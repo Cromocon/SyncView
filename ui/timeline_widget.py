@@ -487,6 +487,59 @@ class TimelineControlWidget(QWidget):
 
         layout.addStretch()
 
+        # --- NUOVI CONTROLLI EXPORT ---
+        # Label "Export:"
+        export_label = QLabel("📤 Export:")
+        export_label.setStyleSheet("color: #d4a356; font-weight: bold;")
+        layout.addWidget(export_label)
+
+        # Spinbox secondi PRIMA
+        label_before = QLabel("Prima:")
+        label_before.setStyleSheet("color: #cccccc;")
+        layout.addWidget(label_before)
+
+        from PyQt6.QtWidgets import QSpinBox
+        self.spin_before = QSpinBox()
+        self.spin_before.setRange(0, 300)  # Max 5 minuti
+        self.spin_before.setValue(5)       # Default 5 secondi
+        self.spin_before.setSuffix("s")
+        self.spin_before.setMinimumWidth(65)
+        self.spin_before.setMaximumWidth(65)
+        self.spin_before.setToolTip("Secondi prima del marker")
+        self.spin_before.setStyleSheet("""
+            QSpinBox {
+                background-color: #2d2d2d;
+                color: #ffffff;
+                border: 1px solid #3a3a3a;
+                border-radius: 3px;
+                padding: 3px;
+            }
+        """)
+        layout.addWidget(self.spin_before)
+
+        # Spinbox secondi DOPO
+        label_after = QLabel("Dopo:")
+        label_after.setStyleSheet("color: #cccccc;")
+        layout.addWidget(label_after)
+
+        self.spin_after = QSpinBox()
+        self.spin_after.setRange(0, 300)
+        self.spin_after.setValue(5)        # Default 5 secondi
+        self.spin_after.setSuffix("s")
+        self.spin_after.setMinimumWidth(65)
+        self.spin_after.setMaximumWidth(65)
+        self.spin_after.setToolTip("Secondi dopo il marker")
+        self.spin_after.setStyleSheet("""
+            QSpinBox {
+                background-color: #2d2d2d;
+                color: #ffffff;
+                border: 1px solid #3a3a3a;
+                border-radius: 3px;
+                padding: 3px;
+            }
+        """)
+        layout.addWidget(self.spin_after)
+
         # Pulsante esportazione video da markers
         self.btn_export = QPushButton("📤 Esporta")
         self.btn_export.setToolTip("Esporta video da markers (Ctrl+E)")
@@ -522,4 +575,8 @@ class TimelineControlWidget(QWidget):
         """)
 
         self.setLayout(layout)
+
+    def get_export_times(self):
+        """Ritorna i secondi prima e dopo per l'export."""
+        return self.spin_before.value(), self.spin_after.value()
 

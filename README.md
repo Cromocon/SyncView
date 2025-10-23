@@ -70,33 +70,102 @@ SyncView/
 
 ## 🚀 Quick Start
 
-### Metodo 1: Script Automatico (Raccomandato)
+### 🐧 Linux / 🍎 macOS
+
+#### Metodo 1: Script Automatico (Raccomandato)
 
 ```bash
+chmod +x run.sh  # Solo la prima volta
 ./run.sh
 ```
 
 Lo script automaticamente:
-- Controlla/crea virtual environment
-- Installa dipendenze mancanti
-- Avvia l'applicazione
+- ✅ Rileva il sistema operativo
+- ✅ Verifica Python3 e fornisce istruzioni se mancante
+- ✅ Crea virtual environment (se non esiste)
+- ✅ Installa tutte le dipendenze da requirements.txt
+- ✅ Verifica FFmpeg e suggerisce installazione
+- ✅ Crea le directory necessarie (Feed-1..4, Salvataggi)
+- ✅ Avvia l'applicazione
 
-### Metodo 2: Manuale
+**Prerequisiti Linux:**
+```bash
+# Ubuntu/Debian
+sudo apt install python3 python3-venv python3-pip ffmpeg
+
+# Fedora/RHEL
+sudo dnf install python3 python3-pip ffmpeg
+
+# Arch Linux
+sudo pacman -S python python-pip ffmpeg
+```
+
+**Prerequisiti macOS:**
+```bash
+# Con Homebrew
+brew install python3 ffmpeg
+```
+
+### 🪟 Windows
+
+#### Metodo 1: Script Automatico (Raccomandato)
+
+**Doppio click su:** `run.bat`
+
+oppure da PowerShell/CMD:
+```cmd
+run.bat
+```
+
+Lo script automaticamente:
+- ✅ Rileva Python (python, py, o python3)
+- ✅ Crea virtual environment (se non esiste)
+- ✅ Installa tutte le dipendenze
+- ✅ Verifica FFmpeg e suggerisce installazione
+- ✅ Crea le directory necessarie
+- ✅ Avvia l'applicazione
+
+**Prerequisiti Windows:**
+1. **Python 3.10+**: [Download da python.org](https://www.python.org/downloads/)
+   - ⚠️ **IMPORTANTE**: Durante l'installazione seleziona "Add Python to PATH"
+2. **FFmpeg** (opzionale ma raccomandato):
+   ```powershell
+   # Con winget
+   winget install FFmpeg
+   
+   # Con Chocolatey
+   choco install ffmpeg
+   ```
+   oppure scarica da [ffmpeg.org](https://ffmpeg.org/download.html)
+
+---
+
+### 🛠️ Metodo 2: Installazione Manuale (Tutte le piattaforme)
 
 #### 1. Creare l'ambiente virtuale
 ```bash
+# Linux/macOS
 python3 -m venv .venv
+
+# Windows
+python -m venv .venv
 ```
 
 #### 2. Attivare l'ambiente virtuale
 ```bash
-source .venv/bin/activate  # Linux/Mac
-# oppure
-.venv\Scripts\activate    # Windows
+# Linux/macOS
+source .venv/bin/activate
+
+# Windows (CMD)
+.venv\Scripts\activate.bat
+
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
 ```
 
 #### 3. Installare le dipendenze
 ```bash
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 

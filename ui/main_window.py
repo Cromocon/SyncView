@@ -6,16 +6,25 @@ Gestisce la griglia video 2x2 e i controlli globali.
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QGridLayout, QPushButton, QLabel, QComboBox,
                              QGroupBox, QCheckBox, QMessageBox, QFileDialog)
-from PyQt6.QtCore import Qt, QTimer, QEvent, QObject # Aggiunto QObject per sender()
+# --- MODIFICHE IMPORT ---
+from PyQt6.QtCore import Qt, QTimer, QEvent, QObject, QThread
+# ------------------------
 from PyQt6.QtGui import QKeySequence, QMouseEvent
 from pathlib import Path
 from typing import Optional
+import sys
+import subprocess
+import shutil
 
 from ui.video_player import VideoPlayerWidget
 from ui.fps_dialog import FPSDialog
 from ui.timeline_widget import TimelineWidget, TimelineControlWidget
+# --- NUOVI IMPORT PER EXPORT ---
+from ui.export_dialog import ExportDialog
+from core.exporter import VideoExporter
+# -------------------------------
 from ui.styles import get_main_stylesheet
-from config.settings import SOURCE_DIRS, DEFAULT_FPS_OPTIONS, SUPPORTED_VIDEO_FORMATS
+from config.settings import SOURCE_DIRS, DEFAULT_FPS_OPTIONS, SUPPORTED_VIDEO_FORMATS, EXPORT_DIR
 from core.logger import logger
 from core.sync_manager import SyncManager
 from core.markers import MarkerManager, Marker
@@ -88,6 +97,129 @@ class DraggableTitleBar(QWidget):
                 event.accept()
 
 
+def check_dependencies():
+    """
+    Controlla lo stato delle dipendenze del sistema.
+    Ritorna un dizionario con lo stato di ogni dipendenza.
+    """
+    status = {
+        'all_ok': True,
+        'python_version': '',
+        'pyqt6': False,
+        'moviepy': False,
+        'numpy': False,
+        'pillow': False,
+        'ffmpeg': False,
+        'errors': []
+    }
+    
+    # Controlla versione Python
+    python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    status['python_version'] = python_version
+    
+    # Controlla PyQt6
+    try:
+        import PyQt6
+        status['pyqt6'] = True
+    except ImportError:
+        status['all_ok'] = False
+        status['errors'].append('PyQt6 non trovato')
+    
+    # Controlla moviepy
+    try:
+        import moviepy
+        status['moviepy'] = True
+    except ImportError:
+        status['all_ok'] = False
+        status['errors'].append('moviepy non trovato')
+    
+    # Controlla numpy
+    try:
+        import numpy
+        status['numpy'] = True
+    except ImportError:
+        status['all_ok'] = False
+        status['errors'].append('numpy non trovato')
+    
+    # Controlla Pillow
+    try:
+        import PIL
+        status['pillow'] = True
+    except ImportError:
+        status['all_ok'] = False
+        status['errors'].append('Pillow non trovato')
+    
+    # Controlla FFmpeg
+    if shutil.which('ffmpeg') is not None:
+        status['ffmpeg'] = True
+    else:
+        status['all_ok'] = False
+        status['errors'].append('FFmpeg non trovato (raccomandato)')
+    
+    return status
+
+
+def generate_dependency_tooltip():
+    """Genera il tooltip dinamico per l'indicatore di sistema."""
+    deps = check_dependencies()
+    
+    if deps['all_ok']:
+        tooltip = "✅ TUTTE LE DIPENDENZE INSTALLATE CORRETTAMENTE\n\n"
+        tooltip += f"🐍 Python: {deps['python_version']}\n"
+        tooltip += "✓ PyQt6: Installato\n"
+        tooltip += "✓ moviepy: Installato\n"
+        tooltip += "✓ numpy: Installato\n"
+        tooltip += "✓ Pillow: Installato\n"
+        tooltip += "✓ FFmpeg: Disponibile\n"
+        tooltip += "\nSistema pronto per l'uso completo!"
+    else:
+        tooltip = "⚠️ ATTENZIONE: ALCUNE DIPENDENZE MANCANTI\n\n"
+        tooltip += f"🐍 Python: {deps['python_version']}\n"
+        
+        # PyQt6
+        if deps['pyqt6']:
+            tooltip += "✓ PyQt6: Installato\n"
+        else:
+            tooltip += "✗ PyQt6: NON TROVATO\n"
+        
+        # moviepy
+        if deps['moviepy']:
+            tooltip += "✓ moviepy: Installato\n"
+        else:
+            tooltip += "✗ moviepy: NON TROVATO (export video non disponibile)\n"
+        
+        # numpy
+        if deps['numpy']:
+            tooltip += "✓ numpy: Installato\n"
+        else:
+            tooltip += "✗ numpy: NON TROVATO\n"
+        
+        # Pillow
+        if deps['pillow']:
+            tooltip += "✓ Pillow: Installato\n"
+        else:
+            tooltip += "✗ Pillow: NON TROVATO\n"
+        
+        # FFmpeg
+        if deps['ffmpeg']:
+            tooltip += "✓ FFmpeg: Disponibile\n"
+        else:
+            tooltip += "⚠ FFmpeg: NON TROVATO (raccomandato per FPS detection)\n"
+        
+        tooltip += "\n❌ PROBLEMI RILEVATI:\n"
+        for error in deps['errors']:
+            tooltip += f"  • {error}\n"
+        
+        tooltip += "\n💡 SOLUZIONE:\n"
+        tooltip += "Esegui: pip install -r requirements.txt\n"
+        if not deps['ffmpeg']:
+            tooltip += "Per FFmpeg: sudo apt install ffmpeg (Linux)\n"
+            tooltip += "           brew install ffmpeg (macOS)\n"
+            tooltip += "           winget install FFmpeg (Windows)"
+    
+    return tooltip
+
+
 class MainWindow(QMainWindow):
     """Finestra principale dell'applicazione SyncView."""
 
@@ -138,6 +270,11 @@ class MainWindow(QMainWindow):
         self.marker_autosave_timer.setInterval(30000)  # 30 secondi
         self.marker_autosave_timer.timeout.connect(self.autosave_markers)
         self.marker_autosave_timer.start()
+        
+        # --- Gestione Thread Esportazione ---
+        self.export_thread: Optional[QThread] = None
+        self.exporter: Optional[VideoExporter] = None
+        # ------------------------------------
 
         # Setup UI
         self.setup_ui()
@@ -202,7 +339,9 @@ class MainWindow(QMainWindow):
         self.timeline_controls.add_marker_requested.connect(self.add_marker_at_current_position)
         self.timeline_controls.prev_marker_requested.connect(self.go_to_previous_marker)
         self.timeline_controls.next_marker_requested.connect(self.go_to_next_marker)
-        self.timeline_controls.export_markers_requested.connect(self.export_video_from_markers)
+        # --- MODIFICA CONNESSIONE ESPORTA ---
+        self.timeline_controls.export_markers_requested.connect(self.start_export_process)
+        # ------------------------------------
         content_layout.addWidget(self.timeline_controls)
 
         self.timeline_widget = TimelineWidget()
@@ -284,6 +423,8 @@ class MainWindow(QMainWindow):
         # Status indicator (QLabel normale - event filter gestirà il drag)
         self.status_indicator = QLabel("● SISTEMA OPERATIVO")
         self.status_indicator.setStyleSheet("color: #5fa373; font-weight: bold; font-size: 12px; padding-right: 15px;")
+        # Imposta tooltip dinamico con stato dipendenze
+        self.status_indicator.setToolTip(generate_dependency_tooltip())
         # Installa event filter della title bar su questo label
         self.status_indicator.installEventFilter(title_bar)
         layout.addWidget(self.status_indicator)
@@ -557,7 +698,9 @@ class MainWindow(QMainWindow):
 
         # Ctrl+E per export video da markers
         export_markers_shortcut = QShortcut(QKeySequence("Ctrl+E"), self)
-        export_markers_shortcut.activated.connect(self.export_video_from_markers)
+        # --- MODIFICA CONNESSIONE ESPORTA ---
+        export_markers_shortcut.activated.connect(self.start_export_process)
+        # ------------------------------------
 
     def on_left_arrow_pressed(self):
         """Gestisce la pressione della freccia sinistra."""
@@ -568,6 +711,17 @@ class MainWindow(QMainWindow):
         """Gestisce la pressione della freccia destra."""
         if self.frame_mode_enabled:
             self.step_frames(1)
+
+    def update_dependency_status(self):
+        """Aggiorna il tooltip del sistema con lo stato delle dipendenze."""
+        self.status_indicator.setToolTip(generate_dependency_tooltip())
+        
+        # Aggiorna anche il colore in base allo stato
+        deps = check_dependencies()
+        if deps['all_ok']:
+            self.status_indicator.setStyleSheet("color: #5fa373; font-weight: bold; font-size: 12px; padding-right: 15px;")
+        else:
+            self.status_indicator.setStyleSheet("color: #f5a623; font-weight: bold; font-size: 12px; padding-right: 15px;")
 
     def auto_load_videos(self):
         """Carica automaticamente i video dalle cartelle Feed-X."""
@@ -1154,54 +1308,278 @@ class MainWindow(QMainWindow):
     #         logger.log_user_action("Marker spostato", f"-> {new_timestamp}ms")
 
     def on_marker_remove_requested(self, marker: Marker):
-        """Gestisce la richiesta di rimozione di un marker (doppio click)."""
+        """Gestisce la richiesta di rimozione di un marker (doppio click).
+        
+        Comportamento:
+        - SYNC ON + Timeline Globale: Rimuove marker globale da tutti i video
+        - SYNC ON + Timeline Individuale: Rimuove marker solo da quel video (gli altri mantengono)
+        - SYNC OFF + Timeline Individuale: Rimuove marker specifico del video
+        - SYNC OFF + Timeline Globale: Operazione ignorata
+        """
         if not marker or not marker.id:
             return
 
         time_str = self._format_time(marker.timestamp)
-
-        # Rimuovi sempre il marker, indipendentemente dallo stato SYNC o origine
-        success = self.marker_manager.remove_marker(marker.id)
-        if success:
-            mode = "SYNC ON" if self.sync_enabled else "SYNC OFF"
-            sender_widget = self.sender()
-            is_global_timeline = (sender_widget == self.timeline_widget)
-            origin = "Globale" if is_global_timeline else "Individuale"
-            logger.log_user_action(f"Marker rimosso ({mode}, {origin})", f"ID: {marker.id} @ {time_str}")
-            # Aggiorna tutte le timeline (sia globale che individuali)
-            self.timeline_widget.update()
-            for player in self.video_players:
-                player.update_markers()
+        sender_widget = self.sender()
+        is_global_timeline = (sender_widget == self.timeline_widget)
+        
+        # Determina da quale video proviene il segnale (se timeline individuale)
+        sender_video_index = None
+        if not is_global_timeline:
+            for i, player in enumerate(self.video_players):
+                if player.timeline_widget == sender_widget:
+                    sender_video_index = i
+                    break
+        
+        if self.sync_enabled:
+            # ============ SYNC ON ============
+            if is_global_timeline and marker.video_index is None:
+                # Rimozione dalla timeline globale: rimuovi marker globale da tutti i video
+                success = self.marker_manager.remove_marker(marker.id)
+                if success:
+                    logger.log_user_action("Marker rimosso (SYNC ON, Globale)", 
+                                         f"ID: {marker.id} @ {time_str} - Rimosso da tutti i video")
+                    self.timeline_widget.update()
+                    for player in self.video_players:
+                        player.update_markers()
+                else:
+                    logger.log_error("Errore rimozione marker", f"ID: {marker.id} non trovato")
+                    
+            elif not is_global_timeline and marker.video_index is None and sender_video_index is not None:
+                # Rimozione da timeline individuale di un marker globale:
+                # Trasforma il marker globale in marker specifici per gli ALTRI video
+                
+                # Rimuovi il marker globale
+                self.marker_manager.remove_marker(marker.id)
+                
+                # Crea marker specifici per tutti i video TRANNE quello da cui è stato rimosso
+                for i in range(4):
+                    if i != sender_video_index and self.video_players[i].is_loaded:
+                        self.marker_manager.add_marker(
+                            timestamp=marker.timestamp,
+                            color=marker.color,
+                            description=marker.description,
+                            category=marker.category,
+                            video_index=i  # Marker specifico per questo video
+                        )
+                
+                logger.log_user_action(f"Marker rimosso (SYNC ON, Video {sender_video_index + 1})", 
+                                     f"ID: {marker.id} @ {time_str} - Marker globale rimosso da Video {sender_video_index + 1}, mantenuto negli altri")
+                
+                # Aggiorna tutte le timeline
+                self.timeline_widget.update()
+                for player in self.video_players:
+                    player.update_markers()
+            else:
+                logger.log_user_action("Rimozione marker ignorata", 
+                                     "SYNC ON, marker specifico non rimovibile da timeline individuale")
         else:
-            logger.log_error("Errore rimozione marker", f"ID: {marker.id} non trovato")
+            # ============ SYNC OFF ============
+            if not is_global_timeline and sender_video_index is not None:
+                # Rimuovi marker solo se appartiene a questo video specifico
+                if marker.video_index == sender_video_index:
+                    success = self.marker_manager.remove_marker(marker.id)
+                    if success:
+                        logger.log_user_action(f"Marker rimosso (SYNC OFF, Video {sender_video_index + 1})", 
+                                             f"ID: {marker.id} @ {time_str}")
+                        self.timeline_widget.update()
+                        for player in self.video_players:
+                            player.update_markers()
+                    else:
+                        logger.log_error("Errore rimozione marker", f"ID: {marker.id} non trovato")
+                elif marker.video_index is None:
+                    # Marker globale: stessa logica di SYNC ON + timeline individuale
+                    # Rimuovi il marker globale e crea marker specifici per gli altri video
+                    self.marker_manager.remove_marker(marker.id)
+                    
+                    for i in range(4):
+                        if i != sender_video_index and self.video_players[i].is_loaded:
+                            self.marker_manager.add_marker(
+                                timestamp=marker.timestamp,
+                                color=marker.color,
+                                description=marker.description,
+                                category=marker.category,
+                                video_index=i
+                            )
+                    
+                    logger.log_user_action(f"Marker globale rimosso (SYNC OFF, Video {sender_video_index + 1})", 
+                                         f"ID: {marker.id} @ {time_str} - Rimosso da Video {sender_video_index + 1}, mantenuto negli altri")
+                    
+                    self.timeline_widget.update()
+                    for player in self.video_players:
+                        player.update_markers()
+                else:
+                    logger.log_user_action("Rimozione marker ignorata", 
+                                         f"Marker appartiene a un altro video (Video {marker.video_index + 1})")
+            elif is_global_timeline:
+                logger.log_user_action("Rimozione marker ignorata", 
+                                     "SYNC OFF, impossibile rimuovere dalla timeline globale")
 
+    # --- FUNZIONE SOSTITUITA ---
+    # def export_video_from_markers(self): ...
+    # ---------------------------
+    
+    # ==================== GESTIONE ESPORTAZIONE (NUOVA) ====================
 
-    def export_video_from_markers(self):
-        """Esporta video basandosi sui markers (funzionalità futura).
+    def get_reference_player(self) -> Optional[VideoPlayerWidget]:
+        """Trova il primo video player caricato da usare come riferimento."""
+        for player in self.video_players:
+            if player.is_loaded and player.video_path:
+                return player
+        return None
 
-        Questa funzione sarà implementata per permettere l'export di segmenti
-        video basati sui timestamp dei marker.
+    def start_export_process(self):
         """
-        logger.log_user_action("Export markers richiesto")
+        Avvia il processo di esportazione video.
+        Chiamato dal pulsante "Esporta" o shortcut Ctrl+E.
+        """
+        logger.log_user_action("Esportazione richiesta")
 
-        # Per ora mostra un messaggio informativo
+        # 0. Controlla se un'esportazione è già in corso
+        if self.export_thread and self.export_thread.isRunning():
+            QMessageBox.warning(
+                self, 
+                "Esportazione in Corso",
+                "Un processo di esportazione è già attivo. Attendi il completamento."
+            )
+            return
+
+        # 1. Controlla se ci sono marker
+        if self.marker_manager.count == 0:
+            QMessageBox.warning(
+                self, 
+                "Nessun Marker", 
+                "Nessun marker trovato. Aggiungi markers (Ctrl+M) prima di esportare."
+            )
+            return
+
+        # 2. Raccogli tutti i video caricati
+        video_paths = {}  # Dict[int, Path]
+        for i, player in enumerate(self.video_players):
+            if player.is_loaded and player.video_path:
+                video_paths[i] = player.video_path
+        
+        if not video_paths:
+            QMessageBox.warning(
+                self, 
+                "Nessun Video", 
+                "Nessun video caricato. Carica almeno un video prima di esportare."
+            )
+            return
+        
+        markers = list(self.marker_manager.markers) # Copia la lista
+        
+        # 3. Ottieni i secondi N e M dai controlli timeline
+        sec_before, sec_after = self.timeline_controls.get_export_times()
+        
+        # 4. Chiedi all'utente dove salvare le clip
+        export_dir = ExportDialog.get_export_directory(EXPORT_DIR, self)
+        
+        if export_dir is None:
+            logger.log_export_action("Esportazione annullata dall'utente")
+            return
+        
+        # 5. Configura il thread e il worker
+        self.export_thread = QThread()
+        self.exporter = VideoExporter(
+            video_paths=video_paths,
+            markers=markers,
+            sec_before=sec_before,
+            sec_after=sec_after,
+            export_dir=export_dir
+        )
+        
+        self.exporter.moveToThread(self.export_thread)
+        
+        # 5. Connetti segnali
+        self.export_thread.started.connect(self.exporter.run)
+        self.exporter.finished.connect(self.on_export_finished)
+        self.exporter.error.connect(self.on_export_error)
+        self.exporter.progress.connect(self.on_export_progress)
+        
+        # Pulisci al termine
+        self.exporter.finished.connect(self.export_thread.quit)
+        self.exporter.error.connect(self.export_thread.quit)
+        self.exporter.destroyed.connect(self.export_thread.deleteLater)
+        self.export_thread.finished.connect(self.export_thread.deleteLater)
+
+        # 6. Avvia il thread
+        self.export_thread.start()
+
+        # 7. Calcola numero totale di clip (per info all'utente)
+        total_clips = 0
+        for marker in markers:
+            if marker.video_index is None:
+                # Marker globale: una clip per ogni video
+                total_clips += len(video_paths)
+            else:
+                # Marker specifico: una clip solo per quel video
+                if marker.video_index in video_paths:
+                    total_clips += 1
+        
+        # 8. Notifica l'utente
+        self.status_indicator.setText(f"● ESPORTAZIONE IN CORSO...")
+        self.status_indicator.setStyleSheet("color: #d4a356;") # Giallo
+        
         QMessageBox.information(
             self,
-            "Esporta Video da Markers",
-            "<h3>Funzionalità in Sviluppo</h3>"
-            "<p>Questa funzione permetterà di esportare segmenti di video "
-            "basandosi sui marker salvati.</p>"
-            "<br>"
-            "<p><b>Funzionalità previste:</b></p>"
-            "<ul>"
-            "<li>Selezione marker di interesse</li>"
-            "<li>Definizione intervallo temporale (secondi prima/dopo)</li>"
-            "<li>Export automatico tramite FFmpeg</li>"
-            "<li>Batch export per tutti i marker</li>"
-            "</ul>"
-            "<br>"
-            "<p><i>I marker sono già salvati in JSON e pronti per l'export!</i></p>"
+            "Esportazione Avviata",
+            f"L'esportazione è iniziata in background.\n"
+            f"Markers: {len(markers)}\n"
+            f"Video caricati: {len(video_paths)}\n"
+            f"Clip totali: ~{total_clips}\n\n"
+            f"Le clip verranno salvate in '{export_dir.name}'."
         )
+
+    def on_export_progress(self, message: str):
+        """Aggiorna lo status indicator con il progresso."""
+        logger.log_export_action("Progresso", message)
+        self.status_indicator.setText(f"● {message.upper()}")
+        self.status_indicator.setStyleSheet("color: #d4a356;") # Giallo
+
+    def on_export_finished(self, message: str):
+        """Chiamato al termine dell'esportazione."""
+        logger.log_export_action("Esportazione completata", message)
+        self.status_indicator.setText("● SISTEMA OPERATIVO")
+        self.status_indicator.setStyleSheet("color: #5fa373;") # Verde
+        self.update_dependency_status()  # Aggiorna tooltip
+        
+        QMessageBox.information(
+            self,
+            "Esportazione Completata",
+            message
+        )
+        self.cleanup_export_thread()
+
+    def on_export_error(self, error_message: str):
+        """Chiamato in caso di errore di esportazione."""
+        logger.log_error("Errore esportazione", error_message)
+        self.status_indicator.setText("● ERRORE ESPORTAZIONE")
+        self.status_indicator.setStyleSheet("color: #cc5555;") # Rosso
+        self.update_dependency_status()  # Aggiorna tooltip
+        
+        QMessageBox.critical(
+            self,
+            "Errore Esportazione",
+            f"Si è verificato un errore:\n\n{error_message}"
+        )
+        self.cleanup_export_thread()
+
+    def cleanup_export_thread(self):
+        """Pulisce i riferimenti al thread e al worker."""
+        self.exporter = None
+        self.export_thread = None
+        # Ripristina status dopo 5 secondi
+        QTimer.singleShot(5000, self.reset_status_indicator)
+
+    def reset_status_indicator(self):
+        """Resetta lo status indicator allo stato base."""
+        # Controlla che non sia in corso un'altra esportazione
+        if not (self.export_thread and self.export_thread.isRunning()):
+            self.status_indicator.setText("● SISTEMA OPERATIVO")
+            self.status_indicator.setStyleSheet("color: #5fa373;") # Verde
+
+    # ===================================================================
 
     def update_timeline_position(self):
         """Aggiorna la posizione corrente sulla timeline basandosi sul primo video rilevato."""
@@ -1260,6 +1638,15 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):  # type: ignore[override]
         """Gestisce la chiusura dell'applicazione."""
         logger.log_user_action("Chiusura applicazione")
+        
+        # --- Interrompi esportazione se in corso ---
+        if self.export_thread and self.export_thread.isRunning():
+            logger.log_export_action("Interruzione esportazione per chiusura app")
+            if self.exporter:
+                self.exporter.stop()
+            self.export_thread.quit()
+            self.export_thread.wait(2000) # Attendi max 2 sec
+        # --------------------------------------------
 
         # Salva markers prima di chiudere
         if self.marker_manager.is_modified:

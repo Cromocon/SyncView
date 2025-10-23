@@ -6,6 +6,9 @@ from pathlib import Path
 
 # Percorsi del progetto
 PROJECT_ROOT = Path(__file__).parent.parent
+# --- MODIFICA: Aggiunto percorso a requirements.txt ---
+REQUIREMENTS_FILE = PROJECT_ROOT / "requirements.txt"
+# ----------------------------------------------------
 SOURCE_DIRS = [
     PROJECT_ROOT / "Feed-1",
     PROJECT_ROOT / "Feed-2",
@@ -15,6 +18,10 @@ SOURCE_DIRS = [
 EXPORT_DIR = PROJECT_ROOT / "Salvataggi"
 LOG_FILE = PROJECT_ROOT / "syncview_log.txt"
 DEVELOPER_LOG = PROJECT_ROOT / "DEVELOPER_LOG.md"
+
+# --- MODIFICA: Assicura che la directory di esportazione esista ---
+EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+# -----------------------------------------------------------------
 
 # Configurazione video
 MAX_VIDEOS = 4

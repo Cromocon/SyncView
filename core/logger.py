@@ -99,6 +99,15 @@ class SyncViewLogger:
             self.logger.info(f"✓ Esportazione completata: {video_name}")
         else:
             self.logger.error(f"✗ Esportazione fallita: {video_name} - {error_msg}")
+            
+    # --- NUOVO METODO PER LOG ESPORTAZIONE ---
+    def log_export_action(self, action, details=""):
+        """Registra un'azione di esportazione."""
+        msg = f"[EXPORT] {action}"
+        if details:
+            msg += f" - {details}"
+        self.logger.info(msg)
+    # ---------------------------------------
     
     @staticmethod
     def add_developer_log(entry):
