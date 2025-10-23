@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Ambiente virtuale
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Log e runtime
+*.log
+syncview_log.txt
+syncview_markers.json
+Export_log.txt
+
+# Esportazioni
+Salvataggi/*
+!Salvataggi/.gitkeep
+
+# Video feed
+Feed-*/*.mp4
+Feed-*/*.avi
+Feed-*/*.mov
+Feed-*/*.mkv
+
+# OS
+.DS_Store
+Thumbs.db
