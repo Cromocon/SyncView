@@ -341,3 +341,67 @@ def get_video_player_stylesheet():
         background-color: #1a0a0a;
     }}
     """
+
+def get_dialog_stylesheet():
+    """Ritorna il foglio di stile per i dialog."""
+    return f"""
+    QDialog {{
+        background-color: {THEME_COLORS['nero_tattico']};
+        color: {THEME_COLORS['text']};
+        font-family: 'Monospace', 'Courier New';
+    }}
+
+    QLabel {{
+        color: {THEME_COLORS['text']};
+        font-weight: bold;
+    }}
+
+    QPushButton {{
+        background-color: {THEME_COLORS['bg_input']};
+        color: {THEME_COLORS['text']};
+        border: 2px solid {THEME_COLORS['grigio_lupo']};
+        border-radius: 4px;
+        padding: 8px 16px;
+        font-weight: bold;
+        min-width: 80px;
+    }}
+
+    QPushButton:hover {{
+        background-color: {THEME_COLORS['bg_hover']};
+        border-color: {THEME_COLORS['desert_tan']};
+    }}
+
+    QPushButton:pressed {{
+        background-color: {THEME_COLORS['bg_pressed']};
+        border-color: {THEME_COLORS['desert_tan_hover']};
+    }}
+
+    QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {{
+        background-color: {THEME_COLORS['bg_input']};
+        color: {THEME_COLORS['text']};
+        border: 2px solid {THEME_COLORS['grigio_lupo']};
+        border-radius: 4px;
+        padding: 5px;
+    }}
+
+    QComboBox:hover, QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover {{
+        border-color: {THEME_COLORS['desert_tan']};
+    }}
+
+    QGroupBox {{
+.
+        color: {THEME_COLORS['desert_tan']};
+        border: 2px solid {THEME_COLORS['grigio_lupo']};
+        border-radius: 5px;
+        margin-top: 10px;
+        font-weight: bold;
+        padding-top: 10px;
+    }}
+
+    QGroupBox::title {{
+        subcontrol-origin: margin;
+        subcontrol-position: top left;
+        padding: 0 5px;
+        color: {THEME_COLORS['desert_tan']};
+    }}
+    """

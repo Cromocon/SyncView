@@ -109,16 +109,16 @@ class ExportDialog(QDialog):
         
         ok_button = button_box.button(QDialogButtonBox.StandardButton.Ok)
         if ok_button:
-            ok_button.setText("✓")
+            ok_button.setText("Conferma")
             ok_button.setStyleSheet(
-                "background-color: #5F6F52; border: 1px solid #798969; font-size: 18px; padding: 8px 20px;"
+                "background-color: #5F6F52; border: 1px solid #798969; padding: 8px 20px;"
             )
         
         cancel_button = button_box.button(QDialogButtonBox.StandardButton.Cancel)
         if cancel_button:
-            cancel_button.setText("✗")
+            cancel_button.setText("Annulla")
             cancel_button.setStyleSheet(
-                "background-color: #B80F0A; border: 1px solid #D41813; font-size: 18px; padding: 8px 20px;"
+                "background-color: #B80F0A; border: 1px solid #D41813; padding: 8px 20px;"
             )
         
         button_box.accepted.connect(self.accept)

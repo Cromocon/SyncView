@@ -7,6 +7,9 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt6.QtCore import Qt
 
 
+from ui.styles import get_dialog_stylesheet
+
+
 class FPSDialog(QDialog):
     """Dialog per inserire un FPS personalizzato."""
     
@@ -19,6 +22,7 @@ class FPSDialog(QDialog):
         
     def setup_ui(self):
         """Configura l'interfaccia del dialog."""
+        self.setStyleSheet(get_dialog_stylesheet())
         layout = QVBoxLayout(self)
         
         # Titolo
@@ -35,7 +39,6 @@ class FPSDialog(QDialog):
         # Input FPS
         input_layout = QHBoxLayout()
         input_label = QLabel("FPS:")
-        input_label.setStyleSheet("font-weight: bold; color: #E0E0E0;")
         input_layout.addWidget(input_label)
         
         self.fps_spinbox = QDoubleSpinBox()
