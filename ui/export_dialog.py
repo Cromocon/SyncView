@@ -26,7 +26,7 @@ class ExportDialog(QDialog):
         # Stile
         self.setStyleSheet("""
             QDialog {
-                background-color: #1a1a1a;
+                background-color: #1C1C1E;
                 color: #e0e0e0;
             }
             QLabel {
@@ -34,29 +34,29 @@ class ExportDialog(QDialog):
                 font-size: 13px;
             }
             QLineEdit {
-                background-color: #2d2d2d;
+                background-color: #808080;
                 color: #ffffff;
-                border: 1px solid #3a3a3a;
+                border: 1px solid #808080;
                 border-radius: 3px;
                 padding: 5px;
                 font-size: 14px;
             }
             QPushButton {
-                background-color: #2a4a2a;
+                background-color: #5F6F52;
                 color: #ffffff;
-                border: 1px solid #3a5a3a;
+                border: 1px solid #798969;
                 border-radius: 3px;
                 padding: 8px 15px;
                 font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #3a5a3a;
+                background-color: #798969;
             }
         """)
         
         # Titolo
         title = QLabel("Scegli Destinazione Esportazione")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #4a9f5e; margin-bottom: 10px;")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #C19A6B; margin-bottom: 10px;")
         layout.addWidget(title)
         
         # Info
@@ -83,15 +83,15 @@ class ExportDialog(QDialog):
         self.btn_browse.clicked.connect(self.browse_directory)
         self.btn_browse.setStyleSheet("""
             QPushButton {
-                background-color: #2a3a4a;
+                background-color: #0047AB;
                 color: #ffffff;
-                border: 1px solid #3a4a5a;
+                border: 1px solid #1A5EC4;
                 border-radius: 3px;
                 padding: 5px 15px;
                 font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #3a4a5a;
+                background-color: #1A5EC4;
             }
         """)
         dir_layout.addWidget(self.btn_browse)
@@ -111,14 +111,14 @@ class ExportDialog(QDialog):
         if ok_button:
             ok_button.setText("✓")
             ok_button.setStyleSheet(
-                "background-color: #2a4a2a; border: 1px solid #3a5a3a; font-size: 18px; padding: 8px 20px;"
+                "background-color: #5F6F52; border: 1px solid #798969; font-size: 18px; padding: 8px 20px;"
             )
         
         cancel_button = button_box.button(QDialogButtonBox.StandardButton.Cancel)
         if cancel_button:
             cancel_button.setText("✗")
             cancel_button.setStyleSheet(
-                "background-color: #4a2a2a; border: 1px solid #5a3a3a; font-size: 18px; padding: 8px 20px;"
+                "background-color: #B80F0A; border: 1px solid #D41813; font-size: 18px; padding: 8px 20px;"
             )
         
         button_box.accepted.connect(self.accept)

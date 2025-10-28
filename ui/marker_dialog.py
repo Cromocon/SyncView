@@ -31,45 +31,45 @@ class MarkerManagerDialog(QDialog):
         # Stile
         self.setStyleSheet("""
             QDialog {
-                background-color: #1a1a1a;
+                background-color: #1C1C1E;
             }
             QLabel {
                 color: #cccccc;
             }
             QTableWidget {
-                background-color: #2a2a2a;
+                background-color: #252527;
                 color: #ffffff;
-                gridline-color: #3a3a3a;
-                border: 1px solid #3a3a3a;
+                gridline-color: #808080;
+                border: 1px solid #808080;
             }
             QTableWidget::item:selected {
-                background-color: #4a9eff;
+                background-color: #0047AB;
             }
             QHeaderView::section {
-                background-color: #2a2a2a;
-                color: #4a9eff;
-                border: 1px solid #3a3a3a;
+                background-color: #252527;
+                color: #0047AB;
+                border: 1px solid #808080;
                 padding: 5px;
                 font-weight: bold;
             }
             QPushButton {
-                background-color: #2a4a2a;
+                background-color: #5F6F52;
                 color: #ffffff;
-                border: 1px solid #3a5a3a;
+                border: 1px solid #798969;
                 border-radius: 3px;
                 padding: 8px 15px;
                 font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #3a5a3a;
+                background-color: #798969;
             }
             QPushButton:pressed {
-                background-color: #1a3a1a;
+                background-color: #5F6F52;
             }
             QComboBox, QLineEdit {
-                background-color: #2a2a2a;
+                background-color: #252527;
                 color: #ffffff;
-                border: 1px solid #3a3a3a;
+                border: 1px solid #808080;
                 border-radius: 3px;
                 padding: 5px;
             }
@@ -135,11 +135,11 @@ class MarkerManagerDialog(QDialog):
         btn_delete = QPushButton("🗑️ Elimina")
         btn_delete.setStyleSheet("""
             QPushButton {
-                background-color: #4a2a2a;
-                border: 1px solid #5a3a3a;
+                background-color: #B80F0A;
+                border: 1px solid #D41813;
             }
             QPushButton:hover {
-                background-color: #5a3a3a;
+                background-color: #D41813;
             }
         """)
         btn_delete.clicked.connect(self.delete_selected_marker)
@@ -154,11 +154,11 @@ class MarkerManagerDialog(QDialog):
         btn_clear = QPushButton("🗑️ Cancella Tutti")
         btn_clear.setStyleSheet("""
             QPushButton {
-                background-color: #5a2a2a;
-                border: 1px solid #6a3a3a;
+                background-color: #B80F0A;
+                border: 1px solid #D41813;
             }
             QPushButton:hover {
-                background-color: #6a3a3a;
+                background-color: #D41813;
             }
         """)
         btn_clear.clicked.connect(self.clear_all_markers)

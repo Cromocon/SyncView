@@ -43,7 +43,7 @@ class TimelineWidget(QWidget):
         self.setMinimumHeight(80) # Aumentato per accogliere i timestamp sotto
         self.setMaximumHeight(80)
         self.setMouseTracking(True)
-        self.setStyleSheet("background-color: #1a1a1a;")
+        self.setStyleSheet("background-color: #1C1C1E;")
 
     def set_marker_manager(self, manager: MarkerManager):
         """Imposta il manager dei markers."""
@@ -76,10 +76,10 @@ class TimelineWidget(QWidget):
 
         # 1. Disegna la base del righello
         ruler_rect = QRect(10, self.ruler_y_pos, width - 20, self.ruler_height)
-        painter.fillRect(ruler_rect, QColor("#2d2d2d")) # Grigio scuro
+        painter.fillRect(ruler_rect, QColor("#808080")) # Grigio Lupo
 
         if self.duration_ms == 0:
-            painter.setPen(QColor("#d4a356")) # Giallo bordo
+            painter.setPen(QColor("#C19A6B")) # Desert Tan
             font = QFont('Arial', 10, QFont.Weight.Bold)
             painter.setFont(font)
             painter.drawText(ruler_rect, Qt.AlignmentFlag.AlignCenter, "NO VIDEO")
@@ -89,7 +89,7 @@ class TimelineWidget(QWidget):
         current_x = self._timestamp_to_x(self.current_position_ms, width)
         progress_width = max(0, current_x - 10)
         progress_rect = QRect(10, self.ruler_y_pos, progress_width, self.ruler_height)
-        painter.fillRect(progress_rect, QColor("#3d7a4a")) # Verde militare
+        painter.fillRect(progress_rect, QColor("#5F6F52")) # Verde Ranger
 
         # 3. Disegna tacche e timestamp
         self._draw_ticks_and_labels(painter, width, ruler_rect)
@@ -161,7 +161,7 @@ class TimelineWidget(QWidget):
             return
 
         # Colore Giallo/Oro del bordo della finestra
-        marker_color = QColor("#d4a356") 
+        marker_color = QColor("#C19A6B") 
 
         font = QFont('Arial', 8)
         painter.setFont(font)
@@ -229,7 +229,7 @@ class TimelineWidget(QWidget):
     def _draw_playhead(self, painter: QPainter, x: int, height: int):
         """Disegna l'indicatore di posizione corrente (playhead)."""
         
-        playhead_color = QColor("#d4a356") # Giallo Bordo
+        playhead_color = QColor("#C19A6B") # Giallo Bordo
         playhead_width = 3
 
         # --- FASE 1: Calcola tutte le coordinate ---
@@ -333,7 +333,7 @@ class TimelineWidget(QWidget):
             if marker:
                 # Il tempo è già visualizzato sotto, quindi il tooltip mostra solo descrizione/categoria
                 time_str_long = self._format_time_long(marker.timestamp)
-                tooltip_text = f"<b>MARKER</b><br><span style='font-size:11pt; color:#d4a356;'>{time_str_long}</span>"
+                tooltip_text = f"<b>MARKER</b><br><span style='font-size:11pt; color:#C19A6B;'>{time_str_long}</span>"
                 if marker.description:
                     tooltip_text += f"<br><i>{marker.description}</i>"
                 if marker.category != 'default':
@@ -451,7 +451,7 @@ class TimelineControlWidget(QWidget):
 
         # Label
         label = QLabel("📍 TIMELINE:")
-        label.setStyleSheet("color: #4a9eff; font-weight: bold;")
+        label.setStyleSheet("color: #0047AB; font-weight: bold;")
         layout.addWidget(label)
 
         # Pulsante aggiungi marker
@@ -460,15 +460,15 @@ class TimelineControlWidget(QWidget):
         self.btn_add.clicked.connect(self.add_marker_requested.emit)
         self.btn_add.setStyleSheet("""
             QPushButton {
-                background-color: #2a4a2a;
+                background-color: #5F6F52;
                 color: #ffffff;
-                border: 1px solid #3a5a3a;
+                border: 1px solid #798969;
                 border-radius: 3px;
                 padding: 5px 10px;
                 font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #3a5a3a;
+                background-color: #798969;
             }
         """)
         layout.addWidget(self.btn_add)
@@ -490,7 +490,7 @@ class TimelineControlWidget(QWidget):
         # --- NUOVI CONTROLLI EXPORT ---
         # Label "Export:"
         export_label = QLabel("📤 Export:")
-        export_label.setStyleSheet("color: #d4a356; font-weight: bold;")
+        export_label.setStyleSheet("color: #C19A6B; font-weight: bold;")
         layout.addWidget(export_label)
 
         # Spinbox secondi PRIMA
@@ -508,9 +508,9 @@ class TimelineControlWidget(QWidget):
         self.spin_before.setToolTip("Secondi prima del marker")
         self.spin_before.setStyleSheet("""
             QSpinBox {
-                background-color: #2d2d2d;
+                background-color: #808080;
                 color: #ffffff;
-                border: 1px solid #3a3a3a;
+                border: 1px solid #808080;
                 border-radius: 3px;
                 padding: 3px;
             }
@@ -531,9 +531,9 @@ class TimelineControlWidget(QWidget):
         self.spin_after.setToolTip("Secondi dopo il marker")
         self.spin_after.setStyleSheet("""
             QSpinBox {
-                background-color: #2d2d2d;
+                background-color: #808080;
                 color: #ffffff;
-                border: 1px solid #3a3a3a;
+                border: 1px solid #808080;
                 border-radius: 3px;
                 padding: 3px;
             }
@@ -546,15 +546,15 @@ class TimelineControlWidget(QWidget):
         self.btn_export.clicked.connect(self.export_markers_requested.emit)
         self.btn_export.setStyleSheet("""
             QPushButton {
-                background-color: #2a3a4a;
+                background-color: #0047AB;
                 color: #ffffff;
-                border: 1px solid #3a4a5a;
+                border: 1px solid #1A5EC4;
                 border-radius: 3px;
                 padding: 5px 10px;
                 font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #3a4a5a;
+                background-color: #1A5EC4;
             }
         """)
         layout.addWidget(self.btn_export)
@@ -562,14 +562,14 @@ class TimelineControlWidget(QWidget):
         # Stile generale
         self.setStyleSheet("""
             QPushButton {
-                background-color: #2a2a2a;
+                background-color: #252527;
                 color: #cccccc;
-                border: 1px solid #3a3a3a;
+                border: 1px solid #808080;
                 border-radius: 3px;
                 padding: 5px 10px;
             }
             QPushButton:hover {
-                background-color: #3a3a3a;
+                background-color: #808080;
                 color: #ffffff;
             }
         """)

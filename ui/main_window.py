@@ -1555,7 +1555,7 @@ class MainWindow(QMainWindow):
         """Chiamato in caso di errore di esportazione."""
         logger.log_error("Errore esportazione", error_message)
         self.status_indicator.setText("● ERRORE ESPORTAZIONE")
-        self.status_indicator.setStyleSheet("color: #cc5555;") # Rosso
+        self.status_indicator.setStyleSheet(f'color: {THEME_COLORS["error"]};') # Rosso
         self.update_dependency_status()  # Aggiorna tooltip
         
         QMessageBox.critical(
@@ -1577,7 +1577,7 @@ class MainWindow(QMainWindow):
         # Controlla che non sia in corso un'altra esportazione
         if not (self.export_thread and self.export_thread.isRunning()):
             self.status_indicator.setText("● SISTEMA OPERATIVO")
-            self.status_indicator.setStyleSheet("color: #5fa373;") # Verde
+            self.status_indicator.setStyleSheet(f'color: {THEME_COLORS["success"]};') # Verde
 
     # ===================================================================
 

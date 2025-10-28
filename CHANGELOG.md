@@ -325,5 +325,3 @@
 - Script di setup automatico
 
 ---
-
-*Per dettagli completi, vedi DEVELOPER_LOG.md*

@@ -23,19 +23,19 @@ class FPSDialog(QDialog):
         
         # Titolo
         title = QLabel("Imposta FPS Personalizzato")
-        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #4a9f5e;")
+        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #C19A6B;")
         layout.addWidget(title)
         
         # Info
         info = QLabel("Inserisci il valore FPS desiderato per la riproduzione video.")
         info.setWordWrap(True)
-        info.setStyleSheet("color: #c0c0c0; margin: 10px 0;")
+        info.setStyleSheet("color: #E0E0E0; margin: 10px 0;")
         layout.addWidget(info)
         
         # Input FPS
         input_layout = QHBoxLayout()
         input_label = QLabel("FPS:")
-        input_label.setStyleSheet("font-weight: bold; color: #c0c0c0;")
+        input_label.setStyleSheet("font-weight: bold; color: #E0E0E0;")
         input_layout.addWidget(input_label)
         
         self.fps_spinbox = QDoubleSpinBox()
@@ -51,7 +51,7 @@ class FPSDialog(QDialog):
         
         # Preset comuni
         preset_label = QLabel("Preset Comuni:")
-        preset_label.setStyleSheet("font-weight: bold; color: #4a9f5e; margin-top: 15px;")
+        preset_label.setStyleSheet("font-weight: bold; color: #C19A6B; margin-top: 15px;")
         layout.addWidget(preset_label)
         
         presets_layout = QHBoxLayout()

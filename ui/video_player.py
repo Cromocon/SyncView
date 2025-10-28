@@ -73,7 +73,7 @@ class VideoPlayerWidget(QWidget):
 
         # FPS label (inizialmente nascosto)
         self.fps_label = QLabel("")
-        self.fps_label.setStyleSheet("color: #4a9f5e; font-size: 11px; font-weight: normal;")
+        self.fps_label.setStyleSheet("color: #C19A6B; font-size: 11px; font-weight: normal;")
         self.fps_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.fps_label.hide()
         header_layout.addWidget(self.fps_label)
@@ -104,9 +104,8 @@ class VideoPlayerWidget(QWidget):
         # Container per il video
         self.video_container = QFrame()
         self.video_container.setObjectName("videoFrame")
-        # --- MODIFICA: Imposta altezza minima sul container ---
+        # Imposta altezza minima sul container
         self.video_container.setMinimumHeight(200)
-        # --- FINE MODIFICA ---
         container_layout = QVBoxLayout(self.video_container)
         container_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -211,7 +210,7 @@ class VideoPlayerWidget(QWidget):
             self.placeholder_label.hide()
             self.video_widget.show()
             self.status_label.setText("✓ PRONTO")
-            self.status_label.setStyleSheet("color: #5fa373;")
+            self.status_label.setStyleSheet("color: #5F6F52;")
             self.is_loaded = True
 
             # Aggiorna visibilità bottoni
@@ -255,7 +254,8 @@ class VideoPlayerWidget(QWidget):
                         self.fps_label.show()
                         return
 
-        except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError, ValueError):
+        except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError, ValueError) as e:
+            # Log solo per debug, non è un errore critico
             pass
 
         # Metodo alternativo: stima basata su metadati PyQt6
@@ -284,7 +284,7 @@ class VideoPlayerWidget(QWidget):
         self.placeholder_label.show()
         self.video_widget.hide()
         self.status_label.setText("✗ ERRORE")
-        self.status_label.setStyleSheet("color: #cc5555;")
+        self.status_label.setStyleSheet("color: #B80F0A;")
         self.fps_label.hide()
         self.is_loaded = False
 
@@ -509,7 +509,7 @@ class VideoPlayerWidget(QWidget):
         self.timeline_widget.set_position(0)
         self.timeline_widget.set_duration(0)
         self.status_label.setText("NO VIDEO")
-        self.status_label.setStyleSheet("color: #777777;")
+        self.status_label.setStyleSheet("color: #808080;")
         self.info_label.setText("00:00:00 / 00:00:00")
         self.fps_label.hide()
         self.fps_label.setText("")

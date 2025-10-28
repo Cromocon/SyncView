@@ -43,15 +43,38 @@ REQUIRED_PACKAGES = [
     "PIL"
 ]
 
-# Tema UI - Stile militare/tattico
+# Tema UI - Palette Tattica SyncView
 THEME_COLORS = {
-    "primary": "#1a1a1a",
-    "secondary": "#2d2d2d",
-    "accent": "#3d7a4a",
-    "text": "#b0b0b0",
-    "border": "#3a3a3a",
-    "error": "#a84444",
-    "warning": "#b88c44",
-    "success": "#4d8559"
+    # Colori Base
+    "nero_tattico": "#1C1C1E",      # Sfondo principale opaco
+    "desert_tan": "#C19A6B",        # Sostituzione giallo/warning/accent
+    "verde_ranger": "#5F6F52",      # Sostituzione verde/success
+    "grigio_lupo": "#808080",       # Elementi secondari/disabilitati
+    "rosso_squadra": "#B80F0A",     # Errori/azioni distruttive
+    "blu_squadra": "#0047AB",       # Info/link/elementi interattivi
+    
+    # Alias per compatibilità
+    "primary": "#1C1C1E",           # nero_tattico
+    "secondary": "#808080",         # grigio_lupo
+    "accent": "#C19A6B",            # desert_tan
+    "text": "#E0E0E0",              # Testo principale (bianco sporco)
+    "text_secondary": "#808080",    # Testo secondario (grigio_lupo)
+    "border": "#808080",            # Bordi (grigio_lupo)
+    "error": "#B80F0A",             # rosso_squadra
+    "warning": "#C19A6B",           # desert_tan
+    "success": "#5F6F52",           # verde_ranger
+    "info": "#0047AB",              # blu_squadra
+    
+    # Varianti Hover/Pressed (30% più chiare/scure)
+    "desert_tan_hover": "#D4B088",
+    "verde_ranger_hover": "#798969",
+    "grigio_lupo_hover": "#999999",
+    "rosso_squadra_hover": "#D41813",
+    "blu_squadra_hover": "#1A5EC4",
+    
+    # Background varianti
+    "bg_hover": "#2A2A2C",
+    "bg_pressed": "#353537",
+    "bg_input": "#252527",
 }
 

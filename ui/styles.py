@@ -9,21 +9,21 @@ def get_main_stylesheet():
     return f"""
     /* Stile generale dell'applicazione */
     QMainWindow {{
-        background-color: {THEME_COLORS['primary']};
+        background-color: {THEME_COLORS['nero_tattico']};
         color: {THEME_COLORS['text']};
     }}
     
     QWidget {{
-        background-color: {THEME_COLORS['primary']};
+        background-color: {THEME_COLORS['nero_tattico']};
         color: {THEME_COLORS['text']};
         font-family: 'Monospace', 'Courier New';
     }}
     
     /* Pulsanti */
     QPushButton {{
-        background-color: {THEME_COLORS['secondary']};
+        background-color: {THEME_COLORS['bg_input']};
         color: {THEME_COLORS['text']};
-        border: 2px solid {THEME_COLORS['border']};
+        border: 2px solid {THEME_COLORS['grigio_lupo']};
         border-radius: 4px;
         padding: 8px 16px;
         font-weight: bold;
@@ -31,79 +31,77 @@ def get_main_stylesheet():
     }}
     
     QPushButton:hover {{
-        background-color: #3d3d3d;
-        border-color: {THEME_COLORS['accent']};
+        background-color: {THEME_COLORS['bg_hover']};
+        border-color: {THEME_COLORS['desert_tan']};
     }}
     
     QPushButton:pressed {{
-        background-color: #1a1a1a;
-        border-color: {THEME_COLORS['accent']};
+        background-color: {THEME_COLORS['bg_pressed']};
+        border-color: {THEME_COLORS['desert_tan_hover']};
     }}
     
     QPushButton:disabled {{
-        background-color: #1a1a1a;
-        color: #666666;
-        border-color: #2d2d2d;
+        background-color: {THEME_COLORS['nero_tattico']};
+        color: {THEME_COLORS['grigio_lupo']};
+        border-color: {THEME_COLORS['grigio_lupo']};
     }}
     
     QPushButton#playButton, QPushButton#pauseButton {{
-        background-color: #2a4a2a;
-        border-color: {THEME_COLORS['accent']};
+        background-color: {THEME_COLORS['verde_ranger']};
+        border-color: {THEME_COLORS['verde_ranger_hover']};
         min-width: 100px;
     }}
     
     QPushButton#playButton:hover, QPushButton#pauseButton:hover {{
-        background-color: #355f35;
+        background-color: {THEME_COLORS['verde_ranger_hover']};
     }}
     
     QPushButton#stopButton {{
-        background-color: #4a2a2a;
-        border-color: {THEME_COLORS['error']};
+        background-color: {THEME_COLORS['rosso_squadra']};
+        border-color: {THEME_COLORS['rosso_squadra_hover']};
     }}
     
     QPushButton#stopButton:hover {{
-        background-color: #5f3535;
+        background-color: {THEME_COLORS['rosso_squadra_hover']};
     }}
     
     /* Bottoni video player */
     QPushButton#loadVideoButton {{
-        background-color: #2a4a2a;
-        border-color: {THEME_COLORS['accent']};
+        background-color: {THEME_COLORS['verde_ranger']};
+        border-color: {THEME_COLORS['verde_ranger_hover']};
         min-width: 70px;
         padding: 5px 10px;
         font-size: 11px;
     }}
     
     QPushButton#loadVideoButton:hover {{
-        background-color: #355f35;
-        border-color: #5fb573;
+        background-color: {THEME_COLORS['verde_ranger_hover']};
     }}
     
     QPushButton#removeVideoButton {{
-        background-color: #4a2a2a;
-        border-color: {THEME_COLORS['error']};
+        background-color: {THEME_COLORS['rosso_squadra']};
+        border-color: {THEME_COLORS['rosso_squadra_hover']};
         min-width: 70px;
         padding: 5px 10px;
         font-size: 11px;
     }}
     
     QPushButton#removeVideoButton:hover {{
-        background-color: #5f3535;
-        border-color: #e87070;
+        background-color: {THEME_COLORS['rosso_squadra_hover']};
     }}
     
     /* ComboBox */
     QComboBox {{
-        background-color: {THEME_COLORS['secondary']};
+        background-color: {THEME_COLORS['bg_input']};
         color: {THEME_COLORS['text']};
-        border: 2px solid {THEME_COLORS['border']};
+        border: 2px solid {THEME_COLORS['grigio_lupo']};
         border-radius: 4px;
         padding: 5px 10px;
         min-width: 100px;
     }}
     
     QComboBox:hover {{
-        border-color: {THEME_COLORS['accent']};
+        border-color: {THEME_COLORS['desert_tan']};
     }}
     
     QComboBox::drop-down {{
@@ -115,15 +113,15 @@ def get_main_stylesheet():
         image: none;
         border-left: 5px solid transparent;
         border-right: 5px solid transparent;
-        border-top: 5px solid {THEME_COLORS['accent']};
+        border-top: 5px solid {THEME_COLORS['desert_tan']};
         margin-right: 5px;
     }}
     
     QComboBox QAbstractItemView {{
-        background-color: {THEME_COLORS['secondary']};
+        background-color: {THEME_COLORS['bg_input']};
         color: {THEME_COLORS['text']};
-        border: 2px solid {THEME_COLORS['accent']};
-        selection-background-color: #355f35;
+        border: 2px solid {THEME_COLORS['desert_tan']};
+        selection-background-color: {THEME_COLORS['verde_ranger']};
     }}
     
     /* Labels */
@@ -133,48 +131,48 @@ def get_main_stylesheet():
     }}
     
     QLabel#headerLabel {{
-        color: {THEME_COLORS['accent']};
+        color: {THEME_COLORS['desert_tan']};
         font-size: 18px;
         font-weight: bold;
         padding: 10px;
     }}
     
     QLabel#statusLabel {{
-        color: {THEME_COLORS['warning']};
+        color: {THEME_COLORS['desert_tan']};
         font-size: 12px;
         padding: 5px;
     }}
     
     /* Slider */
     QSlider::groove:horizontal {{
-        background: {THEME_COLORS['secondary']};
+        background: {THEME_COLORS['bg_input']};
         height: 8px;
         border-radius: 4px;
-        border: 1px solid {THEME_COLORS['border']};
+        border: 1px solid {THEME_COLORS['grigio_lupo']};
     }}
     
     QSlider::handle:horizontal {{
-        background: {THEME_COLORS['accent']};
+        background: {THEME_COLORS['desert_tan']};
         width: 16px;
         height: 16px;
         margin: -5px 0;
         border-radius: 8px;
-        border: 2px solid {THEME_COLORS['primary']};
+        border: 2px solid {THEME_COLORS['nero_tattico']};
     }}
     
     QSlider::handle:horizontal:hover {{
-        background: #5fb573;
+        background: {THEME_COLORS['desert_tan_hover']};
     }}
     
     QSlider::sub-page:horizontal {{
-        background: {THEME_COLORS['accent']};
+        background: {THEME_COLORS['verde_ranger']};
         border-radius: 4px;
     }}
     
     /* GroupBox */
     QGroupBox {{
-        color: {THEME_COLORS['accent']};
-        border: 2px solid {THEME_COLORS['border']};
+        color: {THEME_COLORS['desert_tan']};
+        border: 2px solid {THEME_COLORS['grigio_lupo']};
         border-radius: 5px;
         margin-top: 10px;
         font-weight: bold;
@@ -185,7 +183,7 @@ def get_main_stylesheet():
         subcontrol-origin: margin;
         subcontrol-position: top left;
         padding: 0 5px;
-        color: {THEME_COLORS['accent']};
+        color: {THEME_COLORS['desert_tan']};
     }}
     
     /* CheckBox */
@@ -197,42 +195,42 @@ def get_main_stylesheet():
     QCheckBox::indicator {{
         width: 18px;
         height: 18px;
-        border: 2px solid {THEME_COLORS['border']};
+        border: 2px solid {THEME_COLORS['grigio_lupo']};
         border-radius: 3px;
-        background-color: {THEME_COLORS['secondary']};
+        background-color: {THEME_COLORS['bg_input']};
     }}
     
     QCheckBox::indicator:checked {{
-        background-color: {THEME_COLORS['accent']};
-        border-color: {THEME_COLORS['accent']};
+        background-color: {THEME_COLORS['verde_ranger']};
+        border-color: {THEME_COLORS['verde_ranger_hover']};
     }}
     
     QCheckBox::indicator:hover {{
-        border-color: {THEME_COLORS['accent']};
+        border-color: {THEME_COLORS['desert_tan']};
     }}
     
     /* SpinBox */
     QSpinBox, QDoubleSpinBox {{
-        background-color: {THEME_COLORS['secondary']};
+        background-color: {THEME_COLORS['bg_input']};
         color: {THEME_COLORS['text']};
-        border: 2px solid {THEME_COLORS['border']};
+        border: 2px solid {THEME_COLORS['grigio_lupo']};
         border-radius: 4px;
         padding: 5px;
     }}
     
     QSpinBox:hover, QDoubleSpinBox:hover {{
-        border-color: {THEME_COLORS['accent']};
+        border-color: {THEME_COLORS['desert_tan']};
     }}
     
     /* ScrollBar */
     QScrollBar:vertical {{
-        background: {THEME_COLORS['secondary']};
+        background: {THEME_COLORS['bg_input']};
         width: 12px;
-        border: 1px solid {THEME_COLORS['border']};
+        border: 1px solid {THEME_COLORS['grigio_lupo']};
     }}
     
     QScrollBar::handle:vertical {{
-        background: {THEME_COLORS['accent']};
+        background: {THEME_COLORS['desert_tan']};
         min-height: 20px;
         border-radius: 5px;
     }}
@@ -244,29 +242,29 @@ def get_main_stylesheet():
     /* Frame per video */
     QFrame#videoFrame {{
         background-color: #000000;
-        border: 2px solid {THEME_COLORS['accent']};
+        border: 2px solid {THEME_COLORS['grigio_lupo']};
         border-radius: 5px;
     }}
     
     QFrame#videoFrame:hover {{
-        border-color: #5fb573;
+        border-color: {THEME_COLORS['desert_tan']};
         border-width: 3px;
     }}
     
     /* ToolTip */
     QToolTip {{
-        background-color: {THEME_COLORS['secondary']};
+        background-color: {THEME_COLORS['bg_input']};
         color: {THEME_COLORS['text']};
-        border: 2px solid {THEME_COLORS['accent']};
+        border: 2px solid {THEME_COLORS['desert_tan']};
         padding: 5px;
         border-radius: 3px;
     }}
     
     /* Menu */
     QMenuBar {{
-        background-color: {THEME_COLORS['secondary']};
+        background-color: {THEME_COLORS['bg_input']};
         color: {THEME_COLORS['text']};
-        border-bottom: 2px solid {THEME_COLORS['border']};
+        border-bottom: 2px solid {THEME_COLORS['grigio_lupo']};
     }}
     
     QMenuBar::item {{
@@ -274,14 +272,14 @@ def get_main_stylesheet():
     }}
     
     QMenuBar::item:selected {{
-        background-color: #355f35;
-        color: {THEME_COLORS['accent']};
+        background-color: {THEME_COLORS['verde_ranger']};
+        color: {THEME_COLORS['text']};
     }}
     
     QMenu {{
-        background-color: {THEME_COLORS['secondary']};
+        background-color: {THEME_COLORS['bg_input']};
         color: {THEME_COLORS['text']};
-        border: 2px solid {THEME_COLORS['border']};
+        border: 2px solid {THEME_COLORS['grigio_lupo']};
     }}
     
     QMenu::item {{
@@ -289,35 +287,35 @@ def get_main_stylesheet():
     }}
     
     QMenu::item:selected {{
-        background-color: #355f35;
+        background-color: {THEME_COLORS['verde_ranger']};
     }}
     
     /* Dialog */
     QDialog {{
-        background-color: {THEME_COLORS['primary']};
+        background-color: {THEME_COLORS['nero_tattico']};
         color: {THEME_COLORS['text']};
     }}
     
     /* TextEdit */
     QTextEdit, QPlainTextEdit {{
-        background-color: {THEME_COLORS['secondary']};
+        background-color: {THEME_COLORS['bg_input']};
         color: {THEME_COLORS['text']};
-        border: 2px solid {THEME_COLORS['border']};
+        border: 2px solid {THEME_COLORS['grigio_lupo']};
         border-radius: 4px;
         padding: 5px;
     }}
     
     /* ProgressBar */
     QProgressBar {{
-        background-color: {THEME_COLORS['secondary']};
-        border: 2px solid {THEME_COLORS['border']};
+        background-color: {THEME_COLORS['bg_input']};
+        border: 2px solid {THEME_COLORS['grigio_lupo']};
         border-radius: 4px;
         text-align: center;
         color: {THEME_COLORS['text']};
     }}
     
     QProgressBar::chunk {{
-        background-color: {THEME_COLORS['accent']};
+        background-color: {THEME_COLORS['verde_ranger']};
         border-radius: 2px;
     }}
     """
@@ -327,7 +325,7 @@ def get_video_player_stylesheet():
     return f"""
     QFrame {{
         background-color: #000000;
-        border: 2px solid {THEME_COLORS['accent']};
+        border: 2px solid {THEME_COLORS['grigio_lupo']};
         border-radius: 5px;
     }}
     
@@ -338,7 +336,7 @@ def get_video_player_stylesheet():
     }}
     
     QLabel#errorLabel {{
-        color: {THEME_COLORS['error']};
+        color: {THEME_COLORS['rosso_squadra']};
         font-size: 12px;
         background-color: #1a0a0a;
     }}
