@@ -1,6 +1,7 @@
 """
 Widget del player video per SyncView.
 Supporta caricamento drag & drop e gestione errori.
+Versione 2.0 - Con resource management deterministico.
 """
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton,
@@ -9,6 +10,7 @@ from PyQt6.QtCore import Qt, QUrl, pyqtSignal, QTimer
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 from pathlib import Path
+import gc
 from core.logger import logger
 # --- FIX IMPORTAZIONE ---
 from ui.timeline_widget import TimelineWidget
@@ -16,7 +18,9 @@ from ui.timeline_widget import TimelineWidget
 from core.markers import MarkerManager
 from core.video_loader import AsyncVideoLoader
 from core.frame_cache import FrameCache
-from typing import TYPE_CHECKING
+from core.resource_manager import ResourceHandle
+from ui.loading_states import VideoLoadingSkeleton, ModalStateManager
+from typing import TYPE_CHECKING, Optional
 
 
 class VideoPlayerWidget(QWidget):
@@ -44,6 +48,15 @@ class VideoPlayerWidget(QWidget):
         # Frame cache per performance ottimizzate
         self.frame_cache: FrameCache | None = None
         self.cache_enabled = True
+        
+        # Resource handle per QMediaPlayer cleanup
+        self.media_resource: Optional[ResourceHandle] = None
+        
+        # Flag per evitare log ripetitivi
+        self._media_ready_logged = False
+        
+        # Modal state manager per operazioni lunghe
+        self.modal_manager = ModalStateManager()
 
         # Media player
         self.media_player = QMediaPlayer(self)
@@ -128,7 +141,12 @@ class VideoPlayerWidget(QWidget):
         # Rimuovi l'altezza minima da qui
         # self.placeholder_label.setMinimumHeight(200)
 
+        # Loading skeleton per caricamento asincrono
+        self.loading_skeleton = VideoLoadingSkeleton(self.video_container)
+        self.loading_skeleton.hide()
+
         container_layout.addWidget(self.placeholder_label)
+        container_layout.addWidget(self.loading_skeleton)
         container_layout.addWidget(self.video_widget)
         self.video_widget.hide()
 
@@ -231,12 +249,31 @@ class VideoPlayerWidget(QWidget):
 
             self.video_path = video_path
             
-            # Mostra stato di caricamento
+            # Reset flag per nuovo video
+            self._media_ready_logged = False
+            
+            # Mostra skeleton invece di placeholder generico
             self.is_loading = True
-            self.placeholder_label.setText("⏳ CARICAMENTO IN CORSO...\n\nAnalisi video...")
-            self.placeholder_label.show()
+            self.placeholder_label.hide()
+            self.loading_skeleton.show_loading(video_path.name)
+            
+            # Status bar update
             self.status_label.setText("⏳ CARICANDO...")
             self.status_label.setStyleSheet("color: #C19A6B;")  # Desert tan
+            
+            # Entra in modal state: disabilita controlli durante caricamento
+            widgets_to_disable = [
+                self.load_button,
+                self.remove_button,
+                self.play_btn,
+                self.prev_frame_btn,
+                self.next_frame_btn,
+                self.add_marker_btn
+            ]
+            self.modal_manager.enter_modal_state(
+                widgets_to_disable,
+                f"Caricamento {video_path.name}"
+            )
             
             if async_load and self.async_loader:
                 # Caricamento asincrono
@@ -255,6 +292,7 @@ class VideoPlayerWidget(QWidget):
             self.show_error(f"Errore caricamento: {str(e)}")
             logger.log_error(f"Errore caricamento video Feed-{self.video_index + 1}: {str(e)}", e)
             self.is_loading = False
+            self.modal_manager.exit_modal_state()
 
     def _load_video_sync(self, video_path: Path):
         """Caricamento sincrono del video (metodo originale)."""
@@ -304,13 +342,17 @@ class VideoPlayerWidget(QWidget):
         # Ora carica effettivamente il video nel media player
         self.media_player.setSource(QUrl.fromLocalFile(str(info['path'])))
         
-        # Aggiorna UI
+        # Aggiorna UI - nascondi skeleton, mostra video
+        self.loading_skeleton.hide_loading()
         self.placeholder_label.hide()
         self.video_widget.show()
         self.status_label.setText("✓ PRONTO")
         self.status_label.setStyleSheet("color: #5F6F52;")
         self.is_loaded = True
         self.is_loading = False
+        
+        # Esci da modal state - riabilita controlli
+        self.modal_manager.exit_modal_state()
         
         # Aggiorna visibilità bottoni
         self.load_button.hide()
@@ -325,6 +367,12 @@ class VideoPlayerWidget(QWidget):
         """Callback chiamata in caso di errore durante il caricamento asincrono."""
         if video_index != self.video_index:
             return
+        
+        # Esci da modal state anche in caso di errore
+        self.modal_manager.exit_modal_state()
+        
+        # Nascondi skeleton
+        self.loading_skeleton.hide_loading()
         
         self.show_error(f"Errore caricamento:\n{error_message}")
         self.is_loading = False
@@ -384,6 +432,9 @@ class VideoPlayerWidget(QWidget):
 
     def show_error(self, message):
         """Mostra un messaggio di errore."""
+        # Nascondi skeleton se visibile
+        self.loading_skeleton.hide_loading()
+        
         self.placeholder_label.setText(f"⚠ ERRORE\n\n{message}")
         self.placeholder_label.setObjectName("errorLabel")
         self.placeholder_label.show()
@@ -479,10 +530,11 @@ class VideoPlayerWidget(QWidget):
         Args:
             positions: Lista di posizioni da suggerire
         """
-        # Per ora, logghiamo solo le posizioni suggerite
+        # Per ora, logghiamo solo durante il playback attivo
         # Qt's QMediaPlayer non ha API diretta per position hinting,
         # ma il sistema di cache tiene traccia delle posizioni visitate
-        if positions and self.cache_enabled:
+        # Log solo se ci sono molte posizioni (evita spam nei log)
+        if positions and self.cache_enabled and len(positions) >= 5:
             logger.log_video_action(
                 self.video_index,
                 "Position hints",
@@ -494,8 +546,14 @@ class VideoPlayerWidget(QWidget):
         
         Questa tecnica migliora la fluidità del playback suggerendo
         al sistema quali posizioni verranno raggiunte presto.
+        
+        NON usato durante pause o step frame per evitare overhead.
         """
         if not self.frame_cache or not self.cache_enabled:
+            return
+        
+        # Solo durante playback attivo
+        if self.media_player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
             return
         
         current_pos = self.media_player.position()
@@ -599,8 +657,10 @@ class VideoPlayerWidget(QWidget):
         
         # Quando il video è caricato e pronto, carica il frame di preview
         if status == QMediaPlayer.MediaStatus.LoadedMedia:
-            # Il video è ora completamente caricato e pronto
-            logger.log_video_action(self.video_index, "Media caricato", "Pronto per la riproduzione")
+            # Log solo al primo caricamento, non ad ogni seek
+            if not self._media_ready_logged:
+                logger.log_video_action(self.video_index, "Media caricato", "Pronto per la riproduzione")
+                self._media_ready_logged = True
             
             # Inizializza la cache se non esiste e abbiamo un video path
             if not self.frame_cache and self.video_path and self.cache_enabled:
@@ -612,8 +672,9 @@ class VideoPlayerWidget(QWidget):
                     f"Size: 50 frame positions"
                 )
             
-            # Carica il frame di preview dopo un breve delay per assicurarsi che tutto sia pronto
-            QTimer.singleShot(200, self.load_preview_frame)
+            # Carica il frame di preview solo al primo caricamento
+            if not self.is_loaded:
+                QTimer.singleShot(200, self.load_preview_frame)
         elif status == QMediaPlayer.MediaStatus.InvalidMedia:
             self.show_error("Media non valido o formato non supportato")
             logger.log_error(f"Media non valido Feed-{self.video_index + 1}", "Formato non supportato")
@@ -695,7 +756,7 @@ class VideoPlayerWidget(QWidget):
             self.remove_button.show()
 
     def unload_video(self):
-        """Rimuove il video dal player."""
+        """Rimuove il video dal player con cleanup deterministico."""
         logger.log_video_action(self.video_index, "Video rimosso",
                                 f"{self.video_path.name if self.video_path else 'N/A'}")
 
@@ -710,16 +771,23 @@ class VideoPlayerWidget(QWidget):
             self.frame_cache.clear()
             self.frame_cache = None
 
-        # Ferma la riproduzione
-        self.media_player.stop()
-
-        # Cancella la sorgente
-        self.media_player.setSource(QUrl())
+        # Cleanup media player resource
+        if self.media_resource:
+            self.media_resource.close()
+            self.media_resource = None
+        else:
+            # Fallback: cleanup manuale
+            self.media_player.stop()
+            self.media_player.setSource(QUrl())
+        
+        # Garbage collection per liberare memoria
+        gc.collect()
 
         # Reset stato
         self.video_path = None
         self.is_loaded = False
         self.detected_fps = 0.0
+        self._media_ready_logged = False  # Reset flag
 
         # Reset UI
         self.video_widget.hide()
@@ -735,6 +803,12 @@ class VideoPlayerWidget(QWidget):
         # Aggiorna visibilità bottoni
         self.load_button.show()
         self.remove_button.hide()
+        
+        logger.log_video_action(
+            self.video_index,
+            "Resource cleanup",
+            "Media player e cache puliti, memoria rilasciata"
+        )
 
     # Drag & Drop
 
