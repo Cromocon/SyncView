@@ -30,6 +30,9 @@ from core.sync_manager import SyncManager
 from core.markers import MarkerManager, Marker
 from core.video_loader import AsyncVideoLoader
 from core.frame_cache import FrameCacheManager
+from core.resource_manager import cleanup_global_resources
+from ui.loading_states import ModalStateManager
+import gc
 
 
 class DraggableTitleBar(QWidget):
@@ -267,6 +270,9 @@ class MainWindow(QMainWindow):
         # Frame Cache Manager (performance)
         self.cache_manager = FrameCacheManager(cache_size_per_video=50)
         logger.log_user_action("Frame cache manager creato", "Cache abilitata per tutti i video")
+        
+        # Modal State Manager per operazioni lunghe
+        self.modal_manager = ModalStateManager()
         
         # Opzione auto-load
         self.auto_load_enabled = True  # Può essere resa configurabile
@@ -1544,7 +1550,23 @@ class MainWindow(QMainWindow):
                 if marker.video_index in video_paths:
                     total_clips += 1
         
-        # 8. Notifica l'utente
+        # 8. Entra in modal state - disabilita controlli durante export
+        # Disabilita timeline controls che contiene export button e altri controlli
+        widgets_to_disable: list[QWidget] = [self.timeline_controls]
+        
+        # Aggiungi anche i frame step buttons
+        widgets_to_disable.append(self.back_10_frames_btn)
+        widgets_to_disable.append(self.back_1_frame_btn)
+        widgets_to_disable.append(self.forward_1_frame_btn)
+        widgets_to_disable.append(self.forward_10_frames_btn)
+        
+        self.modal_manager.enter_modal_state(
+            widgets_to_disable,
+            "Export in corso"
+        )
+        logger.log_user_action("Modal state", "Export iniziato - controlli disabilitati")
+        
+        # 9. Notifica l'utente
         self.status_indicator.setText(f"● ESPORTAZIONE IN CORSO...")
         self.status_indicator.setStyleSheet("color: #d4a356;") # Giallo
         
@@ -1555,7 +1577,8 @@ class MainWindow(QMainWindow):
             f"Markers: {len(markers)}\n"
             f"Video caricati: {len(video_paths)}\n"
             f"Clip totali: ~{total_clips}\n\n"
-            f"Le clip verranno salvate in '{export_dir.name}'."
+            f"Le clip verranno salvate in '{export_dir.name}'.\n\n"
+            f"⚠ I controlli sono temporaneamente disabilitati."
         )
 
     def on_export_progress(self, message: str):
@@ -1567,6 +1590,11 @@ class MainWindow(QMainWindow):
     def on_export_finished(self, message: str):
         """Chiamato al termine dell'esportazione."""
         logger.log_export_action("Esportazione completata", message)
+        
+        # Esci da modal state - riabilita controlli
+        self.modal_manager.exit_modal_state()
+        logger.log_user_action("Modal state", "Export completato - controlli riabilitati")
+        
         self.status_indicator.setText("● SISTEMA OPERATIVO")
         self.status_indicator.setStyleSheet("color: #5fa373;") # Verde
         self.update_dependency_status()  # Aggiorna tooltip
@@ -1581,6 +1609,11 @@ class MainWindow(QMainWindow):
     def on_export_error(self, error_message: str):
         """Chiamato in caso di errore di esportazione."""
         logger.log_error("Errore esportazione", error_message)
+        
+        # Esci da modal state anche in caso di errore
+        self.modal_manager.exit_modal_state()
+        logger.log_user_action("Modal state", "Export fallito - controlli riabilitati")
+        
         self.status_indicator.setText("● ERRORE ESPORTAZIONE")
         self.status_indicator.setStyleSheet(f'color: {THEME_COLORS["error"]};') # Rosso
         self.update_dependency_status()  # Aggiorna tooltip
@@ -1663,7 +1696,7 @@ class MainWindow(QMainWindow):
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
 
     def closeEvent(self, event):  # type: ignore[override]
-        """Gestisce la chiusura dell'applicazione."""
+        """Gestisce la chiusura dell'applicazione con cleanup deterministico."""
         logger.log_user_action("Chiusura applicazione")
         
         # --- Log statistiche cache prima della chiusura ---
@@ -1698,10 +1731,24 @@ class MainWindow(QMainWindow):
             self.marker_manager.save()
             logger.log_user_action("Markers salvati", f"{self.marker_manager.count} markers")
 
-        # Ferma tutti i player
+        # --- Ferma e pulisci tutti i player ---
         for player in self.video_players:
             if player.is_loaded:
                 player.stop()
+                player.unload_video()  # Cleanup deterministico
+        # ---------------------------------------
+        
+        # --- CLEANUP DETERMINISTICO GLOBALE ---
+        logger.log_user_action("Resource cleanup globale", "Chiusura risorse in corso...")
+        closed = cleanup_global_resources(force_gc=True)
+        if closed > 0:
+            logger.log_user_action("Resource cleanup globale", f"{closed} risorse chiuse")
+        
+        # Garbage collection finale
+        collected = gc.collect()
+        logger.log_user_action("GC finale", f"{collected} oggetti raccolti")
+        # ---------------------------------------
 
         event.accept()
         logger.log_user_action("Applicazione chiusa")
+

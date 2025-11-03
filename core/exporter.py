@@ -1,12 +1,14 @@
 """
 Gestore Esportazione Video (usa moviepy).
 Esegue l'esportazione in un thread separato.
+Versione 2.0 - Con resource management deterministico.
 """
 
 from PyQt6.QtCore import QObject, pyqtSignal, QThread
 from pathlib import Path
 from typing import List, Optional, Dict, TYPE_CHECKING
 import time
+import gc
 
 # Import moviepy solo se disponibile
 try:
@@ -21,6 +23,7 @@ if TYPE_CHECKING:
 
 from core.markers import Marker
 from core.logger import logger
+from core.resource_manager import ResourcePool, ResourceHandle
 from config.settings import EXPORT_DIR
 
 class VideoExporter(QObject):
@@ -48,6 +51,9 @@ class VideoExporter(QObject):
         self.sec_after_ms = sec_after * 1000
         self.export_dir = export_dir if export_dir else EXPORT_DIR
         self.is_running = True
+        
+        # Resource pool per gestione deterministica
+        self.resource_pool = ResourcePool(name="export")
 
     def run(self):
         """
@@ -80,8 +86,8 @@ class VideoExporter(QObject):
         )
         
         try:
-            # Carica tutti i video UNA SOLA VOLTA
-            video_clips = {}  # Dict[int, VideoFileClip]
+            # Carica tutti i video UNA SOLA VOLTA con resource tracking
+            video_handles: Dict[int, ResourceHandle] = {}  # Track handles
             
             for video_idx, video_path in self.video_paths.items():
                 if not video_path.exists():
@@ -91,13 +97,21 @@ class VideoExporter(QObject):
                 try:
                     logger.log_export_action(f"Caricamento Video {video_idx+1}...", video_path.name)
                     clip = VideoFileClip(str(video_path))
-                    video_clips[video_idx] = clip
+                    
+                    # Crea e registra handle per questo clip
+                    handle = self.resource_pool.create_handle(
+                        clip, 
+                        'moviepy', 
+                        f"video_{video_idx+1}_{video_path.name}"
+                    )
+                    video_handles[video_idx] = handle
+                    
                     logger.log_export_action(f"Video {video_idx+1} caricato", f"Durata: {clip.duration}s")
                 except Exception as e:
                     logger.log_error(f"Errore caricamento Video {video_idx+1}", e)
                     continue
             
-            if not video_clips:
+            if not video_handles:
                 self.error.emit("Nessun video caricato con successo.")
                 return
             
@@ -106,10 +120,10 @@ class VideoExporter(QObject):
             for marker in self.markers:
                 if marker.video_index is None:
                     # Marker globale: una clip per ogni video
-                    total_clips += len(video_clips)
+                    total_clips += len(video_handles)
                 else:
                     # Marker specifico: una clip solo per quel video
-                    if marker.video_index in video_clips:
+                    if marker.video_index in video_handles:
                         total_clips += 1
             
             logger.log_export_action("Clip totali da esportare", str(total_clips))
@@ -120,8 +134,7 @@ class VideoExporter(QObject):
             for marker_idx, marker in enumerate(self.markers):
                 if not self.is_running:
                     self.error.emit("Esportazione annullata.")
-                    for clip in video_clips.values():
-                        clip.close()
+                    # Cleanup gestito dal finally
                     return
                 
                 # Determina da quali video esportare questo marker
@@ -129,10 +142,10 @@ class VideoExporter(QObject):
                 
                 if marker.video_index is None:
                     # Marker globale: esporta da tutti i video
-                    video_indices_to_export = list(video_clips.keys())
+                    video_indices_to_export = list(video_handles.keys())
                 else:
                     # Marker specifico: esporta solo da quel video
-                    if marker.video_index in video_clips:
+                    if marker.video_index in video_handles:
                         video_indices_to_export = [marker.video_index]
                 
                 # Esporta per ogni video selezionato
@@ -142,7 +155,13 @@ class VideoExporter(QObject):
                     
                     clip_counter += 1
                     
-                    video_clip = video_clips[video_idx]
+                    # Ottieni clip dal handle
+                    handle = video_handles[video_idx]
+                    if not handle or not handle.resource:
+                        logger.log_export_action(f"Clip saltata", f"Video {video_idx+1} handle non valido")
+                        continue
+                    
+                    video_clip = handle.resource
                     video_duration_sec = video_clip.duration
                     
                     # Calcola tempi in secondi
@@ -170,10 +189,18 @@ class VideoExporter(QObject):
                         f"{output_path.name} (da {start_sec:.2f}s a {end_sec:.2f}s)"
                     )
                     
-                    # Estrai e salva la subclip
+                    # Estrai e salva la subclip con resource management
+                    sub_clip_handle = None
                     try:
                         # moviepy 2.x usa 'subclipped' invece di 'subclip'
                         sub_clip = video_clip.subclipped(start_sec, end_sec)
+                        
+                        # Registra subclip nel pool per cleanup automatico
+                        sub_clip_handle = self.resource_pool.create_handle(
+                            sub_clip,
+                            'moviepy',
+                            f"subclip_{clip_counter}"
+                        )
                         
                         # Prova prima con audio
                         export_success = False
@@ -187,7 +214,8 @@ class VideoExporter(QObject):
                                     codec="libx264", 
                                     audio_codec="aac",
                                     preset="ultrafast",
-                                    threads=4
+                                    threads=4,
+                                    logger=None  # Disabilita verbose output di moviepy
                                 )
                                 export_success = True
                             except (AttributeError, OSError) as audio_error:
@@ -207,10 +235,10 @@ class VideoExporter(QObject):
                                 codec="libx264", 
                                 audio=False,  # Nessun audio
                                 preset="ultrafast",
-                                threads=4
+                                threads=4,
+                                logger=None
                             )
                         
-                        sub_clip.close()
                         logger.log_export_action(
                             f"✓ Clip {clip_counter} salvata", 
                             output_path.name
@@ -219,16 +247,23 @@ class VideoExporter(QObject):
                     except Exception as e:
                         logger.log_error(f"Errore durante salvataggio clip {output_path.name}", e)
                         # Continua con la prossima clip
-            
-            # Chiudi tutti i video
-            for clip in video_clips.values():
-                clip.close()
+                    finally:
+                        # Cleanup esplicito della subclip
+                        if sub_clip_handle:
+                            sub_clip_handle.close()
+                            del sub_clip_handle
+                        # GC per liberare memoria subito
+                        gc.collect()
             
             self.finished.emit(f"Esportazione completata! {clip_counter} clip salvate in '{self.export_dir.name}'.")
 
         except Exception as e:
             logger.log_error("Errore fatale durante l'esportazione", e)
             self.error.emit(f"Errore: {str(e)}")
+        finally:
+            # CLEANUP DETERMINISTICO: Chiudi tutte le risorse
+            closed = self.resource_pool.cleanup_all(force_gc=True)
+            logger.log_export_action("Resource cleanup", f"{closed} risorse chiuse, pool pulito")
 
     def stop(self):
         """Ferma il processo di esportazione."""
