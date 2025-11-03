@@ -1,14 +1,16 @@
 """
 Widget timeline per visualizzazione e gestione markers video.
-Versione 2.9 - Ruler abbassata
+Versione 3.0 - Ottimizzazioni: spatial indexing, viewport culling, debouncing
 """
 
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QToolTip
-from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QRect, QRectF, QPointF
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QRect, QRectF, QPointF, QTimer
 from PyQt6.QtGui import (QPainter, QColor, QPen, QBrush, QFont, QMouseEvent,
-                         QPaintEvent, QPolygonF, QFontMetrics)
+                         QPaintEvent, QPolygonF, QFontMetrics, QCursor)
 
 from core.markers import Marker, MarkerManager
+from core.spatial_index import MarkerSpatialIndex, ViewportCalculator
+from core.debounce import Debouncer, UpdateScheduler
 from typing import Optional, List, Tuple
 
 
@@ -30,6 +32,21 @@ class TimelineWidget(QWidget):
 
         # Stato interazione
         self.hover_marker: Optional[Marker] = None
+        
+        # --- OTTIMIZZAZIONI ---
+        # Spatial indexing per query O(log n)
+        self.marker_index = MarkerSpatialIndex()
+        
+        # Viewport calculator per culling
+        self.viewport = ViewportCalculator()
+        
+        # Update scheduler per debouncing/throttling
+        self.update_scheduler = UpdateScheduler(throttle_ms=16, debounce_ms=50)
+        
+        # Cache per evitare ricalcoli
+        self._cached_visible_markers: List[Marker] = []
+        self._cache_valid = False
+        # ----------------------
 
         # Configurazione visuale
         # --- MODIFICA: Abbassato il righello ---
@@ -48,17 +65,62 @@ class TimelineWidget(QWidget):
     def set_marker_manager(self, manager: MarkerManager):
         """Imposta il manager dei markers."""
         self.marker_manager = manager
-        self.update()
+        self._rebuild_index()
+        self._schedule_update('normal')
 
     def set_duration(self, duration_ms: int):
         """Imposta la durata totale della timeline."""
         self.duration_ms = duration_ms
-        self.update()
+        self.viewport.update_dimensions(self.width(), duration_ms)
+        self._invalidate_cache()
+        self._schedule_update('normal')
 
     def set_position(self, position_ms: int):
         """Imposta la posizione corrente."""
         self.current_position_ms = position_ms
-        self.update()
+        # Update position usa throttling per smooth playback
+        self._schedule_update('fast')
+    
+    def _rebuild_index(self) -> None:
+        """Ricostruisce l'indice spaziale dei markers."""
+        if self.marker_manager:
+            self.marker_index.update(self.marker_manager.markers)
+            self._invalidate_cache()
+    
+    def _invalidate_cache(self) -> None:
+        """Invalida la cache dei markers visibili."""
+        self._cache_valid = False
+    
+    def _get_visible_markers(self) -> List[Marker]:
+        """Ottiene i markers visibili nell'area corrente (con caching).
+        
+        Returns:
+            Lista di markers visibili
+        """
+        if self._cache_valid:
+            return self._cached_visible_markers
+        
+        # Query range visibile dall'indice spaziale
+        start_ms, end_ms = self.viewport.get_visible_range()
+        self._cached_visible_markers = self.marker_index.query_range(start_ms, end_ms)
+        self._cache_valid = True
+        
+        return self._cached_visible_markers
+    
+    def _schedule_update(self, mode: str = 'normal') -> None:
+        """Schedula un update con debouncing/throttling appropriato.
+        
+        Args:
+            mode: 'fast' (throttle 60fps), 'normal' (debounce), 'immediate'
+        """
+        self.update_scheduler.schedule_update(self.update, mode)
+    
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        """Gestisce ridimensionamento del widget."""
+        super().resizeEvent(event)
+        self.viewport.update_dimensions(self.width(), self.duration_ms)
+        self._invalidate_cache()
+        self._schedule_update('normal')
 
     # ===================================================================
     #   PAINTING (Logica di disegno)
@@ -156,9 +218,18 @@ class TimelineWidget(QWidget):
                                      small_x, self.ruler_y_pos + self.ruler_height)
 
     def _draw_markers_and_timestamps(self, painter: QPainter, width: int):
-        """Disegna i marker (triangoli sopra) con linea verticale e timestamp sotto."""
+        """Disegna i marker (triangoli sopra) con linea verticale e timestamp sotto.
+        
+        OTTIMIZZATO: Usa spatial index per disegnare solo markers visibili.
+        """
         if not self.marker_manager:
             return
+
+        # Ottimizzazione: disegna solo markers visibili
+        visible_markers = self._get_visible_markers()
+        
+        if not visible_markers:
+            return  # Early exit se nessun marker visibile
 
         # Colore Giallo/Oro del bordo della finestra
         marker_color = QColor("#C19A6B") 
@@ -170,7 +241,7 @@ class TimelineWidget(QWidget):
         # Per evitare sovrapposizioni dei timestamp
         drawn_timestamps_rects: List[QRect] = []
 
-        for marker in self.marker_manager.markers:
+        for marker in visible_markers:  # Solo markers visibili!
             x = self._timestamp_to_x(marker.timestamp, width)
 
             # --- Disegna il triangolo del marker sopra la timeline ---
@@ -320,14 +391,40 @@ class TimelineWidget(QWidget):
                 self.marker_remove_requested.emit(marker)
 
     def mouseMoveEvent(self, event: QMouseEvent):  # type: ignore[override]
-        """Gestisce movimento del mouse per hover."""
-        # Non c'è drag (rimosso)
-        # Aggiorna hover
-        marker = self._get_marker_at_position(event.pos())
+        """Gestisce movimento del mouse per hover.
+        
+        OTTIMIZZATO: Hover updates debounced per evitare repaint continui.
+        """
+        # Schedula verifica hover con debouncing
+        self._schedule_hover_check(event.pos())
+
+    def _schedule_hover_check(self, pos: QPoint) -> None:
+        """Schedula verifica hover con debouncing.
+        
+        Evita repaint e tooltip updates continui durante movimento rapido del mouse.
+        """
+        if not hasattr(self, '_hover_timer'):
+            self._hover_timer = QTimer(self)
+            self._hover_timer.setSingleShot(True)
+            self._hover_timer.timeout.connect(self._check_hover)
+        
+        # Salva posizione per check successivo
+        self._pending_hover_pos = pos
+        
+        # Debounce a 50ms
+        self._hover_timer.start(50)
+
+    def _check_hover(self) -> None:
+        """Verifica hover marker alla posizione salvata."""
+        if not hasattr(self, '_pending_hover_pos'):
+            return
+            
+        pos = self._pending_hover_pos
+        marker = self._get_marker_at_position(pos)
 
         if marker != self.hover_marker:
             self.hover_marker = marker
-            self.update()
+            self._schedule_update()  # Throttled update invece di self.update()
 
             # Mostra tooltip
             if marker:
@@ -338,7 +435,10 @@ class TimelineWidget(QWidget):
                     tooltip_text += f"<br><i>{marker.description}</i>"
                 if marker.category != 'default':
                     tooltip_text += f"<br>📂 {marker.category.title()}"
-                QToolTip.showText(event.globalPosition().toPoint(), tooltip_text, self)
+                
+                # Usa QCursor.pos() invece di event.globalPosition() che non abbiamo più
+                from PyQt6.QtGui import QCursor
+                QToolTip.showText(QCursor.pos(), tooltip_text, self)
             else:
                 QToolTip.hideText()
 
@@ -404,7 +504,10 @@ class TimelineWidget(QWidget):
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
 
     def _get_marker_at_position(self, pos: QPoint) -> Optional[Marker]:
-        """Trova marker (triangolo) sotto il cursore."""
+        """Trova marker (triangolo) sotto il cursore.
+        
+        OTTIMIZZATO: Usa spatial index per trovare marker vicino in O(log n).
+        """
         if not self.marker_manager:
             return None
 
@@ -417,15 +520,23 @@ class TimelineWidget(QWidget):
         if not (hit_y_start <= pos.y() <= hit_y_end):
              return None # Cursore non è sulla riga dei marker
 
-        for marker in self.marker_manager.markers:
-            marker_x = self._timestamp_to_x(marker.timestamp, width)
-            
-            # Area di "hit" orizzontale
-            hit_x_start = marker_x - (self.marker_width // 2) - 3 # 3px buffer
+        # Converti X in timestamp
+        timestamp = self._x_to_timestamp(pos.x(), width)
+        
+        # Usa spatial index per trovare marker più vicino
+        # Distanza massima: metà larghezza marker + buffer
+        max_distance_ms = int((self.marker_width / 2 + 3) * self.duration_ms / (width - 20))
+        
+        nearest_marker = self.marker_index.find_nearest(timestamp, max_distance_ms)
+        
+        if nearest_marker:
+            # Verifica che sia effettivamente in hit range
+            marker_x = self._timestamp_to_x(nearest_marker.timestamp, width)
+            hit_x_start = marker_x - (self.marker_width // 2) - 3
             hit_x_end = marker_x + (self.marker_width // 2) + 3
-
+            
             if hit_x_start <= pos.x() <= hit_x_end:
-                return marker
+                return nearest_marker
         
         return None
 
