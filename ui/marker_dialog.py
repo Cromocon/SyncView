@@ -113,8 +113,10 @@ class MarkerManagerDialog(QDialog):
         self.table.setHorizontalHeaderLabels([
             "Timestamp", "Tempo", "Categoria", "Colore", "Descrizione"
         ])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        header = self.table.horizontalHeader()
+        if header:
+            header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+            header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.table.itemDoubleClicked.connect(self.edit_marker)
@@ -205,7 +207,9 @@ class MarkerManagerDialog(QDialog):
             self.table.setItem(row, 4, QTableWidgetItem(marker.description or ""))
             
             # Salva marker nell'item per recupero
-            self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, marker)
+            item = self.table.item(row, 0)
+            if item:
+                item.setData(Qt.ItemDataRole.UserRole, marker)
         
         # Aggiorna statistiche
         self.update_statistics()
@@ -246,7 +250,10 @@ class MarkerManagerDialog(QDialog):
             return None
         
         row = selected[0].row()
-        return self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        item = self.table.item(row, 0)
+        if item:
+            return item.data(Qt.ItemDataRole.UserRole)
+        return None
     
     def add_marker(self):
         """Aggiunge un nuovo marker (placeholder - in pratica si usa Ctrl+M durante playback)."""

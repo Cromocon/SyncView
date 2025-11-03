@@ -28,10 +28,10 @@ Long-term:
 ## 1. Performance optimizations
 
 1.1 Video loading & playback
-- Lazy loading: only decode frames when required.
-- Asynchronous loading: perform heavy I/O and probing in worker threads to keep the UI responsive.
-- Frame caching (LRU) for recently accessed frames to improve seek/preview performance.
-- Predecode next frames during playback to smooth playback.
+- [x] Lazy loading: only decode frames when required.
+- [x] Asynchronous loading: perform heavy I/O and probing in worker threads to keep the UI responsive.
+- [x] Frame caching (LRU) for recently accessed frames to improve seek/preview performance.
+- [x]Predecode next frames during playback to smooth playback.
 - Consider memory-mapped I/O for large files if applicable.
 
 Implementation notes

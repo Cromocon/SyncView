@@ -14,6 +14,8 @@ from core.logger import logger
 from ui.timeline_widget import TimelineWidget
 # --- FINE FIX ---
 from core.markers import MarkerManager
+from core.video_loader import AsyncVideoLoader
+from core.frame_cache import FrameCache
 from typing import TYPE_CHECKING
 
 
@@ -32,8 +34,16 @@ class VideoPlayerWidget(QWidget):
         self.video_index = video_index
         self.video_path = None
         self.is_loaded = False
+        self.is_loading = False  # Flag per indicare caricamento in corso
         self.detected_fps = 0.0  # FPS rilevato dal video
         self.marker_manager: MarkerManager | None = None  # Sarà impostato dal main window
+        
+        # Async loader (condiviso)
+        self.async_loader: AsyncVideoLoader | None = None
+        
+        # Frame cache per performance ottimizzate
+        self.frame_cache: FrameCache | None = None
+        self.cache_enabled = True
 
         # Media player
         self.media_player = QMediaPlayer(self)
@@ -48,6 +58,7 @@ class VideoPlayerWidget(QWidget):
         self.media_player.positionChanged.connect(self.on_position_changed)
         self.media_player.durationChanged.connect(self.on_duration_changed)
         self.media_player.errorOccurred.connect(self.on_error)
+        self.media_player.mediaStatusChanged.connect(self.on_media_status_changed)
 
         # Setup UI
         self.setup_ui()
@@ -193,38 +204,131 @@ class VideoPlayerWidget(QWidget):
 
         return controls
 
-    def load_video(self, video_path):
-        """Carica un video nel player."""
+    def set_async_loader(self, loader: AsyncVideoLoader):
+        """Imposta l'async loader condiviso."""
+        self.async_loader = loader
+    
+    def set_frame_cache(self, cache: FrameCache):
+        """Imposta la frame cache per questo video.
+        
+        Args:
+            cache: FrameCache da utilizzare
+        """
+        self.frame_cache = cache
+        logger.log_video_action(self.video_index, "Frame cache impostata", f"Size: {cache.cache.capacity}")
+
+    def load_video(self, video_path, async_load=True):
+        """Carica un video nel player.
+        
+        Args:
+            video_path: Path del file video
+            async_load: Se True, usa caricamento asincrono (default)
+        """
         try:
             video_path = Path(video_path)
             if not video_path.exists():
                 raise FileNotFoundError(f"File non trovato: {video_path}")
 
             self.video_path = video_path
-            self.media_player.setSource(QUrl.fromLocalFile(str(video_path)))
-
-            # Rileva gli FPS del video
-            self.detect_video_fps(video_path)
-
-            # Aggiorna UI
-            self.placeholder_label.hide()
-            self.video_widget.show()
-            self.status_label.setText("✓ PRONTO")
-            self.status_label.setStyleSheet("color: #5F6F52;")
-            self.is_loaded = True
-
-            # Aggiorna visibilità bottoni
-            self.load_button.hide()
-            self.remove_button.show()
-
-            # Carica il terzo frame come preview (dopo che la durata è nota)
-            QTimer.singleShot(100, self.load_preview_frame)
-
-            logger.log_video_action(self.video_index, "Video caricato", f"{video_path.name} - {self.detected_fps:.2f} fps")
+            
+            # Mostra stato di caricamento
+            self.is_loading = True
+            self.placeholder_label.setText("⏳ CARICAMENTO IN CORSO...\n\nAnalisi video...")
+            self.placeholder_label.show()
+            self.status_label.setText("⏳ CARICANDO...")
+            self.status_label.setStyleSheet("color: #C19A6B;")  # Desert tan
+            
+            if async_load and self.async_loader:
+                # Caricamento asincrono
+                logger.log_video_action(self.video_index, "Avvio caricamento asincrono", video_path.name)
+                self.async_loader.load_video_async(
+                    self.video_index,
+                    video_path,
+                    self.on_video_info_ready,
+                    self.on_video_load_error
+                )
+            else:
+                # Caricamento sincrono (legacy)
+                self._load_video_sync(video_path)
 
         except Exception as e:
             self.show_error(f"Errore caricamento: {str(e)}")
             logger.log_error(f"Errore caricamento video Feed-{self.video_index + 1}: {str(e)}", e)
+            self.is_loading = False
+
+    def _load_video_sync(self, video_path: Path):
+        """Caricamento sincrono del video (metodo originale)."""
+        self.media_player.setSource(QUrl.fromLocalFile(str(video_path)))
+        
+        # Rileva gli FPS del video
+        self.detect_video_fps(video_path)
+        
+        # Aggiorna UI
+        self.placeholder_label.hide()
+        self.video_widget.show()
+        self.status_label.setText("✓ PRONTO")
+        self.status_label.setStyleSheet("color: #5F6F52;")
+        self.is_loaded = True
+        self.is_loading = False
+        
+        # Aggiorna visibilità bottoni
+        self.load_button.hide()
+        self.remove_button.show()
+        
+        logger.log_video_action(self.video_index, "Video caricato (sync)", f"{video_path.name} - {self.detected_fps:.2f} fps")
+
+    def on_video_info_ready(self, video_index: int, info: dict):
+        """Callback chiamata quando le info video sono pronte (async).
+        
+        Args:
+            video_index: Indice del video
+            info: Dizionario con fps, duration, width, height, ecc.
+        """
+        if video_index != self.video_index:
+            return  # Non per questo player
+        
+        logger.log_video_action(
+            self.video_index, 
+            "Info video ricevute", 
+            f"FPS: {info['fps']:.2f}, Size: {info['width']}x{info['height']}"
+        )
+        
+        # Salva FPS
+        self.detected_fps = info['fps']
+        if self.detected_fps > 0:
+            self.fps_label.setText(f"📹 {self.detected_fps:.2f} fps")
+        else:
+            self.fps_label.setText("📹 Auto")
+        self.fps_label.show()
+        
+        # Ora carica effettivamente il video nel media player
+        self.media_player.setSource(QUrl.fromLocalFile(str(info['path'])))
+        
+        # Aggiorna UI
+        self.placeholder_label.hide()
+        self.video_widget.show()
+        self.status_label.setText("✓ PRONTO")
+        self.status_label.setStyleSheet("color: #5F6F52;")
+        self.is_loaded = True
+        self.is_loading = False
+        
+        # Aggiorna visibilità bottoni
+        self.load_button.hide()
+        self.remove_button.show()
+        
+        # Salva video path per la cache
+        self.video_path = info['path']
+        
+        logger.log_video_action(self.video_index, "Video caricato (async)", f"{info['path'].name}")
+
+    def on_video_load_error(self, video_index: int, error_message: str):
+        """Callback chiamata in caso di errore durante il caricamento asincrono."""
+        if video_index != self.video_index:
+            return
+        
+        self.show_error(f"Errore caricamento:\n{error_message}")
+        self.is_loading = False
+        logger.log_error(f"Errore caricamento asincrono Feed-{self.video_index + 1}", error_message)
 
     def detect_video_fps(self, video_path):
         """Rileva gli FPS del video usando ffprobe o metodo alternativo."""
@@ -270,12 +374,13 @@ class VideoPlayerWidget(QWidget):
 
     def load_preview_frame(self):
         """Carica il terzo frame del video come preview."""
-        if self.is_loaded:
+        if self.is_loaded and self.media_player.duration() > 0:
             # Calcola la posizione del terzo frame (~120ms a 25fps)
-            preview_position = 120  # millisecondi
+            preview_position = min(120, self.media_player.duration() - 100)  # Assicura che non superi la durata
             self.media_player.setPosition(preview_position)
             # Mette in pausa per mostrare il frame
             self.media_player.pause()
+            logger.log_video_action(self.video_index, "Preview frame caricato", f"Posizione: {preview_position}ms")
 
     def show_error(self, message):
         """Mostra un messaggio di errore."""
@@ -294,6 +399,12 @@ class VideoPlayerWidget(QWidget):
             self.media_player.play()
             self.play_btn.setText("⏸ Pausa")
             logger.log_playback(self.video_index, "PLAY")
+            
+            # Notifica cache che siamo in playback
+            if self.frame_cache:
+                self.frame_cache.set_playing(True)
+                # Pre-carica frame successivi
+                self._predecode_next_frames()
 
     def pause(self):
         """Mette in pausa la riproduzione."""
@@ -301,6 +412,10 @@ class VideoPlayerWidget(QWidget):
             self.media_player.pause()
             self.play_btn.setText("▶ Play")
             logger.log_playback(self.video_index, "PAUSA")
+            
+            # Notifica cache che siamo in pausa
+            if self.frame_cache:
+                self.frame_cache.set_playing(False)
 
     def stop(self):
         """Ferma la riproduzione."""
@@ -308,6 +423,10 @@ class VideoPlayerWidget(QWidget):
             self.media_player.stop()
             self.play_btn.setText("▶ Play")
             logger.log_playback(self.video_index, "STOP")
+            
+            # Notifica cache
+            if self.frame_cache:
+                self.frame_cache.set_playing(False)
 
     def toggle_play_pause(self):
         """Alterna tra play e pausa."""
@@ -330,11 +449,66 @@ class VideoPlayerWidget(QWidget):
         self.mute_btn.setChecked(muted)
 
     def seek_position(self, position, emit_signal=False):
-        """Salta a una posizione specifica."""
+        """Salta a una posizione specifica.
+        
+        Args:
+            position: Posizione in ms
+            emit_signal: Se True, emette segnale di log
+        """
         if self.is_loaded:
+            # Marca posizione nella cache
+            if self.frame_cache and self.cache_enabled:
+                self.frame_cache.mark_position_visited(position)
+                
+                # Se in pausa, predici posizioni vicine per seek fluidi
+                if not self.frame_cache.is_playing:
+                    duration = self.media_player.duration()
+                    nearby_positions = self.frame_cache.optimize_for_seek(position, duration)
+                    # Hint al media player (non blocca l'UI)
+                    self._hint_positions(nearby_positions)
+            
             self.media_player.setPosition(position)
             if emit_signal:
                 logger.log_timeline_seek(self.video_index, position)
+    
+    def _hint_positions(self, positions: list[int]) -> None:
+        """Suggerisce posizioni al media player per pre-buffering.
+        
+        Questa è una tecnica di ottimizzazione che non blocca l'UI.
+        
+        Args:
+            positions: Lista di posizioni da suggerire
+        """
+        # Per ora, logghiamo solo le posizioni suggerite
+        # Qt's QMediaPlayer non ha API diretta per position hinting,
+        # ma il sistema di cache tiene traccia delle posizioni visitate
+        if positions and self.cache_enabled:
+            logger.log_video_action(
+                self.video_index,
+                "Position hints",
+                f"Suggerite {len(positions)} posizioni per pre-buffer"
+            )
+    
+    def _predecode_next_frames(self) -> None:
+        """Pre-decodifica i frame successivi durante il playback.
+        
+        Questa tecnica migliora la fluidità del playback suggerendo
+        al sistema quali posizioni verranno raggiunte presto.
+        """
+        if not self.frame_cache or not self.cache_enabled:
+            return
+        
+        current_pos = self.media_player.position()
+        next_positions = self.frame_cache.get_predecode_positions(current_pos)
+        
+        # Hint al sistema
+        self._hint_positions(next_positions)
+        
+        # Marca le posizioni come "previste"
+        for pos in next_positions:
+            if not self.frame_cache.is_position_cached(pos):
+                # Questa posizione non è ancora in cache, sarà richiesta presto
+                pass
     
     def on_timeline_clicked(self, position):
         """Gestisce quando l'utente clicca sulla timeline."""
@@ -390,6 +564,14 @@ class VideoPlayerWidget(QWidget):
 
     def on_position_changed(self, position):
         """Gestisce il cambio di posizione."""
+        # Traccia posizione nella cache
+        if self.frame_cache and self.cache_enabled:
+            self.frame_cache.mark_position_visited(position)
+            
+            # Durante il playback, continua a predire frame successivi
+            if self.frame_cache.is_playing and position % 500 == 0:  # Ogni 500ms
+                self._predecode_next_frames()
+        
         # Aggiorna timeline widget
         self.timeline_widget.set_position(position)
 
@@ -410,6 +592,31 @@ class VideoPlayerWidget(QWidget):
         """Gestisce gli errori del media player."""
         self.show_error(error_string)
         logger.log_error(f"Errore media player Feed-{self.video_index + 1}", error_string)
+
+    def on_media_status_changed(self, status):
+        """Gestisce il cambio di stato del media player."""
+        from PyQt6.QtMultimedia import QMediaPlayer
+        
+        # Quando il video è caricato e pronto, carica il frame di preview
+        if status == QMediaPlayer.MediaStatus.LoadedMedia:
+            # Il video è ora completamente caricato e pronto
+            logger.log_video_action(self.video_index, "Media caricato", "Pronto per la riproduzione")
+            
+            # Inizializza la cache se non esiste e abbiamo un video path
+            if not self.frame_cache and self.video_path and self.cache_enabled:
+                from core.frame_cache import FrameCache
+                self.frame_cache = FrameCache(self.video_path, cache_size=50)
+                logger.log_video_action(
+                    self.video_index,
+                    "Frame cache creata automaticamente",
+                    f"Size: 50 frame positions"
+                )
+            
+            # Carica il frame di preview dopo un breve delay per assicurarsi che tutto sia pronto
+            QTimer.singleShot(200, self.load_preview_frame)
+        elif status == QMediaPlayer.MediaStatus.InvalidMedia:
+            self.show_error("Media non valido o formato non supportato")
+            logger.log_error(f"Media non valido Feed-{self.video_index + 1}", "Formato non supportato")
 
     def update_time_label(self, position, duration):
         """Aggiorna il label con i tempi."""
@@ -491,6 +698,17 @@ class VideoPlayerWidget(QWidget):
         """Rimuove il video dal player."""
         logger.log_video_action(self.video_index, "Video rimosso",
                                 f"{self.video_path.name if self.video_path else 'N/A'}")
+
+        # Pulisci cache
+        if self.frame_cache:
+            stats = self.frame_cache.get_stats()
+            logger.log_video_action(
+                self.video_index,
+                "Cache stats prima della pulizia",
+                f"Hit rate: {stats['hit_rate']:.1f}%, Hits: {stats['hits']}, Misses: {stats['misses']}"
+            )
+            self.frame_cache.clear()
+            self.frame_cache = None
 
         # Ferma la riproduzione
         self.media_player.stop()

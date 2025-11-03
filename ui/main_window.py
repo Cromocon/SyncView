@@ -24,10 +24,12 @@ from ui.export_dialog import ExportDialog
 from core.exporter import VideoExporter
 # -------------------------------
 from ui.styles import get_main_stylesheet
-from config.settings import SOURCE_DIRS, DEFAULT_FPS_OPTIONS, SUPPORTED_VIDEO_FORMATS, EXPORT_DIR
+from config.settings import SOURCE_DIRS, DEFAULT_FPS_OPTIONS, SUPPORTED_VIDEO_FORMATS, EXPORT_DIR, THEME_COLORS
 from core.logger import logger
 from core.sync_manager import SyncManager
 from core.markers import MarkerManager, Marker
+from core.video_loader import AsyncVideoLoader
+from core.frame_cache import FrameCacheManager
 
 
 class DraggableTitleBar(QWidget):
@@ -258,6 +260,16 @@ class MainWindow(QMainWindow):
         # Pulisci tutti i marker all'avvio
         self.marker_manager.clear_all()
         logger.log_user_action("Marker puliti", "Avvio applicazione")
+        
+        # Async Video Loader (lazy loading)
+        self.async_loader = AsyncVideoLoader()
+        
+        # Frame Cache Manager (performance)
+        self.cache_manager = FrameCacheManager(cache_size_per_video=50)
+        logger.log_user_action("Frame cache manager creato", "Cache abilitata per tutti i video")
+        
+        # Opzione auto-load
+        self.auto_load_enabled = True  # Può essere resa configurabile
 
         # Timer aggiornamento timeline
         self.timeline_update_timer = QTimer()
@@ -287,8 +299,13 @@ class MainWindow(QMainWindow):
         # I controlli globali partono nascosti, si mostrano solo con sincronizzazione attiva
         # Verrà gestito dal primo toggle_sync chiamato all'avvio
 
-        # Auto-load video dalle cartelle Feed
-        QTimer.singleShot(500, self.auto_load_videos)
+        # Auto-load video dalle cartelle Feed (opzionale)
+        # Aumentato il delay per dare tempo all'UI di inizializzarsi completamente
+        if self.auto_load_enabled:
+            QTimer.singleShot(1000, self.auto_load_videos)
+            logger.log_user_action("Auto-load abilitato", "Caricamento video in 1 secondo")
+        else:
+            logger.log_user_action("Auto-load disabilitato", "I video vanno caricati manualmente")
 
         logger.log_user_action("Finestra principale creata", "Fase 1 avviata")
 
@@ -466,6 +483,9 @@ class MainWindow(QMainWindow):
 
             # Imposta il marker manager su ogni player
             player.set_marker_manager(self.marker_manager)
+            
+            # Imposta l'async loader su ogni player
+            player.set_async_loader(self.async_loader)
 
             # Collega il segnale di seek dell'utente per la sincronizzazione (SYNC OFF)
             player.user_seeked.connect(self.on_video_seeked)
@@ -724,9 +744,10 @@ class MainWindow(QMainWindow):
             self.status_indicator.setStyleSheet("color: #f5a623; font-weight: bold; font-size: 12px; padding-right: 15px;")
 
     def auto_load_videos(self):
-        """Carica automaticamente i video dalle cartelle Feed-X."""
-        logger.log_user_action("Auto-caricamento video", "Ricerca nelle cartelle Feed")
+        """Carica automaticamente i video dalle cartelle Feed-X usando lazy loading asincrono."""
+        logger.log_user_action("Auto-caricamento video", "Ricerca nelle cartelle Feed (async)")
 
+        loaded_count = 0
         for i, source_dir in enumerate(SOURCE_DIRS):
             if source_dir.exists():
                 # Cerca il primo file video nella directory
@@ -735,10 +756,16 @@ class MainWindow(QMainWindow):
                     video_files.extend(list(source_dir.glob(f"*{fmt}")))
 
                 if video_files:
-                    # Carica il primo video trovato
-                    self.video_players[i].load_video(video_files[0])
-                    logger.log_user_action(f"Video auto-caricato",
+                    # Carica il primo video trovato in modo asincrono
+                    self.video_players[i].load_video(video_files[0], async_load=True)
+                    loaded_count += 1
+                    logger.log_user_action(f"Video auto-caricato (async)",
                                          f"Feed-{i+1}: {video_files[0].name}")
+        
+        if loaded_count == 0:
+            logger.log_user_action("Nessun video trovato", "Cartelle Feed vuote")
+        else:
+            logger.log_user_action(f"Auto-load completato", f"{loaded_count} video in caricamento")
 
     def load_videos_dialog(self):
         """Apre un dialogo per caricare video manualmente."""
@@ -1638,6 +1665,24 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):  # type: ignore[override]
         """Gestisce la chiusura dell'applicazione."""
         logger.log_user_action("Chiusura applicazione")
+        
+        # --- Log statistiche cache prima della chiusura ---
+        if self.cache_manager:
+            stats = self.cache_manager.get_global_stats()
+            logger.log_user_action(
+                "Frame cache stats finali",
+                f"Hit rate: {stats['global_hit_rate']:.1f}%, "
+                f"Hits: {stats['total_hits']}, Misses: {stats['total_misses']}, "
+                f"Cached positions: {stats['total_cached_positions']}"
+            )
+            self.cache_manager.clear_all()
+        # -----------------------------------------------
+        
+        # --- Pulisci thread async loader ---
+        if self.async_loader:
+            logger.log_user_action("Pulizia async loader", "Chiusura thread in corso")
+            self.async_loader.cleanup_all()
+        # -----------------------------------
         
         # --- Interrompi esportazione se in corso ---
         if self.export_thread and self.export_thread.isRunning():
