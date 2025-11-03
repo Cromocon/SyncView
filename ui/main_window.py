@@ -248,6 +248,10 @@ class MainWindow(QMainWindow):
         self.current_playback_rate = 1.0 # Mantenuto a 1.0x
         self.custom_fps = 25.0  # Mantenuto per FPSDialog (se usato in futuro)
         self.focused_video_index = 0  # Indice del video attualmente selezionato/cliccato
+        
+        # Debug mode per visualizzare dimensioni widget
+        self.debug_mode = False
+        self.original_tooltips: dict[QWidget, str] = {}  # Salva i tooltip originali
 
         # Player video
         self.video_players = []
@@ -347,43 +351,61 @@ class MainWindow(QMainWindow):
         title_bar = self.create_custom_title_bar()
         inner_layout.addWidget(title_bar)
 
-        # Contenuto principale
+        # Contenuto principale - Layout orizzontale: sidebar sinistra + contenuto destro
         content_widget = QWidget()
-        content_layout = QVBoxLayout(content_widget)
+        content_layout = QHBoxLayout(content_widget)
         content_layout.setContentsMargins(10, 10, 10, 10)
         content_layout.setSpacing(10)
 
-        # Griglia video 2x2 (header rimosso, ora è nella title bar)
-        video_grid = self.create_video_grid()
-        content_layout.addLayout(video_grid, 1)
+        # === SIDEBAR SINISTRA CON CONTROLLI ===
+        sidebar_widget = QWidget()
+        sidebar_layout = QVBoxLayout(sidebar_widget)
+        sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        sidebar_layout.setSpacing(10)
+        sidebar_widget.setFixedWidth(280)  # Larghezza fissa per sidebar
 
-        # Timeline widget con markers
+        # Controlli globali in sidebar
+        controls = self.create_global_controls()
+        sidebar_layout.addWidget(controls)
+
+        # Controlli frame-by-frame in sidebar (nascosti inizialmente)
+        self.frame_controls_widget = self.create_frame_controls()
+        self.frame_controls_widget.hide()
+        sidebar_layout.addWidget(self.frame_controls_widget)
+
+        # Timeline controls in sidebar
         self.timeline_controls = TimelineControlWidget()
         self.timeline_controls.add_marker_requested.connect(self.add_marker_at_current_position)
         self.timeline_controls.prev_marker_requested.connect(self.go_to_previous_marker)
         self.timeline_controls.next_marker_requested.connect(self.go_to_next_marker)
-        # --- MODIFICA CONNESSIONE ESPORTA ---
         self.timeline_controls.export_markers_requested.connect(self.start_export_process)
-        # ------------------------------------
-        content_layout.addWidget(self.timeline_controls)
+        sidebar_layout.addWidget(self.timeline_controls)
 
+        sidebar_layout.addStretch()  # Push controls to top
+
+        # Aggiungi sidebar al layout principale
+        content_layout.addWidget(sidebar_widget)
+
+        # === CONTENUTO DESTRO (VIDEO + TIMELINE) ===
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(10)
+
+        # Griglia video 2x2 - ora occupa più spazio verticale
+        video_grid = self.create_video_grid()
+        right_layout.addLayout(video_grid, 3)  # Stretch factor aumentato
+
+        # Timeline widget con markers
         self.timeline_widget = TimelineWidget()
         self.timeline_widget.set_marker_manager(self.marker_manager)
-        self.timeline_widget.timeline_clicked.connect(self.seek_to_timestamp) # <--- Segnale per SYNC ON
+        self.timeline_widget.timeline_clicked.connect(self.seek_to_timestamp)
         self.timeline_widget.marker_clicked.connect(self.on_marker_clicked)
-        # self.timeline_widget.marker_moved.connect(self.on_marker_moved) # Rimosso (no drag)
-        # Connetti il nuovo segnale per la rimozione dalla timeline globale
         self.timeline_widget.marker_remove_requested.connect(self.on_marker_remove_requested)
-        content_layout.addWidget(self.timeline_widget)
+        right_layout.addWidget(self.timeline_widget)
 
-        # Controlli globali
-        controls = self.create_global_controls()
-        content_layout.addWidget(controls)
-
-        # Controlli frame-by-frame (nascosti inizialmente)
-        self.frame_controls_widget = self.create_frame_controls()
-        self.frame_controls_widget.hide()
-        content_layout.addWidget(self.frame_controls_widget)
+        # Aggiungi contenuto destro al layout principale
+        content_layout.addWidget(right_widget, 1)  # Stretch per occupare tutto lo spazio
 
         # Aggiungi content al container interno
         inner_layout.addWidget(content_widget)
@@ -504,6 +526,9 @@ class MainWindow(QMainWindow):
 
             # Collega il segnale di rimozione marker (doppio click) dalla timeline *individuale*
             player.timeline_widget.marker_remove_requested.connect(self.on_marker_remove_requested)
+            
+            # Collega il segnale di cambio stato caricamento per aggiornare visibilità controlli
+            player.video_load_state_changed.connect(self.on_video_load_state_changed)
 
             row = i // 2
             col = i % 2
@@ -512,147 +537,151 @@ class MainWindow(QMainWindow):
         return grid
 
     def create_global_controls(self):
-        """Crea i controlli globali."""
+        """Crea i controlli globali per la sidebar."""
         group_box = QGroupBox("Controlli Globali")
         layout = QVBoxLayout(group_box)
+        layout.setSpacing(8)
 
-        # Prima riga: Controlli riproduzione
-        playback_layout = QHBoxLayout()
+        # === CONTROLLI RIPRODUZIONE ===
+        playback_label = QLabel("Riproduzione")
+        playback_label.setStyleSheet("font-weight: bold; color: #d4a356;")
+        layout.addWidget(playback_label)
 
-        # Riorganizzazione: Inizio | Play/Pause | Fine
-        self.to_start_button = QPushButton("⏮")
-        self.to_start_button.setToolTip("Vai all'inizio (Home)")
-        self.to_start_button.clicked.connect(self.global_to_start)
-        playback_layout.addWidget(self.to_start_button)
-
-        # Pulsante Play/Pausa unificato
+        # Pulsante Play/Pausa unificato (largo)
         self.play_pause_button = QPushButton("▶ PLAY")
         self.play_pause_button.setObjectName("playButton")
         self.play_pause_button.setToolTip("Play/Pausa (Spazio)")
+        self.play_pause_button.setMinimumHeight(40)
         self.play_pause_button.clicked.connect(self.toggle_play_pause_global)
-        playback_layout.addWidget(self.play_pause_button)
+        layout.addWidget(self.play_pause_button)
+
+        # Pulsanti navigazione (compatti)
+        nav_layout = QHBoxLayout()
+        self.to_start_button = QPushButton("⏮")
+        self.to_start_button.setToolTip("Vai all'inizio (Home)")
+        self.to_start_button.clicked.connect(self.global_to_start)
+        nav_layout.addWidget(self.to_start_button)
 
         self.to_end_button = QPushButton("⏭")
         self.to_end_button.setToolTip("Vai alla fine (End)")
         self.to_end_button.clicked.connect(self.global_to_end)
-        playback_layout.addWidget(self.to_end_button)
-
-        playback_layout.addSpacing(20)
+        nav_layout.addWidget(self.to_end_button)
+        layout.addLayout(nav_layout)
 
         # Audio master
         self.master_mute_button = QPushButton("🔊 AUDIO MASTER")
         self.master_mute_button.setCheckable(True)
         self.master_mute_button.setToolTip("Audio Master (M)")
         self.master_mute_button.clicked.connect(self.toggle_master_audio)
-        playback_layout.addWidget(self.master_mute_button)
+        layout.addWidget(self.master_mute_button)
 
-        playback_layout.addStretch()
+        layout.addSpacing(10)
 
-        layout.addLayout(playback_layout)
-
-        # Seconda riga: FPS e Sincronizzazione
-        settings_layout = QHBoxLayout()
+        # === IMPOSTAZIONI ===
+        settings_label = QLabel("Impostazioni")
+        settings_label.setStyleSheet("font-weight: bold; color: #d4a356;")
+        layout.addWidget(settings_label)
 
         # FPS selector
-        fps_label = QLabel("Impostazione FPS:") # Etichetta modificata
-        settings_layout.addWidget(fps_label)
+        fps_layout = QVBoxLayout()
+        fps_label = QLabel("FPS:")
+        fps_layout.addWidget(fps_label)
 
         self.fps_combo = QComboBox()
         self.fps_combo.addItems(DEFAULT_FPS_OPTIONS)
         self.fps_combo.setCurrentText("Auto")
-        self.fps_combo.setToolTip("Seleziona FPS (non influenza la velocità)") # Tooltip aggiornato
+        self.fps_combo.setToolTip("Seleziona FPS (non influenza la velocità)")
         self.fps_combo.currentTextChanged.connect(self.on_fps_changed)
-        settings_layout.addWidget(self.fps_combo)
-
-        settings_layout.addSpacing(20)
+        fps_layout.addWidget(self.fps_combo)
+        layout.addLayout(fps_layout)
 
         # Sync checkbox
         self.sync_checkbox = QCheckBox("Sincronizzazione Attiva")
         self.sync_checkbox.setChecked(True)
         self.sync_checkbox.setToolTip("Attiva/Disattiva Sincronizzazione (Ctrl+S)")
         self.sync_checkbox.stateChanged.connect(self.toggle_sync)
-        settings_layout.addWidget(self.sync_checkbox)
+        layout.addWidget(self.sync_checkbox)
 
         # Inizializza la visibilità dei controlli in base allo stato della checkbox
-        # Chiamiamo toggle_sync manually per impostare lo stato iniziale
         QTimer.singleShot(0, lambda: self.toggle_sync(Qt.CheckState.Checked.value))
 
         # Resync button (visibile solo quando sync è off)
-        self.resync_button = QPushButton("🔄 SINCRONIZZA TUTTO")
+        self.resync_button = QPushButton("🔄 SINCRONIZZA")
         self.resync_button.clicked.connect(self.resync_all)
         self.resync_button.hide()
-        settings_layout.addWidget(self.resync_button)
-
-        settings_layout.addSpacing(20)
+        layout.addWidget(self.resync_button)
 
         # Frame mode checkbox
         self.frame_mode_checkbox = QCheckBox("Modalità Frame")
         self.frame_mode_checkbox.setToolTip("Attiva/Disattiva Modalità Frame (Ctrl+F)")
         self.frame_mode_checkbox.stateChanged.connect(self.toggle_frame_mode)
-        settings_layout.addWidget(self.frame_mode_checkbox)
+        layout.addWidget(self.frame_mode_checkbox)
 
-        settings_layout.addStretch()
+        layout.addSpacing(10)
 
         # Guida button
         help_button = QPushButton("❓ GUIDA")
         help_button.setToolTip("Mostra Guida (F1)")
         help_button.clicked.connect(self.show_help)
-        settings_layout.addWidget(help_button)
-
-        layout.addLayout(settings_layout)
+        layout.addWidget(help_button)
 
         return group_box
 
     def create_frame_controls(self):
-        """Crea i controlli per la modalità frame-by-frame."""
-        group_box = QGroupBox("🎞 CONTROLLI FRAME-BY-FRAME")
-        layout = QHBoxLayout(group_box)
+        """Crea i controlli per la modalità frame-by-frame (sidebar)."""
+        group_box = QGroupBox("🎞 FRAME-BY-FRAME")
+        layout = QVBoxLayout(group_box)
         layout.setContentsMargins(10, 15, 10, 10)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
 
         # Info label
-        info_label = QLabel("Modalità Frame Attiva - Usa i controlli per navigare frame per frame")
-        info_label.setStyleSheet("color: #d4a356; font-size: 12px;")
+        info_label = QLabel("Modalità Frame Attiva")
+        info_label.setStyleSheet("color: #d4a356; font-size: 11px; font-weight: bold;")
         layout.addWidget(info_label)
 
-        layout.addStretch()
-
-        # Pulsanti frame
-        # Indietro 10 frame
-        self.back_10_frames_btn = QPushButton("◀◀ -10 Frame")
-        self.back_10_frames_btn.setToolTip("Torna indietro di 10 frame (Shift + ←)")
-        self.back_10_frames_btn.clicked.connect(lambda: self.step_frames(-10))
-        layout.addWidget(self.back_10_frames_btn)
-
-        # Indietro 1 frame
-        self.back_1_frame_btn = QPushButton("◀ -1 Frame")
-        self.back_1_frame_btn.setToolTip("Torna indietro di 1 frame (←)")
-        self.back_1_frame_btn.clicked.connect(lambda: self.step_frames(-1))
-        layout.addWidget(self.back_1_frame_btn)
-
         # Frame step selector
+        step_layout = QHBoxLayout()
         step_label = QLabel("Step:")
-        layout.addWidget(step_label)
+        step_layout.addWidget(step_label)
 
         self.frame_step_combo = QComboBox()
         self.frame_step_combo.addItems(["40ms (25fps)", "33ms (30fps)", "100ms", "200ms"])
         self.frame_step_combo.setCurrentIndex(0)
         self.frame_step_combo.setToolTip("Dimensione dello step per frame")
-        layout.addWidget(self.frame_step_combo)
+        step_layout.addWidget(self.frame_step_combo)
+        layout.addLayout(step_layout)
 
-        # Avanti 1 frame
-        self.forward_1_frame_btn = QPushButton("+1 Frame ▶")
-        self.forward_1_frame_btn.setToolTip("Avanza di 1 frame (→)")
-        self.forward_1_frame_btn.clicked.connect(lambda: self.step_frames(1))
-        layout.addWidget(self.forward_1_frame_btn)
+        # Pulsanti grandi: -10, -1, +1, +10
+        buttons_layout = QVBoxLayout()
+        buttons_layout.setSpacing(5)
 
-        # Avanti 10 frame
-        self.forward_10_frames_btn = QPushButton("+10 Frame ▶▶")
+        # Riga 1: -10 e +10
+        row1 = QHBoxLayout()
+        self.back_10_frames_btn = QPushButton("◀◀ -10")
+        self.back_10_frames_btn.setToolTip("Torna indietro di 10 frame (Shift + ←)")
+        self.back_10_frames_btn.clicked.connect(lambda: self.step_frames(-10))
+        row1.addWidget(self.back_10_frames_btn)
+
+        self.forward_10_frames_btn = QPushButton("+10 ▶▶")
         self.forward_10_frames_btn.setToolTip("Avanza di 10 frame (Shift + →)")
         self.forward_10_frames_btn.clicked.connect(lambda: self.step_frames(10))
-        layout.addWidget(self.forward_10_frames_btn)
+        row1.addWidget(self.forward_10_frames_btn)
+        buttons_layout.addLayout(row1)
 
-        layout.addStretch()
+        # Riga 2: -1 e +1
+        row2 = QHBoxLayout()
+        self.back_1_frame_btn = QPushButton("◀ -1")
+        self.back_1_frame_btn.setToolTip("Torna indietro di 1 frame (←)")
+        self.back_1_frame_btn.clicked.connect(lambda: self.step_frames(-1))
+        row2.addWidget(self.back_1_frame_btn)
+
+        self.forward_1_frame_btn = QPushButton("+1 ▶")
+        self.forward_1_frame_btn.setToolTip("Avanza di 1 frame (→)")
+        self.forward_1_frame_btn.clicked.connect(lambda: self.step_frames(1))
+        row2.addWidget(self.forward_1_frame_btn)
+        buttons_layout.addLayout(row2)
+
+        layout.addLayout(buttons_layout)
 
         return group_box
 
@@ -895,7 +924,7 @@ class MainWindow(QMainWindow):
         self.sync_manager.set_sync_enabled(self.sync_enabled)
 
         if self.sync_enabled:
-            # Nascondi controlli individuali
+            # SYNC ON: Nascondi controlli individuali
             for player in self.video_players:
                 player.show_controls(False)
 
@@ -908,15 +937,19 @@ class MainWindow(QMainWindow):
             self.to_end_button.show()
             self.master_mute_button.show()
 
-            # Mostra timeline centrale, nascondi timeline individuali
-            self.timeline_controls.show()
+            # Mostra timeline centrale e controlli marker
+            self.timeline_controls.show_marker_controls()
             self.timeline_widget.show()
             for player in self.video_players:
                 player.hide_timeline()
         else:
-            # Mostra controlli individuali
+            # SYNC OFF: Mostra controlli solo per video caricati
             for player in self.video_players:
-                player.show_controls(True)
+                # Mostra controlli solo se il video è caricato
+                if player.is_loaded:
+                    player.show_controls(True)
+                else:
+                    player.show_controls(False)
 
             # Mostra pulsante resync
             self.resync_button.show()
@@ -927,11 +960,36 @@ class MainWindow(QMainWindow):
             self.to_end_button.hide()
             self.master_mute_button.hide()
 
-            # Nascondi timeline centrale, mostra timeline individuali
-            self.timeline_controls.hide()
+            # Nascondi timeline centrale e controlli marker (export rimane visibile)
+            self.timeline_controls.hide_marker_controls()
             self.timeline_widget.hide()
             for player in self.video_players:
+                if player.is_loaded:
+                    player.show_timeline()
+                else:
+                    player.hide_timeline()
+
+    def on_video_load_state_changed(self, video_index: int, is_loaded: bool):
+        """Gestisce il cambio di stato di caricamento di un video.
+        
+        Aggiorna la visibilità dei controlli individuali in base allo stato di sync.
+        """
+        player = self.video_players[video_index]
+        
+        # Se siamo in SYNC OFF, aggiorna la visibilità dei controlli
+        if not self.sync_enabled:
+            if is_loaded:
+                player.show_controls(True)
                 player.show_timeline()
+            else:
+                player.show_controls(False)
+                player.hide_timeline()
+        
+        logger.log_video_action(
+            video_index,
+            "Stato caricamento cambiato",
+            f"is_loaded={is_loaded}, sync_enabled={self.sync_enabled}"
+        )
 
     # --- MODIFICA: Aggiunto aggiornamento forzato delle timeline ---
     def resync_all(self):
@@ -1227,7 +1285,7 @@ class MainWindow(QMainWindow):
                                   f"Clicca su un video caricato prima di aggiungere un marker.")
 
         # Aggiorna timeline globale e timeline di ogni video player
-        self.timeline_widget.update()
+        self.timeline_widget.refresh_markers()  # Rebuild index + repaint
         for player in self.video_players:
             player.update_markers()
 
@@ -1372,7 +1430,7 @@ class MainWindow(QMainWindow):
                 if success:
                     logger.log_user_action("Marker rimosso (SYNC ON, Globale)", 
                                          f"ID: {marker.id} @ {time_str} - Rimosso da tutti i video")
-                    self.timeline_widget.update()
+                    self.timeline_widget.refresh_markers()
                     for player in self.video_players:
                         player.update_markers()
                 else:
@@ -1400,7 +1458,7 @@ class MainWindow(QMainWindow):
                                      f"ID: {marker.id} @ {time_str} - Marker globale rimosso da Video {sender_video_index + 1}, mantenuto negli altri")
                 
                 # Aggiorna tutte le timeline
-                self.timeline_widget.update()
+                self.timeline_widget.refresh_markers()
                 for player in self.video_players:
                     player.update_markers()
             else:
@@ -1415,7 +1473,7 @@ class MainWindow(QMainWindow):
                     if success:
                         logger.log_user_action(f"Marker rimosso (SYNC OFF, Video {sender_video_index + 1})", 
                                              f"ID: {marker.id} @ {time_str}")
-                        self.timeline_widget.update()
+                        self.timeline_widget.refresh_markers()
                         for player in self.video_players:
                             player.update_markers()
                     else:
@@ -1438,7 +1496,7 @@ class MainWindow(QMainWindow):
                     logger.log_user_action(f"Marker globale rimosso (SYNC OFF, Video {sender_video_index + 1})", 
                                          f"ID: {marker.id} @ {time_str} - Rimosso da Video {sender_video_index + 1}, mantenuto negli altri")
                     
-                    self.timeline_widget.update()
+                    self.timeline_widget.refresh_markers()
                     for player in self.video_players:
                         player.update_markers()
                 else:
@@ -1694,6 +1752,131 @@ class MainWindow(QMainWindow):
         seconds = int(total_seconds % 60)
         millis = int(ms % 1000)
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
+
+    def _save_and_clear_tooltips(self, widget: QWidget):
+        """Salva ricorsivamente i tooltip di tutti i widget figli e li pulisce."""
+        # Salva il tooltip di questo widget se esiste
+        current_tooltip = widget.toolTip()
+        if current_tooltip:
+            self.original_tooltips[widget] = current_tooltip
+            widget.setToolTip("")  # Pulisci il tooltip
+        
+        # Itera ricorsivamente sui figli
+        for child in widget.findChildren(QWidget):
+            child_tooltip = child.toolTip()
+            if child_tooltip:
+                self.original_tooltips[child] = child_tooltip
+                child.setToolTip("")
+    
+    def _restore_tooltips(self):
+        """Ripristina i tooltip originali salvati."""
+        for widget, tooltip in self.original_tooltips.items():
+            try:
+                widget.setToolTip(tooltip)
+            except RuntimeError:
+                # Widget potrebbe essere stato distrutto
+                pass
+    
+    def _install_event_filter_recursive(self, widget: QWidget):
+        """Installa event filter ricorsivamente su tutti i widget."""
+        widget.installEventFilter(self)
+        for child in widget.findChildren(QWidget):
+            child.installEventFilter(self)
+    
+    def _remove_event_filter_recursive(self, widget: QWidget):
+        """Rimuove event filter ricorsivamente da tutti i widget."""
+        widget.removeEventFilter(self)
+        for child in widget.findChildren(QWidget):
+            child.removeEventFilter(self)
+
+    def keyPressEvent(self, event):  # type: ignore[override]
+        """Gestisce eventi tastiera, incluso F11 per fullscreen."""
+        # Ctrl+Shift+D per toggle debug mode
+        if (event.key() == Qt.Key.Key_D and 
+            event.modifiers() == (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)):
+            self.debug_mode = not self.debug_mode
+            if self.debug_mode:
+                logger.log_user_action("Debug Mode", "ATTIVATO - Mostra dimensioni widget al passaggio del mouse")
+                # Salva i tooltip originali e puliscili
+                self.original_tooltips.clear()
+                self._save_and_clear_tooltips(self)
+                # Installa event filter ricorsivamente su tutti i widget
+                self._install_event_filter_recursive(self)
+            else:
+                logger.log_user_action("Debug Mode", "DISATTIVATO")
+                # Rimuovi event filter ricorsivamente
+                self._remove_event_filter_recursive(self)
+                # Ripristina i tooltip originali
+                self._restore_tooltips()
+                self.original_tooltips.clear()
+            event.accept()
+        
+        # F11 per fullscreen
+        elif event.key() == Qt.Key.Key_F11:
+            # Toggle fullscreen
+            if self.isFullScreen():
+                self.showNormal()
+            else:
+                self.showFullScreen()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+    
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # type: ignore[override]
+        """Filtro eventi per debug mode - mostra dimensioni widget."""
+        if self.debug_mode:
+            if event.type() == QEvent.Type.Enter:
+                # Quando il mouse entra in un widget, mostra le sue dimensioni
+                if isinstance(obj, QWidget):
+                    size = obj.size()
+                    pos = obj.pos()
+                    obj_name = obj.objectName() or obj.__class__.__name__
+                    
+                    # Crea tooltip con informazioni
+                    tooltip = (f"🔍 DEBUG INFO\n"
+                              f"Widget: {obj_name}\n"
+                              f"Dimensioni: {size.width()}px × {size.height()}px\n"
+                              f"Posizione: ({pos.x()}, {pos.y()})")
+                    
+                    # Aggiungi info su minimum/maximum size se esistono
+                    min_size = obj.minimumSize()
+                    max_size = obj.maximumSize()
+                    if min_size.width() > 0 or min_size.height() > 0:
+                        tooltip += f"\nMin: {min_size.width()}px × {min_size.height()}px"
+                    if max_size.width() < 16777215 or max_size.height() < 16777215:
+                        tooltip += f"\nMax: {max_size.width()}px × {max_size.height()}px"
+                    
+                    # Imposta il tooltip (verrà mostrato automaticamente da Qt)
+                    obj.setToolTip(tooltip)
+            
+            elif event.type() == QEvent.Type.Leave:
+                # Quando il mouse esce, pulisci il tooltip debug
+                if isinstance(obj, QWidget):
+                    obj.setToolTip("")
+        
+        return super().eventFilter(obj, event)
+
+    def changeEvent(self, event):  # type: ignore[override]
+        """Gestisce i cambiamenti di stato della finestra (es. fullscreen/maximized)."""
+        super().changeEvent(event)
+        
+        # Rileva cambio di stato fullscreen/windowed/maximized
+        if event.type() == QEvent.Type.WindowStateChange:
+            # Considera "fullscreen" sia WindowFullScreen che WindowMaximized
+            is_fullscreen = bool(
+                (self.windowState() & Qt.WindowState.WindowFullScreen) or
+                (self.windowState() & Qt.WindowState.WindowMaximized)
+            )
+            
+            # Aggiorna i controlli di tutti i video player
+            for player in self.video_players:
+                player.is_fullscreen = is_fullscreen
+                player.update_controls_for_fullscreen(is_fullscreen)
+            
+            logger.log_user_action(
+                "Window state changed",
+                f"Fullscreen/Maximized: {is_fullscreen}"
+            )
 
     def closeEvent(self, event):  # type: ignore[override]
         """Gestisce la chiusura dell'applicazione con cleanup deterministico."""

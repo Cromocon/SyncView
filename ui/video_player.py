@@ -32,6 +32,7 @@ class VideoPlayerWidget(QWidget):
     user_seeked = pyqtSignal(int, int)  # (video_index, posizione) - quando l'utente sposta la timeline manually
     video_focused = pyqtSignal(int)  # (video_index) - quando il video viene cliccato/selezionato
     add_marker_requested = pyqtSignal(int, int)  # (video_index, posizione) - richiesta aggiunta marker da questo video
+    video_load_state_changed = pyqtSignal(int, bool)  # (video_index, is_loaded) - quando lo stato di caricamento cambia
 
     def __init__(self, video_index, parent=None):
         super().__init__(parent)
@@ -39,6 +40,7 @@ class VideoPlayerWidget(QWidget):
         self.video_path = None
         self.is_loaded = False
         self.is_loading = False  # Flag per indicare caricamento in corso
+        self.is_fullscreen = False  # Flag per tracciare stato fullscreen
         self.detected_fps = 0.0  # FPS rilevato dal video
         self.marker_manager: MarkerManager | None = None  # Sarà impostato dal main window
         
@@ -94,6 +96,28 @@ class VideoPlayerWidget(QWidget):
         header_layout.addWidget(self.title_label)
 
         header_layout.addStretch()
+
+        # === SYNC OFF CONTROLS ===
+        # Marker button (visible only in SYNC OFF)
+        self.add_marker_btn = QPushButton("📍")
+        self.add_marker_btn.setObjectName("headerMarkerButton")
+        self.add_marker_btn.setToolTip("Aggiungi marker alla posizione corrente (Ctrl+M)")
+        self.add_marker_btn.setFixedSize(60, 30)  # Windowed iniziale: 60x30
+        self.add_marker_btn.setStyleSheet("padding: 0px; text-align: center;")
+        self.add_marker_btn.clicked.connect(self.add_marker_at_position)
+        self.add_marker_btn.hide()  # Hidden by default (SYNC ON)
+        header_layout.addWidget(self.add_marker_btn)
+
+        # Mute button (visible only in SYNC OFF)
+        self.mute_btn = QPushButton("🔊")
+        self.mute_btn.setObjectName("headerMuteButton")
+        self.mute_btn.setCheckable(True)
+        self.mute_btn.setToolTip("Mute/Unmute audio")
+        self.mute_btn.setFixedSize(60, 30)  # Windowed iniziale: 60x30
+        self.mute_btn.setStyleSheet("padding: 0px; text-align: center;")
+        self.mute_btn.clicked.connect(self.toggle_mute)
+        self.mute_btn.hide()  # Hidden by default (SYNC ON)
+        header_layout.addWidget(self.mute_btn)
 
         # FPS label (inizialmente nascosto)
         self.fps_label = QLabel("")
@@ -170,57 +194,95 @@ class VideoPlayerWidget(QWidget):
         layout.addWidget(self.info_label)
 
     def create_controls(self):
-        """Crea i controlli individuali del player."""
+        """Crea i controlli individuali del player - 5 pulsanti compatti."""
         controls = QWidget()
         layout = QHBoxLayout(controls)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3)  # Spacing ridotto tra i pulsanti
 
-        # Play/Pause
-        self.play_btn = QPushButton("▶ Play")
-        self.play_btn.clicked.connect(self.toggle_play_pause)
-        layout.addWidget(self.play_btn)
-
-        # Mute
-        self.mute_btn = QPushButton("🔊 Audio")
-        self.mute_btn.setCheckable(True)
-        self.mute_btn.clicked.connect(self.toggle_mute)
-        layout.addWidget(self.mute_btn)
-
-        # Spacer
-        layout.addStretch()
-
-        # Pulsante Marker (per modalità singola)
-        self.add_marker_btn = QPushButton("📍 + Marker")
-        self.add_marker_btn.setToolTip("Aggiungi marker alla posizione corrente (Ctrl+M)")
-        self.add_marker_btn.clicked.connect(self.add_marker_at_position)
-        layout.addWidget(self.add_marker_btn)
-
-        layout.addStretch()
-
-        # Frame controls
-        self.prev_frame_btn = QPushButton("◀◀ Frame Prec.")
+        # Pulsante -10 frame
+        self.prev_frame_btn = QPushButton("-10")
         self.prev_frame_btn.setToolTip("Torna indietro di 10 frame (Shift + ←)")
+        self.prev_frame_btn.setFixedSize(60, 38)  # Windowed iniziale: 60x38
         self.prev_frame_btn.clicked.connect(lambda: self.step_frames(-10))
         layout.addWidget(self.prev_frame_btn)
         
-        self.next_frame_btn = QPushButton("Frame Succ. ▶▶")
-        self.next_frame_btn.setToolTip("Avanza di 10 frame (Shift + →)")
-        self.next_frame_btn.clicked.connect(lambda: self.step_frames(10))
-        layout.addWidget(self.next_frame_btn)
-
-        # Rinomina i pulsanti -1 e +1 per coerenza con la shortcut
-        self.prev_1_frame_btn = QPushButton("◀ -1 Frame")
+        # Pulsante -1 frame
+        self.prev_1_frame_btn = QPushButton("-1")
         self.prev_1_frame_btn.setToolTip("Torna indietro di 1 frame (←)")
+        self.prev_1_frame_btn.setFixedSize(60, 38)  # Windowed iniziale: 60x38
         self.prev_1_frame_btn.clicked.connect(lambda: self.step_frames(-1))
         layout.addWidget(self.prev_1_frame_btn)
 
-        self.next_1_frame_btn = QPushButton("+1 Frame ▶")
+        # Play/Pause (centrale)
+        self.play_btn = QPushButton("▶")
+        self.play_btn.setToolTip("Play/Pausa (Spazio)")
+        self.play_btn.setFixedSize(70, 38)  # Windowed iniziale: 70x38
+        self.play_btn.clicked.connect(self.toggle_play_pause)
+        layout.addWidget(self.play_btn)
+
+        # Pulsante +1 frame
+        self.next_1_frame_btn = QPushButton("+1")
         self.next_1_frame_btn.setToolTip("Avanza di 1 frame (→)")
+        self.next_1_frame_btn.setFixedSize(60, 38)  # Windowed iniziale: 60x38
         self.next_1_frame_btn.clicked.connect(lambda: self.step_frames(1))
         layout.addWidget(self.next_1_frame_btn)
 
+        # Pulsante +10 frame
+        self.next_frame_btn = QPushButton("+10")
+        self.next_frame_btn.setToolTip("Avanza di 10 frame (Shift + →)")
+        self.next_frame_btn.setFixedSize(60, 38)  # Windowed iniziale: 60x38
+        self.next_frame_btn.clicked.connect(lambda: self.step_frames(10))
+        layout.addWidget(self.next_frame_btn)
 
         return controls
+
+    def update_controls_for_fullscreen(self, is_fullscreen: bool):
+        """Aggiorna testo e dimensioni dei controlli in base allo stato fullscreen.
+        
+        Args:
+            is_fullscreen: True se in fullscreen/maximized, False se windowed
+        """
+        if is_fullscreen:
+            # Fullscreen/Maximized: pulsanti più larghi con testo descrittivo
+            self.prev_frame_btn.setText("◀◀ -10")
+            self.prev_frame_btn.setFixedSize(80, 38)
+            
+            self.prev_1_frame_btn.setText("◀ -1")
+            self.prev_1_frame_btn.setFixedSize(80, 38)
+            
+            self.play_btn.setText("▶ Play" if self.media_player.playbackState() != QMediaPlayer.PlaybackState.PlayingState else "⏸ Pausa")
+            self.play_btn.setFixedSize(100, 38)
+            
+            self.next_1_frame_btn.setText("+1 ▶")
+            self.next_1_frame_btn.setFixedSize(80, 38)
+            
+            self.next_frame_btn.setText("+10 ▶▶")
+            self.next_frame_btn.setFixedSize(80, 38)
+            
+            # Header buttons: marker e mute - Fullscreen 80x30
+            self.add_marker_btn.setFixedSize(80, 30)
+            self.mute_btn.setFixedSize(80, 30)
+        else:
+            # Windowed: pulsanti compatti, solo numeri/icone
+            self.prev_frame_btn.setText("-10")
+            self.prev_frame_btn.setFixedSize(60, 38)
+            
+            self.prev_1_frame_btn.setText("-1")
+            self.prev_1_frame_btn.setFixedSize(60, 38)
+            
+            self.play_btn.setText("▶" if self.media_player.playbackState() != QMediaPlayer.PlaybackState.PlayingState else "⏸")
+            self.play_btn.setFixedSize(70, 38)
+            
+            self.next_1_frame_btn.setText("+1")
+            self.next_1_frame_btn.setFixedSize(60, 38)
+            
+            self.next_frame_btn.setText("+10")
+            self.next_frame_btn.setFixedSize(60, 38)
+            
+            # Header buttons: marker e mute - Windowed 60x30
+            self.add_marker_btn.setFixedSize(60, 30)
+            self.mute_btn.setFixedSize(60, 30)
 
     def set_async_loader(self, loader: AsyncVideoLoader):
         """Imposta l'async loader condiviso."""
@@ -313,6 +375,9 @@ class VideoPlayerWidget(QWidget):
         self.load_button.hide()
         self.remove_button.show()
         
+        # Emetti segnale di cambio stato
+        self.video_load_state_changed.emit(self.video_index, True)
+        
         logger.log_video_action(self.video_index, "Video caricato (sync)", f"{video_path.name} - {self.detected_fps:.2f} fps")
 
     def on_video_info_ready(self, video_index: int, info: dict):
@@ -357,6 +422,9 @@ class VideoPlayerWidget(QWidget):
         # Aggiorna visibilità bottoni
         self.load_button.hide()
         self.remove_button.show()
+        
+        # Emetti segnale di cambio stato
+        self.video_load_state_changed.emit(self.video_index, True)
         
         # Salva video path per la cache
         self.video_path = info['path']
@@ -448,7 +516,11 @@ class VideoPlayerWidget(QWidget):
         """Avvia la riproduzione."""
         if self.is_loaded:
             self.media_player.play()
-            self.play_btn.setText("⏸ Pausa")
+            # Aggiorna testo in base allo stato fullscreen
+            if self.is_fullscreen:
+                self.play_btn.setText("⏸ Pausa")
+            else:
+                self.play_btn.setText("⏸")
             logger.log_playback(self.video_index, "PLAY")
             
             # Notifica cache che siamo in playback
@@ -461,7 +533,11 @@ class VideoPlayerWidget(QWidget):
         """Mette in pausa la riproduzione."""
         if self.is_loaded:
             self.media_player.pause()
-            self.play_btn.setText("▶ Play")
+            # Aggiorna testo in base allo stato fullscreen
+            if self.is_fullscreen:
+                self.play_btn.setText("▶ Play")
+            else:
+                self.play_btn.setText("▶")
             logger.log_playback(self.video_index, "PAUSA")
             
             # Notifica cache che siamo in pausa
@@ -472,7 +548,11 @@ class VideoPlayerWidget(QWidget):
         """Ferma la riproduzione."""
         if self.is_loaded:
             self.media_player.stop()
-            self.play_btn.setText("▶ Play")
+            # Aggiorna testo in base allo stato fullscreen
+            if self.is_fullscreen:
+                self.play_btn.setText("▶ Play")
+            else:
+                self.play_btn.setText("▶")
             logger.log_playback(self.video_index, "STOP")
             
             # Notifica cache
@@ -698,8 +778,14 @@ class VideoPlayerWidget(QWidget):
         """Mostra/nasconde i controlli individuali."""
         if show:
             self.controls_widget.show()
+            # In SYNC OFF, mostra anche marker e mute buttons in header
+            self.add_marker_btn.show()
+            self.mute_btn.show()
         else:
             self.controls_widget.hide()
+            # In SYNC ON, nascondi marker e mute buttons in header
+            self.add_marker_btn.hide()
+            self.mute_btn.hide()
 
     def hide_timeline(self):
         """Nasconde la timeline del video."""
@@ -803,6 +889,9 @@ class VideoPlayerWidget(QWidget):
         # Aggiorna visibilità bottoni
         self.load_button.show()
         self.remove_button.hide()
+        
+        # Emetti segnale di cambio stato
+        self.video_load_state_changed.emit(self.video_index, False)
         
         logger.log_video_action(
             self.video_index,

@@ -3,7 +3,7 @@ Widget timeline per visualizzazione e gestione markers video.
 Versione 3.0 - Ottimizzazioni: spatial indexing, viewport culling, debouncing
 """
 
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QToolTip
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QToolTip, QGroupBox
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QRect, QRectF, QPointF, QTimer
 from PyQt6.QtGui import (QPainter, QColor, QPen, QBrush, QFont, QMouseEvent,
                          QPaintEvent, QPolygonF, QFontMetrics, QCursor)
@@ -86,6 +86,11 @@ class TimelineWidget(QWidget):
         if self.marker_manager:
             self.marker_index.update(self.marker_manager.markers)
             self._invalidate_cache()
+    
+    def refresh_markers(self) -> None:
+        """Forza l'aggiornamento dei markers (chiamato quando markers cambiano)."""
+        self._rebuild_index()
+        self._schedule_update('normal')
     
     def _invalidate_cache(self) -> None:
         """Invalida la cache dei markers visibili."""
@@ -556,19 +561,21 @@ class TimelineControlWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        layout = QHBoxLayout()
-        layout.setContentsMargins(0, 5, 0, 5)
-        layout.setSpacing(5)
+        # Vertical layout for sidebar
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(10)
 
-        # Label
-        label = QLabel("📍 TIMELINE:")
-        label.setStyleSheet("color: #0047AB; font-weight: bold;")
-        layout.addWidget(label)
+        # === MARKER SECTION (GroupBox) ===
+        self.marker_group = QGroupBox("Markers")
+        marker_layout = QVBoxLayout(self.marker_group)
+        marker_layout.setSpacing(8)
 
-        # Pulsante aggiungi marker
-        self.btn_add = QPushButton("+ Marker")
+        # Row 1: Add marker button (full width)
+        self.btn_add = QPushButton("+ Aggiungi Marker")
         self.btn_add.setToolTip("Aggiungi marker alla posizione corrente (Ctrl+M)")
         self.btn_add.clicked.connect(self.add_marker_requested.emit)
+        self.btn_add.setMinimumHeight(35)
         self.btn_add.setStyleSheet("""
             QPushButton {
                 background-color: #5F6F52;
@@ -582,40 +589,48 @@ class TimelineControlWidget(QWidget):
                 background-color: #798969;
             }
         """)
-        layout.addWidget(self.btn_add)
+        marker_layout.addWidget(self.btn_add)
 
-        # Pulsante marker precedente
+        # Row 2: Navigation buttons (side by side)
+        nav_layout = QHBoxLayout()
+        nav_layout.setSpacing(5)
+        
         self.btn_prev = QPushButton("◀ Prec")
         self.btn_prev.setToolTip("Vai al marker precedente (P)")
         self.btn_prev.clicked.connect(self.prev_marker_requested.emit)
-        layout.addWidget(self.btn_prev)
+        nav_layout.addWidget(self.btn_prev)
 
-        # Pulsante marker successivo
         self.btn_next = QPushButton("Succ ▶")
         self.btn_next.setToolTip("Vai al marker successivo (N)")
         self.btn_next.clicked.connect(self.next_marker_requested.emit)
-        layout.addWidget(self.btn_next)
+        nav_layout.addWidget(self.btn_next)
+        
+        marker_layout.addLayout(nav_layout)
+        
+        main_layout.addWidget(self.marker_group)
 
-        layout.addStretch()
+        # Spacer per spingere export in basso
+        main_layout.addStretch()
 
-        # --- NUOVI CONTROLLI EXPORT ---
-        # Label "Export:"
-        export_label = QLabel("📤 Export:")
-        export_label.setStyleSheet("color: #C19A6B; font-weight: bold;")
-        layout.addWidget(export_label)
+        # === EXPORT SECTION (GroupBox) ===
+        export_group = QGroupBox("Export")
+        export_layout = QVBoxLayout(export_group)
+        export_layout.setSpacing(8)
 
-        # Spinbox secondi PRIMA
+        # Row 1: Secondi PRIMA del marker
+        from PyQt6.QtWidgets import QSpinBox
+        
+        before_layout = QHBoxLayout()
+        before_layout.setSpacing(5)
+        
         label_before = QLabel("Prima:")
         label_before.setStyleSheet("color: #cccccc;")
-        layout.addWidget(label_before)
+        before_layout.addWidget(label_before)
 
-        from PyQt6.QtWidgets import QSpinBox
         self.spin_before = QSpinBox()
         self.spin_before.setRange(0, 300)  # Max 5 minuti
         self.spin_before.setValue(5)       # Default 5 secondi
         self.spin_before.setSuffix("s")
-        self.spin_before.setMinimumWidth(65)
-        self.spin_before.setMaximumWidth(65)
         self.spin_before.setToolTip("Secondi prima del marker")
         self.spin_before.setStyleSheet("""
             QSpinBox {
@@ -626,19 +641,22 @@ class TimelineControlWidget(QWidget):
                 padding: 3px;
             }
         """)
-        layout.addWidget(self.spin_before)
+        before_layout.addWidget(self.spin_before)
+        
+        export_layout.addLayout(before_layout)
 
-        # Spinbox secondi DOPO
+        # Row 2: Secondi DOPO il marker
+        after_layout = QHBoxLayout()
+        after_layout.setSpacing(5)
+        
         label_after = QLabel("Dopo:")
         label_after.setStyleSheet("color: #cccccc;")
-        layout.addWidget(label_after)
+        after_layout.addWidget(label_after)
 
         self.spin_after = QSpinBox()
         self.spin_after.setRange(0, 300)
         self.spin_after.setValue(5)        # Default 5 secondi
         self.spin_after.setSuffix("s")
-        self.spin_after.setMinimumWidth(65)
-        self.spin_after.setMaximumWidth(65)
         self.spin_after.setToolTip("Secondi dopo il marker")
         self.spin_after.setStyleSheet("""
             QSpinBox {
@@ -649,12 +667,15 @@ class TimelineControlWidget(QWidget):
                 padding: 3px;
             }
         """)
-        layout.addWidget(self.spin_after)
+        after_layout.addWidget(self.spin_after)
+        
+        export_layout.addLayout(after_layout)
 
-        # Pulsante esportazione video da markers
-        self.btn_export = QPushButton("📤 Esporta")
+        # Row 3: Export button (full width)
+        self.btn_export = QPushButton("📤 Esporta Video")
         self.btn_export.setToolTip("Esporta video da markers (Ctrl+E)")
         self.btn_export.clicked.connect(self.export_markers_requested.emit)
+        self.btn_export.setMinimumHeight(35)
         self.btn_export.setStyleSheet("""
             QPushButton {
                 background-color: #0047AB;
@@ -668,9 +689,11 @@ class TimelineControlWidget(QWidget):
                 background-color: #1A5EC4;
             }
         """)
-        layout.addWidget(self.btn_export)
+        export_layout.addWidget(self.btn_export)
+        
+        main_layout.addWidget(export_group)
 
-        # Stile generale
+        # Stile generale per pulsanti di default
         self.setStyleSheet("""
             QPushButton {
                 background-color: #252527;
@@ -685,9 +708,15 @@ class TimelineControlWidget(QWidget):
             }
         """)
 
-        self.setLayout(layout)
-
     def get_export_times(self):
         """Ritorna i secondi prima e dopo per l'export."""
         return self.spin_before.value(), self.spin_after.value()
+    
+    def show_marker_controls(self):
+        """Mostra i controlli marker (SYNC ON)."""
+        self.marker_group.show()
+    
+    def hide_marker_controls(self):
+        """Nasconde i controlli marker (SYNC OFF)."""
+        self.marker_group.hide()
 
