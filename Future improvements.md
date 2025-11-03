@@ -39,9 +39,9 @@ Implementation notes
 - Example pattern: enqueue file probe + preloading tasks on a worker pool and emit signals back to the UI.
 
 1.2 Timeline & markers
-- Only repaint the visible area of the timeline; avoid full repaint on scroll or small updates.
-- Use spatial indexing (sorted list, bisect, or interval tree) to query markers in O(log n) for visible range.
-- Debounce rapid updates during drag operations (e.g. 16-50ms throttle).
+- [x] Only repaint the visible area of the timeline; avoid full repaint on scroll or small updates.
+- [x] Use spatial indexing (sorted list, bisect, or interval tree) to query markers in O(log n) for visible range.
+- [x] Debounce rapid updates during drag operations (e.g. 16-50ms throttle).
 
 1.3 Export system
 - Enable parallel exports (bounded thread- or process-pool) to use multiple CPU cores.
@@ -50,8 +50,8 @@ Implementation notes
 - Implement an export queue with resume capability and per-clip retries on transient failures.
 
 1.4 Memory & resource management
-- Explicitly close moviepy/ffmpeg handles and release resources after export.
-- Use small scoped objects and del + gc.collect() for deterministic clean-up when necessary.
+- [x] Explicitly close moviepy/ffmpeg handles and release resources after export.
+- [x] Use small scoped objects and del + gc.collect() for deterministic clean-up when necessary.
 
 Example cleanup snippet
 ```python
@@ -83,8 +83,8 @@ def safe_close(clip):
 - Add keyboard shortcuts and a help overview.
 
 2.3 UX polish
-- Skeleton or placeholder states for heavy widgets while loading.
-- Clearer modal state handling for long-running operations (disable only necessary controls).
+- [x] Skeleton or placeholder states for heavy widgets while loading.
+- [x] Clearer modal state handling for long-running operations (disable only necessary controls).
 
 ---
 
