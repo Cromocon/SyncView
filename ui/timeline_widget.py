@@ -33,6 +33,9 @@ class TimelineWidget(QWidget):
         # Stato interazione
         self.hover_marker: Optional[Marker] = None
         
+        # Debug mode
+        self.debug_mode = False
+        
         # --- OTTIMIZZAZIONI ---
         # Spatial indexing per query O(log n)
         self.marker_index = MarkerSpatialIndex()
@@ -55,6 +58,10 @@ class TimelineWidget(QWidget):
         self.ruler_height = 24
         self.marker_height = 10  # Altezza del triangolo
         self.marker_width = 12   # Larghezza del triangolo
+        
+        # Margini laterali aumentati per mostrare timestamp inizio/fine
+        self.left_margin = 80   # Margine sinistro (per "00:00:00")
+        self.right_margin = 80  # Margine destro (per durata totale)
 
         # Setup UI
         self.setMinimumHeight(80) # Aumentato per accogliere i timestamp sotto
@@ -67,6 +74,10 @@ class TimelineWidget(QWidget):
         self.marker_manager = manager
         self._rebuild_index()
         self._schedule_update('normal')
+
+    def set_debug_mode(self, enabled: bool):
+        """Imposta la modalità debug per tooltip dettagliati."""
+        self.debug_mode = enabled
 
     def set_duration(self, duration_ms: int):
         """Imposta la durata totale della timeline."""
@@ -141,8 +152,9 @@ class TimelineWidget(QWidget):
         width = self.width()
         height = self.height()
 
-        # 1. Disegna la base del righello
-        ruler_rect = QRect(10, self.ruler_y_pos, width - 20, self.ruler_height)
+        # 1. Disegna la base del righello - MARGINI AUMENTATI per vedere i timestamp laterali
+        ruler_rect = QRect(self.left_margin, self.ruler_y_pos, 
+                          width - self.left_margin - self.right_margin, self.ruler_height)
         painter.fillRect(ruler_rect, QColor("#808080")) # Grigio Lupo
 
         if self.duration_ms == 0:
@@ -154,19 +166,39 @@ class TimelineWidget(QWidget):
 
         # 2. Disegna la barra di progresso
         current_x = self._timestamp_to_x(self.current_position_ms, width)
-        progress_width = max(0, current_x - 10)
-        progress_rect = QRect(10, self.ruler_y_pos, progress_width, self.ruler_height)
+        progress_width = max(0, current_x - self.left_margin)
+        progress_rect = QRect(self.left_margin, self.ruler_y_pos, progress_width, self.ruler_height)
         painter.fillRect(progress_rect, QColor("#5F6F52")) # Verde Ranger
 
-        # 3. Disegna tacche e timestamp
+        # 3. Disegna le etichette timestamp inizio/fine ai lati
+        self._draw_edge_labels(painter, width)
+
+        # 4. Disegna tacche e timestamp
         self._draw_ticks_and_labels(painter, width, ruler_rect)
 
-        # 4. Disegna markers e i loro timestamp sotto
+        # 5. Disegna markers e i loro timestamp sotto
         if self.marker_manager:
             self._draw_markers_and_timestamps(painter, width)
 
-        # 5. Disegna il Playhead (Indicatore di posizione)
+        # 6. Disegna il Playhead (Indicatore di posizione)
         self._draw_playhead(painter, current_x, height)
+
+    def _draw_edge_labels(self, painter: QPainter, width: int):
+        """Disegna le etichette timestamp all'inizio e alla fine della timeline."""
+        font = QFont('Arial', 9, QFont.Weight.Bold)
+        painter.setFont(font)
+        painter.setPen(QColor("#C19A6B"))  # Colore giallo/oro
+        
+        # Etichetta START (00.000) a sinistra
+        start_text = "00.000"
+        start_rect = QRect(5, self.ruler_y_pos, self.left_margin - 10, self.ruler_height)
+        painter.drawText(start_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, start_text)
+        
+        # Etichetta END (durata totale) a destra - formato compatto senza zeri inutili
+        end_text = self._format_time_compact(self.duration_ms)
+        end_rect = QRect(width - self.right_margin + 10, self.ruler_y_pos, 
+                        self.right_margin - 15, self.ruler_height)
+        painter.drawText(end_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, end_text)
 
     def _draw_ticks_and_labels(self, painter: QPainter, width: int, ruler_rect: QRect):
         """Disegna le tacche e i timestamp sul righello."""
@@ -197,6 +229,10 @@ class TimelineWidget(QWidget):
 
 
         for t in range(0, self.duration_ms + 1, interval_ms):
+            # Salta l'etichetta a t=0 perché abbiamo già l'etichetta laterale
+            if t == 0:
+                continue
+                
             x = self._timestamp_to_x(t, width)
 
             # Tacca grande
@@ -435,11 +471,91 @@ class TimelineWidget(QWidget):
             if marker:
                 # Il tempo è già visualizzato sotto, quindi il tooltip mostra solo descrizione/categoria
                 time_str_long = self._format_time_long(marker.timestamp)
-                tooltip_text = f"<b>MARKER</b><br><span style='font-size:11pt; color:#C19A6B;'>{time_str_long}</span>"
-                if marker.description:
-                    tooltip_text += f"<br><i>{marker.description}</i>"
-                if marker.category != 'default':
-                    tooltip_text += f"<br>📂 {marker.category.title()}"
+                
+                if self.debug_mode:
+                    # Modalità DEBUG: informazioni dettagliate sulla generazione del marker
+                    import inspect
+                    import sys
+                    
+                    tooltip_text = f"<b>🔍 DEBUG: MARKER</b><br>"
+                    tooltip_text += f"<span style='color:#C19A6B;'>{time_str_long}</span><br>"
+                    tooltip_text += "<hr>"
+                    
+                    # Informazioni sul marker object
+                    tooltip_text += f"<b>📦 OGGETTO MARKER</b><br>"
+                    tooltip_text += f"Classe: <code>{marker.__class__.__module__}.{marker.__class__.__qualname__}</code><br>"
+                    tooltip_text += f"ID Python: <code>{id(marker)}</code><br>"
+                    tooltip_text += f"Memoria: {sys.getsizeof(marker)} bytes<br>"
+                    
+                    # Informazioni sulla creazione del marker
+                    tooltip_text += "<br><b>🏗️ DEFINIZIONE CLASSE</b><br>"
+                    try:
+                        source_file = inspect.getfile(marker.__class__)
+                        source_lines = inspect.getsourcelines(marker.__class__)
+                        line_number = source_lines[1] if source_lines else "?"
+                        import os
+                        file_name = os.path.basename(source_file)
+                        tooltip_text += f"File: <code>{file_name}</code><br>"
+                        tooltip_text += f"Linea classe: {line_number}<br>"
+                        
+                        # Trova il metodo __init__
+                        try:
+                            init_lines = inspect.getsourcelines(marker.__class__.__init__)
+                            init_line = init_lines[1]
+                            tooltip_text += f"Metodo __init__: linea {init_line}<br>"
+                        except:
+                            pass
+                    except (TypeError, OSError):
+                        tooltip_text += "Built-in class (no source file)<br>"
+                    
+                    # Informazioni sui dati del marker
+                    tooltip_text += "<br><b>📊 DATI MARKER</b><br>"
+                    tooltip_text += f"Timestamp: {marker.timestamp} ms<br>"
+                    tooltip_text += f"Categoria: <code>{marker.category}</code><br>"
+                    if marker.description:
+                        desc_preview = marker.description[:50] + "..." if len(marker.description) > 50 else marker.description
+                        tooltip_text += f"Descrizione: <i>{desc_preview}</i><br>"
+                    
+                    # Informazioni sul MarkerManager
+                    if self.marker_manager:
+                        tooltip_text += "<br><b>🗂️ MARKER MANAGER</b><br>"
+                        tooltip_text += f"Totale markers: {len(self.marker_manager.markers)}<br>"
+                        # Trova la posizione di questo marker
+                        try:
+                            marker_index = self.marker_manager.markers.index(marker)
+                            tooltip_text += f"Posizione: {marker_index + 1}/{len(self.marker_manager.markers)}<br>"
+                        except ValueError:
+                            tooltip_text += "Posizione: Non trovato<br>"
+                    
+                    # Informazioni sulla visualizzazione
+                    tooltip_text += "<br><b>🎨 RENDERING</b><br>"
+                    marker_x = self._timestamp_to_x(marker.timestamp, self.width())
+                    tooltip_text += f"Posizione X: {marker_x}px<br>"
+                    tooltip_text += f"Timeline width: {self.width()}px<br>"
+                    tooltip_text += f"Marker width: {self.marker_width}px<br>"
+                    tooltip_text += f"Marker height: {self.marker_height}px<br>"
+                    
+                    # Informazioni sull'indice spaziale
+                    tooltip_text += "<br><b>🗺️ SPATIAL INDEX</b><br>"
+                    tooltip_text += f"Index size: {self.marker_index.count()} markers<br>"
+                    visible_markers = self._get_visible_markers()
+                    tooltip_text += f"Markers visibili: {len(visible_markers)}<br>"
+                    
+                    # Riferimento al codice che crea i markers (nel progetto)
+                    tooltip_text += "<br><b>📝 CREAZIONE NEL PROGETTO</b><br>"
+                    tooltip_text += "I marker vengono creati in:<br>"
+                    tooltip_text += "• <code>MarkerManager.add_marker()</code><br>"
+                    tooltip_text += "  └─ File: <code>core/markers.py</code><br>"
+                    tooltip_text += "• Chiamato da: <code>MainWindow.add_marker()</code><br>"
+                    tooltip_text += "  └─ File: <code>ui/main_window.py</code><br>"
+                    
+                else:
+                    # Modalità normale
+                    tooltip_text = f"<b>MARKER</b><br><span style='font-size:11pt; color:#C19A6B;'>{time_str_long}</span>"
+                    if marker.description:
+                        tooltip_text += f"<br><i>{marker.description}</i>"
+                    if marker.category != 'default':
+                        tooltip_text += f"<br>📂 {marker.category.title()}"
                 
                 # Usa QCursor.pos() invece di event.globalPosition() che non abbiamo più
                 from PyQt6.QtGui import QCursor
@@ -465,15 +581,18 @@ class TimelineWidget(QWidget):
     def _timestamp_to_x(self, timestamp_ms: int, width: int) -> int:
         """Converte timestamp in coordinata X."""
         if self.duration_ms == 0:
-            return 10
+            return self.left_margin
         ratio = timestamp_ms / self.duration_ms
-        # Mappa sul range [10, width - 10]
-        return int(10 + (width - 20) * ratio)
+        # Mappa sul range [left_margin, width - right_margin]
+        timeline_width = width - self.left_margin - self.right_margin
+        return int(self.left_margin + timeline_width * ratio)
 
     def _x_to_timestamp(self, x: int, width: int) -> int:
         """Converte coordinata X in timestamp."""
-        if width - 20 == 0: return 0
-        ratio = (x - 10) / (width - 20)
+        timeline_width = width - self.left_margin - self.right_margin
+        if timeline_width == 0: 
+            return 0
+        ratio = (x - self.left_margin) / timeline_width
         ratio = max(0.0, min(1.0, ratio))  # Clamp 0-1
         return int(self.duration_ms * ratio)
 
@@ -508,6 +627,30 @@ class TimelineWidget(QWidget):
         millis = int(ms % 1000)
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
 
+    def _format_time_compact(self, ms: int) -> str:
+        """Formatta millisecondi in formato compatto senza zeri inutili.
+        
+        Esempi:
+        - 5000ms -> "05.000"
+        - 65000ms -> "01:05.000"
+        - 3665000ms -> "01:01:05.000"
+        """
+        total_seconds = ms / 1000
+        hours = int(total_seconds // 3600)
+        minutes = int((total_seconds % 3600) // 60)
+        seconds = int(total_seconds % 60)
+        millis = int(ms % 1000)
+
+        if hours > 0:
+            # Formato con ore: HH:MM:SS.mmm
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
+        elif minutes > 0:
+            # Formato con minuti: MM:SS.mmm
+            return f"{minutes:02d}:{seconds:02d}.{millis:03d}"
+        else:
+            # Formato solo secondi: SS.mmm
+            return f"{seconds:02d}.{millis:03d}"
+
     def _get_marker_at_position(self, pos: QPoint) -> Optional[Marker]:
         """Trova marker (triangolo) sotto il cursore.
         
@@ -530,7 +673,8 @@ class TimelineWidget(QWidget):
         
         # Usa spatial index per trovare marker più vicino
         # Distanza massima: metà larghezza marker + buffer
-        max_distance_ms = int((self.marker_width / 2 + 3) * self.duration_ms / (width - 20))
+        timeline_width = width - self.left_margin - self.right_margin
+        max_distance_ms = int((self.marker_width / 2 + 3) * self.duration_ms / timeline_width)
         
         nearest_marker = self.marker_index.find_nearest(timestamp, max_distance_ms)
         

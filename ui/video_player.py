@@ -18,7 +18,6 @@ from ui.timeline_widget import TimelineWidget
 from core.markers import MarkerManager
 from core.video_loader import AsyncVideoLoader
 from core.frame_cache import FrameCache
-from core.resource_manager import ResourceHandle
 from ui.loading_states import VideoLoadingSkeleton, ModalStateManager
 from typing import TYPE_CHECKING, Optional
 
@@ -50,9 +49,6 @@ class VideoPlayerWidget(QWidget):
         # Frame cache per performance ottimizzate
         self.frame_cache: FrameCache | None = None
         self.cache_enabled = True
-        
-        # Resource handle per QMediaPlayer cleanup
-        self.media_resource: Optional[ResourceHandle] = None
         
         # Flag per evitare log ripetitivi
         self._media_ready_logged = False
@@ -489,14 +485,17 @@ class VideoPlayerWidget(QWidget):
             self.fps_label.hide()
 
     def load_preview_frame(self):
-        """Carica il terzo frame del video come preview."""
-        if self.is_loaded and self.media_player.duration() > 0:
-            # Calcola la posizione del terzo frame (~120ms a 25fps)
-            preview_position = min(120, self.media_player.duration() - 100)  # Assicura che non superi la durata
+        """Carica il primo frame del video come preview."""
+        if self.media_player.duration() > 0:
+            # Vai al primo frame disponibile (10ms per sicurezza)
+            preview_position = 10
             self.media_player.setPosition(preview_position)
             # Mette in pausa per mostrare il frame
             self.media_player.pause()
             logger.log_video_action(self.video_index, "Preview frame caricato", f"Posizione: {preview_position}ms")
+        else:
+            # Se la durata non è ancora disponibile, riprova tra poco
+            QTimer.singleShot(100, self.load_preview_frame)
 
     def show_error(self, message):
         """Mostra un messaggio di errore."""
@@ -741,6 +740,9 @@ class VideoPlayerWidget(QWidget):
             if not self._media_ready_logged:
                 logger.log_video_action(self.video_index, "Media caricato", "Pronto per la riproduzione")
                 self._media_ready_logged = True
+                
+                # Carica il frame di preview solo al primo caricamento
+                QTimer.singleShot(200, self.load_preview_frame)
             
             # Inizializza la cache se non esiste e abbiamo un video path
             if not self.frame_cache and self.video_path and self.cache_enabled:
@@ -751,10 +753,6 @@ class VideoPlayerWidget(QWidget):
                     "Frame cache creata automaticamente",
                     f"Size: 50 frame positions"
                 )
-            
-            # Carica il frame di preview solo al primo caricamento
-            if not self.is_loaded:
-                QTimer.singleShot(200, self.load_preview_frame)
         elif status == QMediaPlayer.MediaStatus.InvalidMedia:
             self.show_error("Media non valido o formato non supportato")
             logger.log_error(f"Media non valido Feed-{self.video_index + 1}", "Formato non supportato")
@@ -857,14 +855,9 @@ class VideoPlayerWidget(QWidget):
             self.frame_cache.clear()
             self.frame_cache = None
 
-        # Cleanup media player resource
-        if self.media_resource:
-            self.media_resource.close()
-            self.media_resource = None
-        else:
-            # Fallback: cleanup manuale
-            self.media_player.stop()
-            self.media_player.setSource(QUrl())
+        # Cleanup media player
+        self.media_player.stop()
+        self.media_player.setSource(QUrl())
         
         # Garbage collection per liberare memoria
         gc.collect()

@@ -1,6 +1,7 @@
 """
 Sistema di gestione markers per timeline video.
 Permette di annotare punti specifici nei video con etichette, colori e descrizioni.
+Versione 3.1 - Con supporto SQLite per storage efficiente.
 """
 
 from typing import List, Dict, Optional
@@ -65,17 +66,31 @@ class MarkerManager:
         'review',      # Da rivedere
     ]
     
-    def __init__(self, project_path: Optional[Path] = None):
+    def __init__(self, project_path: Optional[Path] = None, use_database: bool = True):
         """
         Inizializza il manager dei markers.
         
         Args:
             project_path: Path del file di progetto (opzionale)
+            use_database: Se True usa SQLite, altrimenti JSON (default: True)
         """
         self.markers: List[Marker] = []
         self.project_path = project_path
         self.auto_save_enabled = True
         self._modified = False
+        self.use_database = use_database
+        self._db = None
+        self._modified_markers = set()  # Track di marker modificati per incremental save
+        
+        # Inizializza database se abilitato
+        if self.use_database and project_path:
+            from core.marker_db import MarkerDatabase
+            db_path = project_path.parent / f"{project_path.stem}.markers.db"
+            self._db = MarkerDatabase(db_path)
+            
+            # Migra da JSON se esiste
+            if project_path.exists() and not db_path.exists():
+                self._migrate_from_json()
     
     def add_marker(self, timestamp: int, color: str = '#3498db', 
                    description: str = "", category: str = "default", 
@@ -103,9 +118,10 @@ class MarkerManager:
         self.markers.append(marker)
         self.markers.sort(key=lambda m: m.timestamp)  # Mantieni ordinato
         self._modified = True
+        self._modified_markers.add(marker.id)  # Track marker modificato
         
         if self.auto_save_enabled and self.project_path:
-            self.save()
+            self.save_incremental()
         
         return marker
     
@@ -124,8 +140,12 @@ class MarkerManager:
                 self.markers.pop(i)
                 self._modified = True
                 
+                # Rimuovi dal database se abilitato
+                if self.use_database and self._db:
+                    self._db.delete_marker(marker_id)
+                
                 if self.auto_save_enabled and self.project_path:
-                    self.save()
+                    self.save_incremental()
                 
                 return True
         return False
@@ -152,9 +172,10 @@ class MarkerManager:
                     self.markers.sort(key=lambda m: m.timestamp)
                 
                 self._modified = True
+                self._modified_markers.add(marker_id)  # Track marker modificato
                 
                 if self.auto_save_enabled and self.project_path:
-                    self.save()
+                    self.save_incremental()
                 
                 return marker
         return None
@@ -253,7 +274,8 @@ class MarkerManager:
     
     def save(self, path: Optional[Path] = None) -> bool:
         """
-        Salva markers su file JSON.
+        Salva tutti i markers.
+        Usa SQLite se abilitato, altrimenti JSON.
         
         Args:
             path: Path del file (usa project_path se None)
@@ -267,17 +289,27 @@ class MarkerManager:
             return False
         
         try:
-            data = {
-                'version': '3.0',
-                'created_at': datetime.now().isoformat(),
-                'markers': [m.to_dict() for m in self.markers]
-            }
-            
-            with open(save_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            
-            self._modified = False
-            return True
+            if self.use_database and self._db:
+                # Salva nel database SQLite
+                success = self._db.save_markers_batch(self.markers)
+                if success:
+                    self._modified = False
+                    self._modified_markers.clear()
+                return success
+            else:
+                # Salva in JSON (legacy)
+                data = {
+                    'version': '3.0',
+                    'created_at': datetime.now().isoformat(),
+                    'markers': [m.to_dict() for m in self.markers]
+                }
+                
+                with open(save_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+                
+                self._modified = False
+                self._modified_markers.clear()
+                return True
             
         except Exception as e:
             print(f"Errore salvataggio markers: {e}")
@@ -285,7 +317,8 @@ class MarkerManager:
     
     def load(self, path: Optional[Path] = None) -> bool:
         """
-        Carica markers da file JSON.
+        Carica markers.
+        Usa SQLite se abilitato, altrimenti JSON.
         
         Args:
             path: Path del file (usa project_path se None)
@@ -295,22 +328,34 @@ class MarkerManager:
         """
         load_path = path or self.project_path
         
-        if not load_path or not Path(load_path).exists():
+        if not load_path:
             return False
         
         try:
-            with open(load_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            self.markers.clear()
-            
-            for marker_data in data.get('markers', []):
-                marker = Marker.from_dict(marker_data)
-                self.markers.append(marker)
-            
-            self.markers.sort(key=lambda m: m.timestamp)
-            self._modified = False
-            return True
+            if self.use_database and self._db:
+                # Carica dal database SQLite
+                self.markers = self._db.load_all_markers()
+                self._modified = False
+                self._modified_markers.clear()
+                return True
+            else:
+                # Carica da JSON (legacy o quando database disabilitato)
+                if not Path(load_path).exists():
+                    return False
+                
+                with open(load_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                self.markers.clear()
+                
+                for marker_data in data.get('markers', []):
+                    marker = Marker.from_dict(marker_data)
+                    self.markers.append(marker)
+                
+                self.markers.sort(key=lambda m: m.timestamp)
+                self._modified = False
+                self._modified_markers.clear()
+                return True
             
         except Exception as e:
             print(f"Errore caricamento markers: {e}")
@@ -393,3 +438,66 @@ class MarkerManager:
     def count(self) -> int:
         """Numero totale di markers."""
         return len(self.markers)
+    
+    def save_incremental(self) -> bool:
+        """
+        Salva solo i marker modificati (incremental save).
+        Più efficiente del salvataggio completo.
+        
+        Returns:
+            True se salvato con successo
+        """
+        if not self._modified_markers:
+            return True  # Niente da salvare
+        
+        if self.use_database and self._db:
+            # Salva solo marker modificati nel database
+            modified_markers = [
+                m for m in self.markers if m.id in self._modified_markers
+            ]
+            
+            if modified_markers:
+                success = self._db.save_markers_batch(modified_markers)
+                if success:
+                    self._modified_markers.clear()
+                    self._modified = False
+                return success
+        else:
+            # Fallback: salva tutto in JSON
+            return self.save()
+        
+        return False
+    
+    def _migrate_from_json(self) -> None:
+        """Migra marker da JSON legacy a SQLite."""
+        if not self.project_path or not self.project_path.exists():
+            return
+        
+        try:
+            # Carica da JSON
+            with open(self.project_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            markers = []
+            for marker_data in data.get('markers', []):
+                if 'label' in marker_data:
+                    del marker_data['label']
+                marker = Marker.from_dict(marker_data)
+                markers.append(marker)
+            
+            # Salva nel database
+            if self._db and markers:
+                self._db.save_markers_batch(markers)
+                
+                # Crea backup del JSON
+                backup_path = self.project_path.with_suffix('.json.backup')
+                self.project_path.rename(backup_path)
+                
+                from core.logger import logger
+                logger.log_user_action(
+                    "Migrazione marker JSON→SQLite",
+                    f"{len(markers)} marker migrati, backup: {backup_path.name}"
+                )
+        except Exception as e:
+            from core.logger import logger
+            logger.log_error("Errore migrazione marker JSON", e)

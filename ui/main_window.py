@@ -19,10 +19,10 @@ import shutil
 from ui.video_player import VideoPlayerWidget
 from ui.fps_dialog import FPSDialog
 from ui.timeline_widget import TimelineWidget, TimelineControlWidget
-# --- NUOVI IMPORT PER EXPORT ---
-from ui.export_dialog import ExportDialog
-from core.exporter import VideoExporter
-# -------------------------------
+# --- IMPORT PER EXPORT SEMPLIFICATO ---
+from ui.simple_export_dialog import SimpleExportDialog
+from core.advanced_exporter import AdvancedVideoExporter
+# ---------------------------------------
 from ui.styles import get_main_stylesheet
 from config.settings import SOURCE_DIRS, DEFAULT_FPS_OPTIONS, SUPPORTED_VIDEO_FORMATS, EXPORT_DIR, THEME_COLORS
 from core.logger import logger
@@ -30,7 +30,6 @@ from core.sync_manager import SyncManager
 from core.markers import MarkerManager, Marker
 from core.video_loader import AsyncVideoLoader
 from core.frame_cache import FrameCacheManager
-from core.resource_manager import cleanup_global_resources
 from ui.loading_states import ModalStateManager
 import gc
 
@@ -295,7 +294,7 @@ class MainWindow(QMainWindow):
         
         # --- Gestione Thread Esportazione ---
         self.export_thread: Optional[QThread] = None
-        self.exporter: Optional[VideoExporter] = None
+        self.exporter: Optional[AdvancedVideoExporter] = None
         # ------------------------------------
 
         # Setup UI
@@ -1140,20 +1139,28 @@ class MainWindow(QMainWindow):
         )
 
     def show_help(self):
-        """Mostra il dialogo della guida - Rimosso per debloat."""
+        """Mostra il dialogo della guida."""
         logger.log_user_action("Guida richiesta")
         QMessageBox.information(
             self,
-            "SyncView - Guida",
-            "<h3>SyncView v2.5</h3>"
-            "<p><b>Controlli:</b></p>"
+            "SyncView - Guida Rapida",
+            "<h3>SyncView v2.5 - Guida Rapida</h3>"
+            "<p><b>Shortcuts Principali:</b></p>"
+            "<ul>"
+            "<li><b>Ctrl+O:</b> Carica video</li>"
+            "<li><b>Ctrl+M:</b> Aggiungi marker globale</li>"
+            "<li><b>Ctrl+E:</b> Esporta clip</li>"
+            "<li><b>Ctrl+S:</b> Toggle sincronizzazione</li>"
+            "<li><b>Ctrl+F:</b> Toggle modalità frame</li>"
+            "<li><b>F11:</b> Toggle fullscreen</li>"
+            "</ul>"
+            "<p><b>Controlli Video:</b></p>"
             "<ul>"
             "<li><b>Spazio:</b> Play/Pausa</li>"
-            "<li><b>Home/End:</b> Inizio/Fine</li>"
-            "<li><b>← / →:</b> Frame Prec/Succ</li>"
-            "<li><b>M:</b> Mute/Unmute</li>"
+            "<li><b>Home/End:</b> Vai a Inizio/Fine</li>"
+            "<li><b>← / →:</b> Frame Precedente/Successivo</li>"
+            "<li><b>M:</b> Mute/Unmute audio</li>"
             "</ul>"
-            "<p><i>Per la documentazione completa, vedi README.md</i></p>"
         )
 
     def show_about(self):
@@ -1521,8 +1528,8 @@ class MainWindow(QMainWindow):
 
     def start_export_process(self):
         """
-        Avvia il processo di esportazione video.
-        Chiamato dal pulsante "Esporta" o shortcut Ctrl+E.
+        Avvia il processo di esportazione video con sistema semplificato.
+        Usa automaticamente export avanzato con FFmpeg e parallelizzazione.
         """
         logger.log_user_action("Esportazione richiesta")
 
@@ -1563,30 +1570,41 @@ class MainWindow(QMainWindow):
         # 3. Ottieni i secondi N e M dai controlli timeline
         sec_before, sec_after = self.timeline_controls.get_export_times()
         
-        # 4. Chiedi all'utente dove salvare le clip
-        export_dir = ExportDialog.get_export_directory(EXPORT_DIR, self)
+        # 4. Apri dialog semplificato (solo destinazione e qualità)
+        config = SimpleExportDialog.get_export_config_simple(self)
         
-        if export_dir is None:
+        if config is None:
             logger.log_export_action("Esportazione annullata dall'utente")
             return
         
-        # 5. Configura il thread e il worker
+        # 5. Calcola numero automatico di worker (CPU count - 1, min 1)
+        import multiprocessing as mp
+        cpu_count = mp.cpu_count()
+        max_workers = max(1, cpu_count - 1)
+        
+        # 6. Configura thread e worker avanzato con impostazioni automatiche
         self.export_thread = QThread()
-        self.exporter = VideoExporter(
+        self.exporter = AdvancedVideoExporter(
             video_paths=video_paths,
             markers=markers,
             sec_before=sec_before,
             sec_after=sec_after,
-            export_dir=export_dir
+            export_dir=config['directory'],
+            quality=config['quality'],
+            max_workers=max_workers,        # Automatico
+            enable_hardware=True,           # Sempre abilitato
+            max_retries=3                   # Sempre 3 tentativi
         )
         
         self.exporter.moveToThread(self.export_thread)
         
-        # 5. Connetti segnali
+        # 7. Connetti segnali
         self.export_thread.started.connect(self.exporter.run)
         self.exporter.finished.connect(self.on_export_finished)
         self.exporter.error.connect(self.on_export_error)
-        self.exporter.progress.connect(self.on_export_progress)
+        self.exporter.progress.connect(self.on_export_progress_advanced)
+        self.exporter.job_completed.connect(self.on_export_job_completed)
+        self.exporter.job_failed.connect(self.on_export_job_failed)
         
         # Pulisci al termine
         self.exporter.finished.connect(self.export_thread.quit)
@@ -1594,21 +1612,19 @@ class MainWindow(QMainWindow):
         self.exporter.destroyed.connect(self.export_thread.deleteLater)
         self.export_thread.finished.connect(self.export_thread.deleteLater)
 
-        # 6. Avvia il thread
+        # 8. Avvia
         self.export_thread.start()
-
-        # 7. Calcola numero totale di clip (per info all'utente)
-        total_clips = 0
-        for marker in markers:
-            if marker.video_index is None:
-                # Marker globale: una clip per ogni video
-                total_clips += len(video_paths)
-            else:
-                # Marker specifico: una clip solo per quel video
-                if marker.video_index in video_paths:
-                    total_clips += 1
         
-        # 8. Entra in modal state - disabilita controlli durante export
+        # 9. Disabilita controlli
+        self._enter_export_modal_state()
+        
+        logger.log_export_action(
+            "Export avviato",
+            f"FFmpeg, {max_workers} workers, {config['quality'].name}, HW: Enabled, Retry: 3"
+        )
+    
+    def _enter_export_modal_state(self):
+        """Disabilita controlli durante export."""
         # Disabilita timeline controls che contiene export button e altri controlli
         widgets_to_disable: list[QWidget] = [self.timeline_controls]
         
@@ -1618,26 +1634,20 @@ class MainWindow(QMainWindow):
         widgets_to_disable.append(self.forward_1_frame_btn)
         widgets_to_disable.append(self.forward_10_frames_btn)
         
+        # Aggiungi anche load button dai video player
+        for player in self.video_players:
+            widgets_to_disable.append(player.load_button)
+            widgets_to_disable.append(player.remove_button)
+        
         self.modal_manager.enter_modal_state(
             widgets_to_disable,
             "Export in corso"
         )
         logger.log_user_action("Modal state", "Export iniziato - controlli disabilitati")
         
-        # 9. Notifica l'utente
+        # Notifica l'utente
         self.status_indicator.setText(f"● ESPORTAZIONE IN CORSO...")
         self.status_indicator.setStyleSheet("color: #d4a356;") # Giallo
-        
-        QMessageBox.information(
-            self,
-            "Esportazione Avviata",
-            f"L'esportazione è iniziata in background.\n"
-            f"Markers: {len(markers)}\n"
-            f"Video caricati: {len(video_paths)}\n"
-            f"Clip totali: ~{total_clips}\n\n"
-            f"Le clip verranno salvate in '{export_dir.name}'.\n\n"
-            f"⚠ I controlli sono temporaneamente disabilitati."
-        )
 
     def on_export_progress(self, message: str):
         """Aggiorna lo status indicator con il progresso."""
@@ -1687,6 +1697,20 @@ class MainWindow(QMainWindow):
         """Pulisce i riferimenti al thread e al worker."""
         self.exporter = None
         self.export_thread = None
+    
+    def on_export_progress_advanced(self, message: str, current: int, total: int):
+        """Callback per progresso export avanzato."""
+        logger.log_export_action("Progresso", f"{message} ({current}/{total})")
+        self.status_indicator.setText(f"● {message}")
+        self.status_indicator.setStyleSheet("color: #C19A6B;")  # Giallo
+        
+    def on_export_job_completed(self, job_id: str):
+        """Callback quando un job di export completa."""
+        logger.log_export_action("Job completato", job_id)
+    
+    def on_export_job_failed(self, job_id: str, error_message: str):
+        """Callback quando un job di export fallisce."""
+        logger.log_export_action(f"Job fallito: {job_id}", error_message)
         # Ripristina status dopo 5 secondi
         QTimer.singleShot(5000, self.reset_status_indicator)
 
@@ -1802,6 +1826,8 @@ class MainWindow(QMainWindow):
                 self._save_and_clear_tooltips(self)
                 # Installa event filter ricorsivamente su tutti i widget
                 self._install_event_filter_recursive(self)
+                # Attiva debug mode anche sulla timeline
+                self.timeline_widget.set_debug_mode(True)
             else:
                 logger.log_user_action("Debug Mode", "DISATTIVATO")
                 # Rimuovi event filter ricorsivamente
@@ -1809,6 +1835,8 @@ class MainWindow(QMainWindow):
                 # Ripristina i tooltip originali
                 self._restore_tooltips()
                 self.original_tooltips.clear()
+                # Disattiva debug mode sulla timeline
+                self.timeline_widget.set_debug_mode(False)
             event.accept()
         
         # F11 per fullscreen
@@ -1828,23 +1856,135 @@ class MainWindow(QMainWindow):
             if event.type() == QEvent.Type.Enter:
                 # Quando il mouse entra in un widget, mostra le sue dimensioni
                 if isinstance(obj, QWidget):
+                    import inspect
+                    
                     size = obj.size()
                     pos = obj.pos()
                     obj_name = obj.objectName() or obj.__class__.__name__
                     
-                    # Crea tooltip con informazioni
+                    # === HEADER ===
                     tooltip = (f"🔍 DEBUG INFO\n"
+                              f"{'='*50}\n"
                               f"Widget: {obj_name}\n"
-                              f"Dimensioni: {size.width()}px × {size.height()}px\n"
-                              f"Posizione: ({pos.x()}, {pos.y()})")
+                              f"Classe: {obj.__class__.__module__}.{obj.__class__.__qualname__}\n"
+                              f"ID Python: {id(obj)}")
                     
-                    # Aggiungi info su minimum/maximum size se esistono
+                    # === GEOMETRIA ===
+                    tooltip += f"\n\n📐 GEOMETRIA\n"
+                    tooltip += f"Dimensioni: {size.width()}px × {size.height()}px\n"
+                    tooltip += f"Posizione: ({pos.x()}, {pos.y()})\n"
+                    
+                    # Geometry completa
+                    geom = obj.geometry()
+                    tooltip += f"Geometry: x={geom.x()}, y={geom.y()}, w={geom.width()}, h={geom.height()}"
+                    
+                    # Size hints
+                    size_hint = obj.sizeHint()
+                    if size_hint.isValid():
+                        tooltip += f"\nSize Hint: {size_hint.width()}px × {size_hint.height()}px"
+                    
                     min_size = obj.minimumSize()
                     max_size = obj.maximumSize()
                     if min_size.width() > 0 or min_size.height() > 0:
-                        tooltip += f"\nMin: {min_size.width()}px × {min_size.height()}px"
+                        tooltip += f"\nMin Size: {min_size.width()}px × {min_size.height()}px"
                     if max_size.width() < 16777215 or max_size.height() < 16777215:
-                        tooltip += f"\nMax: {max_size.width()}px × {max_size.height()}px"
+                        tooltip += f"\nMax Size: {max_size.width()}px × {max_size.height()}px"
+                    
+                    # Size policy
+                    policy = obj.sizePolicy()
+                    h_policy = policy.horizontalPolicy().name
+                    v_policy = policy.verticalPolicy().name
+                    tooltip += f"\nSize Policy: H={h_policy}, V={v_policy}"
+                    
+                    # === LAYOUT ===
+                    layout = obj.layout()
+                    if layout:
+                        tooltip += f"\n\n📦 LAYOUT\n"
+                        tooltip += f"Tipo: {layout.__class__.__name__}\n"
+                        margins = layout.contentsMargins()
+                        tooltip += f"Margins: L={margins.left()}, T={margins.top()}, R={margins.right()}, B={margins.bottom()}\n"
+                        tooltip += f"Spacing: {layout.spacing()}\n"
+                        tooltip += f"Widgets figli: {layout.count()}"
+                    
+                    # === GERARCHIA ===
+                    tooltip += f"\n\n🌲 GERARCHIA\n"
+                    
+                    # Parent
+                    parent = obj.parent()
+                    if parent:
+                        parent_name = parent.objectName() if hasattr(parent, 'objectName') else parent.__class__.__name__
+                        tooltip += f"Parent: {parent_name}\n"
+                        if hasattr(parent, '__class__'):
+                            tooltip += f"  └─ {parent.__class__.__module__}.{parent.__class__.__name__}"
+                    else:
+                        tooltip += "Parent: None (top-level)"
+                    
+                    # Figli diretti
+                    children = obj.children()
+                    if children:
+                        tooltip += f"\nFigli: {len(children)}"
+                        # Mostra solo i primi 5 figli per non sovraccaricare
+                        for i, child in enumerate(children[:5]):
+                            child_name = child.objectName() if hasattr(child, 'objectName') and child.objectName() else child.__class__.__name__
+                            tooltip += f"\n  {i+1}. {child_name} ({child.__class__.__name__})"
+                        if len(children) > 5:
+                            tooltip += f"\n  ... e altri {len(children) - 5} figli"
+                    
+                    # === STATO ===
+                    tooltip += f"\n\n⚡ STATO\n"
+                    tooltip += f"Visibile: {obj.isVisible()}\n"
+                    tooltip += f"Enabled: {obj.isEnabled()}\n"
+                    tooltip += f"Focus: {obj.hasFocus()}\n"
+                    tooltip += f"Mouse Tracking: {obj.hasMouseTracking()}"
+                    
+                    # Stato specifico per certi widget
+                    if hasattr(obj, 'isChecked'):
+                        tooltip += f"\nChecked: {obj.isChecked()}"  # type: ignore[attr-defined]
+                    if hasattr(obj, 'text'):
+                        text = obj.text()  # type: ignore[attr-defined]
+                        if text and len(text) < 30:
+                            tooltip += f"\nTesto: '{text}'"
+                    
+                    # === STILE ===
+                    stylesheet = obj.styleSheet()
+                    if stylesheet:
+                        # Mostra solo le prime 100 caratteri del stylesheet
+                        style_preview = stylesheet[:100].replace('\n', ' ')
+                        tooltip += f"\n\n🎨 STILE\n"
+                        tooltip += f"StyleSheet: {style_preview}..."
+                    
+                    # === CODICE SORGENTE ===
+                    try:
+                        source_file = inspect.getfile(obj.__class__)
+                        source_lines = inspect.getsourcelines(obj.__class__)
+                        line_number = source_lines[1] if source_lines else "?"
+                        # Mostra solo il nome del file, non il path completo
+                        import os
+                        file_name = os.path.basename(source_file)
+                        tooltip += f"\n\n📄 CODICE SORGENTE\n"
+                        tooltip += f"File: {file_name}\n"
+                        tooltip += f"Linea: {line_number}\n"
+                        tooltip += f"Path: {source_file}"
+                        
+                        # Prova a trovare il metodo __init__
+                        try:
+                            init_lines = inspect.getsourcelines(obj.__class__.__init__)
+                            init_line = init_lines[1]
+                            tooltip += f"\n__init__: linea {init_line}"
+                        except:
+                            pass
+                            
+                    except (TypeError, OSError):
+                        # Alcune classi built-in non hanno file sorgente
+                        tooltip += f"\n\n📄 CODICE SORGENTE\n"
+                        tooltip += "Built-in Qt widget (no source file)"
+                    
+                    # === MEMORIA ===
+                    import sys
+                    obj_size = sys.getsizeof(obj)
+                    tooltip += f"\n\n💾 MEMORIA\n"
+                    tooltip += f"Size: {obj_size} bytes\n"
+                    tooltip += f"Reference count: {sys.getrefcount(obj)}"
                     
                     # Imposta il tooltip (verrà mostrato automaticamente da Qt)
                     obj.setToolTip(tooltip)
@@ -1920,12 +2060,6 @@ class MainWindow(QMainWindow):
                 player.stop()
                 player.unload_video()  # Cleanup deterministico
         # ---------------------------------------
-        
-        # --- CLEANUP DETERMINISTICO GLOBALE ---
-        logger.log_user_action("Resource cleanup globale", "Chiusura risorse in corso...")
-        closed = cleanup_global_resources(force_gc=True)
-        if closed > 0:
-            logger.log_user_action("Resource cleanup globale", f"{closed} risorse chiuse")
         
         # Garbage collection finale
         collected = gc.collect()

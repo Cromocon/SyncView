@@ -27,7 +27,7 @@ Long-term:
 
 ## 1. Performance optimizations
 
-1.1 Video loading & playback
+[x] 1.1 Video loading & playback
 - [x] Lazy loading: only decode frames when required.
 - [x] Asynchronous loading: perform heavy I/O and probing in worker threads to keep the UI responsive.
 - [x] Frame caching (LRU) for recently accessed frames to improve seek/preview performance.
@@ -38,18 +38,18 @@ Implementation notes
 - Use QThread or Python threads (careful with GIL) or QThreadPool + QRunnable for worker tasks.
 - Example pattern: enqueue file probe + preloading tasks on a worker pool and emit signals back to the UI.
 
-1.2 Timeline & markers
+[x] 1.2 Timeline & markers
 - [x] Only repaint the visible area of the timeline; avoid full repaint on scroll or small updates.
 - [x] Use spatial indexing (sorted list, bisect, or interval tree) to query markers in O(log n) for visible range.
 - [x] Debounce rapid updates during drag operations (e.g. 16-50ms throttle).
 
-1.3 Export system
-- Enable parallel exports (bounded thread- or process-pool) to use multiple CPU cores.
-- Add optional hardware-accelerated encoders (FFmpeg NVENC, QSV) when present.
-- Use ‘fast’ presets for quick previews and allow higher-quality presets for final renders.
-- Implement an export queue with resume capability and per-clip retries on transient failures.
+[x] 1.3 Export system
+- [x] Enable parallel exports (bounded thread- or process-pool) to use multiple CPU cores.
+- [x] Add optional hardware-accelerated encoders (FFmpeg NVENC, QSV) when present.
+- [x] Use ‘fast’ presets for quick previews and allow higher-quality presets for final renders.
+- [x] Implement an export queue with resume capability and per-clip retries on transient failures.
 
-1.4 Memory & resource management
+[x] 1.4 Memory & resource management
 - [x] Explicitly close moviepy/ffmpeg handles and release resources after export.
 - [x] Use small scoped objects and del + gc.collect() for deterministic clean-up when necessary.
 
@@ -90,10 +90,10 @@ def safe_close(clip):
 
 ## 3. Architecture & maintainability
 
-3.1 Data layer
-- Use SQLite (or tiny DB) for marker storage instead of a single JSON blob when marker count grows.
-- Implement incremental saves (only persist changed markers) to reduce I/O.
-- Introduce a versioned migration strategy for saved marker files.
+[x] 3.1 Data layer
+- [x] Use SQLite (or tiny DB) for marker storage instead of a single JSON blob when marker count grows.
+- [x] Implement incremental saves (only persist changed markers) to reduce I/O.
+- [x] Introduce a versioned migration strategy for saved marker files.
 
 3.2 Code structure
 - Centralize managers (MarkerManager, ExportManager) as singletons or carefully injected dependencies.

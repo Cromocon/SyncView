@@ -34,6 +34,7 @@ FRAME_STEP_OPTIONS = [40, 100, 200] # Mantenuto per frame stepping
 
 # Configurazione esportazione
 DEFAULT_EXPORT_WINDOW = 5
+EXPORT_SETTINGS_FILE = PROJECT_ROOT / "export_settings.json"  # File per salvare preferenze export
 
 # Dipendenze richieste
 REQUIRED_PACKAGES = [

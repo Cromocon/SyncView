@@ -25,7 +25,7 @@ else
 fi
 
 echo -e "${BLUE}╔═══════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║       SyncView - T-MVA System        ║${NC}"
+echo -e "${BLUE}║       SyncView - T-MVA System         ║${NC}"
 echo -e "${BLUE}╚═══════════════════════════════════════╝${NC}"
 echo ""
 echo -e "${BLUE}Sistema operativo:${NC} $OS_TYPE"

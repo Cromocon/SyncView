@@ -20,7 +20,14 @@ ENV/
 *.log
 syncview_log.txt
 syncview_markers.json
+syncview_markers.json.backup
+*.markers.db
+*.markers.db-journal
+export_settings.json
 Export_log.txt
+
+# File temporanei export
+*TEMP_MPY*.mp4
 
 # Esportazioni
 Salvataggi/*
