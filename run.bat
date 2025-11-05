@@ -96,14 +96,6 @@ if %ERRORLEVEL% NEQ 0 (
     echo [*] FFmpeg trovato
 )
 
-REM Crea directory necessarie
-for %%D in (Feed-1 Feed-2 Feed-3 Feed-4 Salvataggi) do (
-    if not exist "%%D" (
-        mkdir "%%D"
-        echo [*] Creata directory: %%D
-    )
-)
-
 echo.
 echo ========================================
 echo     Avvio SyncView in corso...

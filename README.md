@@ -40,30 +40,36 @@ SyncView è un'applicazione desktop professionale per l'analisi multi-video tatt
 SyncView/
 ├── config/          # Configurazione dell'applicazione
 │   ├── __init__.py
-│   └── settings.py  # Colori, FPS options, formati supportati
+│   ├── settings.py  # Colori, FPS options, formati supportati
+│   └── user_paths.py  # Gestione path utente memorizzati
 ├── core/            # Logica di business
 │   ├── __init__.py
 │   ├── logger.py    # Sistema di logging categorizzato
-│   └── sync_manager.py  # Motore di sincronizzazione
+│   ├── sync_manager.py  # Motore di sincronizzazione
+│   ├── markers.py   # Gestione markers con SQLite
+│   ├── marker_db.py # Database layer per markers
+│   └── advanced_exporter.py  # Export video con parallelizzazione
 ├── ui/              # Interfaccia utente
 │   ├── __init__.py
 │   ├── main_window.py      # Finestra principale + DraggableTitleBar
 │   ├── video_player.py     # Widget player video individuale
 │   ├── fps_dialog.py       # Dialogo FPS personalizzato
+│   ├── marker_dialog.py    # Dialog gestione markers
+│   ├── simple_export_dialog.py  # Dialog export semplificato
 │   └── styles.py           # Qt stylesheets
-├── Feed-1/          # Directory auto-caricamento video 1
-├── Feed-2/          # Directory auto-caricamento video 2
-├── Feed-3/          # Directory auto-caricamento video 3
-├── Feed-4/          # Directory auto-caricamento video 4
-├── Salvataggi/      # Directory esportazioni future
 ├── main.py          # Entry point dell'applicazione
 ├── requirements.txt # Dipendenze Python
-├── run.sh          # Script avvio rapido
+├── run.sh          # Script avvio rapido (Linux/macOS)
+├── run.bat         # Script avvio rapido (Windows)
+├── MARKER_DATABASE.md            # Documentazione sistema database
 ├── COMPLETE_HISTORY.md           # Storia completa sviluppo
 ├── TECHNICAL_DOCUMENTATION.md    # Documentazione tecnica
 ├── CHANGELOG.md                  # Changelog versioni
 ├── DEVELOPER_LOG.md              # Log sviluppatore
 └── README.md                     # Questo file
+
+Note: L'applicazione non crea directory predefinite. I path dei video
+e della directory di export vengono memorizzati in ~/.syncview/user_paths.json
 ```
 
 ---
@@ -85,7 +91,6 @@ Lo script automaticamente:
 - ✅ Crea virtual environment (se non esiste)
 - ✅ Installa tutte le dipendenze da requirements.txt
 - ✅ Verifica FFmpeg e suggerisce installazione
-- ✅ Crea le directory necessarie (Feed-1..4, Salvataggi)
 - ✅ Avvia l'applicazione
 
 **Prerequisiti Linux:**
@@ -122,7 +127,6 @@ Lo script automaticamente:
 - ✅ Crea virtual environment (se non esiste)
 - ✅ Installa tutte le dipendenze
 - ✅ Verifica FFmpeg e suggerisce installazione
-- ✅ Crea le directory necessarie
 - ✅ Avvia l'applicazione
 
 **Prerequisiti Windows:**
@@ -319,19 +323,21 @@ python main.py
 
 ### Caricamento Video
 
-**Metodo 1: Auto-caricamento**
-- Posiziona video nelle cartelle `Feed-1/` a `Feed-4/`
-- Avvia l'applicazione
-- I video verranno caricati automaticamente
-
-**Metodo 2: Drag & Drop**
+**Metodo 1: Drag & Drop**
 - Trascina file video sui placeholder
 
-**Metodo 3: Bottone Carica**
+**Metodo 2: Bottone Carica**
 - Click su "📁 CARICA" in ogni video slot
 
-**Metodo 4: Scorciatoia**
+**Metodo 3: Scorciatoia**
 - Premi `Ctrl+O`
+
+**Metodo 4: Auto-caricamento**
+- Se hai caricato video in precedenza, verranno ricaricati automaticamente
+- all'avvio (se i file esistono ancora)
+
+**Nota:** L'applicazione memorizza i path dei video caricati in
+`~/.syncview/user_paths.json` per ricaricarli automaticamente.
 
 ### Modalità di Controllo
 

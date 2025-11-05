@@ -24,7 +24,8 @@ from ui.simple_export_dialog import SimpleExportDialog
 from core.advanced_exporter import AdvancedVideoExporter
 # ---------------------------------------
 from ui.styles import get_main_stylesheet
-from config.settings import SOURCE_DIRS, DEFAULT_FPS_OPTIONS, SUPPORTED_VIDEO_FORMATS, EXPORT_DIR, THEME_COLORS
+from config.settings import DEFAULT_FPS_OPTIONS, SUPPORTED_VIDEO_FORMATS, THEME_COLORS
+from config.user_paths import user_path_manager
 from core.logger import logger
 from core.sync_manager import SyncManager
 from core.markers import MarkerManager, Marker
@@ -778,28 +779,55 @@ class MainWindow(QMainWindow):
             self.status_indicator.setStyleSheet("color: #f5a623; font-weight: bold; font-size: 12px; padding-right: 15px;")
 
     def auto_load_videos(self):
-        """Carica automaticamente i video dalle cartelle Feed-X usando lazy loading asincrono."""
-        logger.log_user_action("Auto-caricamento video", "Ricerca nelle cartelle Feed (async)")
+        """Carica automaticamente i video dalle ultime path utilizzate."""
+        logger.log_user_action("Auto-caricamento video", "Tentativo di carica da ultime path usate")
 
-        loaded_count = 0
-        for i, source_dir in enumerate(SOURCE_DIRS):
-            if source_dir.exists():
-                # Cerca il primo file video nella directory
-                video_files = []
-                for fmt in SUPPORTED_VIDEO_FORMATS:
-                    video_files.extend(list(source_dir.glob(f"*{fmt}")))
+        # Log di tutti i percorsi salvati (prima del filtro)
+        all_paths = [user_path_manager.get_video_path(i) for i in range(4)]
+        logger.log_user_action(
+            "Percorsi salvati trovati",
+            f"Slot 0: {all_paths[0]}, Slot 1: {all_paths[1]}, Slot 2: {all_paths[2]}, Slot 3: {all_paths[3]}"
+        )
 
-                if video_files:
-                    # Carica il primo video trovato in modo asincrono
-                    self.video_players[i].load_video(video_files[0], async_load=True)
-                    loaded_count += 1
-                    logger.log_user_action(f"Video auto-caricato (async)",
-                                         f"Feed-{i+1}: {video_files[0].name}")
+        # Ottieni le path valide (che esistono ancora)
+        valid_paths = user_path_manager.get_valid_video_paths()
         
-        if loaded_count == 0:
-            logger.log_user_action("Nessun video trovato", "Cartelle Feed vuote")
-        else:
-            logger.log_user_action(f"Auto-load completato", f"{loaded_count} video in caricamento")
+        if not valid_paths:
+            logger.log_user_action("Nessun video da auto-caricare", "Nessun file video trovato o tutti i percorsi sono null")
+            # Mostra un messaggio informativo all'utente
+            self.status_indicator.setText("● PRONTO - NESSUN VIDEO SALVATO")
+            self.status_indicator.setStyleSheet("color: #C19A6B;")  # Desert tan
+            return
+        
+        logger.log_user_action(
+            f"Video validi trovati: {len(valid_paths)}",
+            f"Slot: {list(valid_paths.keys())}"
+        )
+        
+        loaded_count = 0
+        for index, video_path in valid_paths.items():
+            # Carica il video in modo asincrono
+            self.video_players[index].load_video(video_path, async_load=True)
+            loaded_count += 1
+            logger.log_user_action(
+                f"Video auto-caricato (async)",
+                f"Player {index+1}: {video_path.name}"
+            )
+        
+        # Aggiorna status indicator con info sul caricamento
+        self.status_indicator.setText(f"● CARICAMENTO {loaded_count} VIDEO...")
+        self.status_indicator.setStyleSheet("color: #C19A6B;")  # Desert tan
+        
+        # Dopo 2 secondi, reimposta lo status normale
+        QTimer.singleShot(2000, lambda: self._reset_status_after_autoload(loaded_count))
+        
+        logger.log_user_action(f"Auto-load completato", f"{loaded_count} video in caricamento")
+
+    def _reset_status_after_autoload(self, loaded_count: int):
+        """Reimposta lo status indicator dopo il caricamento automatico."""
+        self.status_indicator.setText("● SISTEMA OPERATIVO")
+        self.status_indicator.setStyleSheet("color: #5fa373;")  # Verde
+        logger.log_user_action(f"Auto-load status reset", f"{loaded_count} video caricati")
 
     def load_videos_dialog(self):
         """Apre un dialogo per caricare video manualmente."""
@@ -2054,12 +2082,14 @@ class MainWindow(QMainWindow):
             self.marker_manager.save()
             logger.log_user_action("Markers salvati", f"{self.marker_manager.count} markers")
 
-        # --- Ferma e pulisci tutti i player ---
+        # --- Ferma e pulisci tutti i player SENZA cancellare i percorsi salvati ---
         for player in self.video_players:
             if player.is_loaded:
                 player.stop()
-                player.unload_video()  # Cleanup deterministico
-        # ---------------------------------------
+                # Usa cleanup_video(remove_path=False) per mantenere i percorsi salvati
+                player.cleanup_video(remove_path=False)
+        logger.log_user_action("Cleanup video completato", "Percorsi salvati mantenuti per prossimo avvio")
+        # ---------------------------------------------------------------------------
         
         # Garbage collection finale
         collected = gc.collect()

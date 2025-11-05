@@ -432,10 +432,13 @@ class TimelineWidget(QWidget):
                 self.marker_remove_requested.emit(marker)
 
     def mouseMoveEvent(self, event: QMouseEvent):  # type: ignore[override]
-        """Gestisce movimento del mouse per hover.
+        """Gestisce movimento del mouse per hover e tooltip timeline.
         
         OTTIMIZZATO: Hover updates debounced per evitare repaint continui.
         """
+        # Mostra tooltip con timestamp sulla timeline
+        self._show_timeline_tooltip(event.pos())
+        
         # Schedula verifica hover con debouncing
         self._schedule_hover_check(event.pos())
 
@@ -454,6 +457,44 @@ class TimelineWidget(QWidget):
         
         # Debounce a 50ms
         self._hover_timer.start(50)
+
+    def _show_timeline_tooltip(self, pos: QPoint) -> None:
+        """Mostra tooltip con timestamp quando si fa hover sulla timeline.
+        
+        Args:
+            pos: Posizione del mouse
+        """
+        # Verifica se il mouse è sulla timeline (area del righello)
+        ruler_top = self.ruler_y_pos
+        ruler_bottom = self.ruler_y_pos + self.ruler_height
+        
+        if not (ruler_top <= pos.y() <= ruler_bottom):
+            # Mouse non è sulla timeline, non mostrare tooltip
+            return
+        
+        # Verifica se c'è un marker sotto il cursore
+        # (il tooltip del marker ha priorità)
+        marker = self._get_marker_at_position(pos)
+        if marker:
+            # C'è un marker, non mostrare tooltip della timeline
+            # (verrà mostrato quello del marker in _check_hover)
+            return
+        
+        # Calcola il timestamp dove punta il mouse
+        timestamp = self._x_to_timestamp(pos.x(), self.width())
+        
+        # Clamp al range valido
+        if timestamp < 0 or timestamp > self.duration_ms:
+            return
+        
+        # Formatta il timestamp
+        time_str = self._format_time_long(timestamp)
+        
+        # Mostra tooltip semplice con il timestamp
+        tooltip_text = f"<span style='color:#C19A6B; font-size:10pt;'>{time_str}</span>"
+        
+        from PyQt6.QtGui import QCursor
+        QToolTip.showText(QCursor.pos(), tooltip_text, self)
 
     def _check_hover(self) -> None:
         """Verifica hover marker alla posizione salvata."""
@@ -757,80 +798,157 @@ class TimelineControlWidget(QWidget):
         main_layout.addStretch()
 
         # === EXPORT SECTION (GroupBox) ===
-        export_group = QGroupBox("Export")
+        export_group = QGroupBox("Export Clip")
         export_layout = QVBoxLayout(export_group)
-        export_layout.setSpacing(8)
+        export_layout.setSpacing(12)
 
-        # Row 1: Secondi PRIMA del marker
-        from PyQt6.QtWidgets import QSpinBox
+        # Import necessari per i nuovi controlli
+        from PyQt6.QtWidgets import QSlider
         
-        before_layout = QHBoxLayout()
-        before_layout.setSpacing(5)
+        # --- PRIMA del marker ---
+        label_before = QLabel("⏮️ Prima del marker")
+        label_before.setStyleSheet("color: #C19A6B; font-weight: bold; font-size: 10pt;")
+        export_layout.addWidget(label_before)
         
-        label_before = QLabel("Prima:")
-        label_before.setStyleSheet("color: #cccccc;")
-        before_layout.addWidget(label_before)
-
-        self.spin_before = QSpinBox()
-        self.spin_before.setRange(0, 300)  # Max 5 minuti
-        self.spin_before.setValue(5)       # Default 5 secondi
-        self.spin_before.setSuffix("s")
-        self.spin_before.setToolTip("Secondi prima del marker")
-        self.spin_before.setStyleSheet("""
-            QSpinBox {
-                background-color: #808080;
-                color: #ffffff;
+        # Slider + valore
+        before_row = QHBoxLayout()
+        before_row.setSpacing(8)
+        
+        self.slider_before = QSlider(Qt.Orientation.Horizontal)
+        self.slider_before.setRange(0, 60)  # 0-60 secondi
+        self.slider_before.setValue(5)      # Default 5 secondi
+        self.slider_before.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.slider_before.setTickInterval(10)
+        self.slider_before.setToolTip("Secondi da includere prima del marker")
+        self.slider_before.setStyleSheet("""
+            QSlider::groove:horizontal {
                 border: 1px solid #808080;
-                border-radius: 3px;
-                padding: 3px;
+                height: 8px;
+                background: #2a2a2a;
+                border-radius: 4px;
+            }
+            QSlider::handle:horizontal {
+                background: #5F6F52;
+                border: 2px solid #798969;
+                width: 18px;
+                margin: -5px 0;
+                border-radius: 9px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #798969;
             }
         """)
-        before_layout.addWidget(self.spin_before)
+        before_row.addWidget(self.slider_before, 3)
         
-        export_layout.addLayout(before_layout)
-
-        # Row 2: Secondi DOPO il marker
-        after_layout = QHBoxLayout()
-        after_layout.setSpacing(5)
+        self.label_before_value = QLabel("5s")
+        self.label_before_value.setStyleSheet("""
+            color: #ffffff;
+            background-color: #5F6F52;
+            border: 1px solid #798969;
+            border-radius: 3px;
+            padding: 4px 8px;
+            font-weight: bold;
+            min-width: 35px;
+        """)
+        self.label_before_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        before_row.addWidget(self.label_before_value)
         
-        label_after = QLabel("Dopo:")
-        label_after.setStyleSheet("color: #cccccc;")
-        after_layout.addWidget(label_after)
-
-        self.spin_after = QSpinBox()
-        self.spin_after.setRange(0, 300)
-        self.spin_after.setValue(5)        # Default 5 secondi
-        self.spin_after.setSuffix("s")
-        self.spin_after.setToolTip("Secondi dopo il marker")
-        self.spin_after.setStyleSheet("""
-            QSpinBox {
-                background-color: #808080;
-                color: #ffffff;
+        export_layout.addLayout(before_row)
+        
+        # Separatore visivo
+        separator = QLabel()
+        separator.setStyleSheet("background-color: #808080; max-height: 1px;")
+        separator.setMaximumHeight(1)
+        export_layout.addWidget(separator)
+        
+        # --- DOPO il marker ---
+        label_after = QLabel("⏭️ Dopo il marker")
+        label_after.setStyleSheet("color: #C19A6B; font-weight: bold; font-size: 10pt;")
+        export_layout.addWidget(label_after)
+        
+        # Slider + valore
+        after_row = QHBoxLayout()
+        after_row.setSpacing(8)
+        
+        self.slider_after = QSlider(Qt.Orientation.Horizontal)
+        self.slider_after.setRange(0, 60)  # 0-60 secondi
+        self.slider_after.setValue(5)      # Default 5 secondi
+        self.slider_after.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.slider_after.setTickInterval(10)
+        self.slider_after.setToolTip("Secondi da includere dopo il marker")
+        self.slider_after.setStyleSheet("""
+            QSlider::groove:horizontal {
                 border: 1px solid #808080;
-                border-radius: 3px;
-                padding: 3px;
+                height: 8px;
+                background: #2a2a2a;
+                border-radius: 4px;
+            }
+            QSlider::handle:horizontal {
+                background: #5F6F52;
+                border: 2px solid #798969;
+                width: 18px;
+                margin: -5px 0;
+                border-radius: 9px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #798969;
             }
         """)
-        after_layout.addWidget(self.spin_after)
+        after_row.addWidget(self.slider_after, 3)
         
-        export_layout.addLayout(after_layout)
-
+        self.label_after_value = QLabel("5s")
+        self.label_after_value.setStyleSheet("""
+            color: #ffffff;
+            background-color: #5F6F52;
+            border: 1px solid #798969;
+            border-radius: 3px;
+            padding: 4px 8px;
+            font-weight: bold;
+            min-width: 35px;
+        """)
+        self.label_after_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        after_row.addWidget(self.label_after_value)
+        
+        export_layout.addLayout(after_row)
+        
+        # Label durata totale
+        self.label_total_duration = QLabel("⏱️ Durata clip: 10s")
+        self.label_total_duration.setStyleSheet("""
+            color: #C19A6B;
+            font-weight: bold;
+            font-size: 9pt;
+            padding: 5px;
+            background-color: #2a2a2a;
+            border-radius: 3px;
+        """)
+        self.label_total_duration.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        export_layout.addWidget(self.label_total_duration)
+        
+        # Connetti slider per aggiornare labels
+        self.slider_before.valueChanged.connect(self._update_export_labels)
+        self.slider_after.valueChanged.connect(self._update_export_labels)
+        
         # Row 3: Export button (full width)
-        self.btn_export = QPushButton("📤 Esporta Video")
-        self.btn_export.setToolTip("Esporta video da markers (Ctrl+E)")
+        self.btn_export = QPushButton("📤 Esporta Clip")
+        self.btn_export.setToolTip("Esporta video da tutti i markers (Ctrl+E)")
         self.btn_export.clicked.connect(self.export_markers_requested.emit)
-        self.btn_export.setMinimumHeight(35)
+        self.btn_export.setMinimumHeight(40)
         self.btn_export.setStyleSheet("""
             QPushButton {
                 background-color: #0047AB;
                 color: #ffffff;
-                border: 1px solid #1A5EC4;
-                border-radius: 3px;
-                padding: 5px 10px;
+                border: 2px solid #1A5EC4;
+                border-radius: 5px;
+                padding: 8px 12px;
                 font-weight: bold;
+                font-size: 11pt;
             }
             QPushButton:hover {
                 background-color: #1A5EC4;
+                border-color: #2E6FD6;
+            }
+            QPushButton:pressed {
+                background-color: #003580;
             }
         """)
         export_layout.addWidget(self.btn_export)
@@ -850,11 +968,37 @@ class TimelineControlWidget(QWidget):
                 background-color: #808080;
                 color: #ffffff;
             }
+            QGroupBox {
+                color: #C19A6B;
+                border: 2px solid #808080;
+                border-radius: 5px;
+                margin-top: 10px;
+                font-weight: bold;
+                font-size: 11pt;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
         """)
+
+    def _update_export_labels(self) -> None:
+        """Aggiorna le labels dei valori e la durata totale."""
+        before = self.slider_before.value()
+        after = self.slider_after.value()
+        total = before + after
+        
+        # Aggiorna label valori
+        self.label_before_value.setText(f"{before}s")
+        self.label_after_value.setText(f"{after}s")
+        
+        # Aggiorna durata totale
+        self.label_total_duration.setText(f"⏱️ Durata clip: {total}s")
 
     def get_export_times(self):
         """Ritorna i secondi prima e dopo per l'export."""
-        return self.spin_before.value(), self.spin_after.value()
+        return self.slider_before.value(), self.slider_after.value()
     
     def show_marker_controls(self):
         """Mostra i controlli marker (SYNC ON)."""

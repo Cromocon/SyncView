@@ -12,6 +12,7 @@ import json
 
 from core.advanced_exporter import ExportQuality
 from config.settings import EXPORT_SETTINGS_FILE
+from config.user_paths import user_path_manager
 
 
 class ExportSettings:
@@ -20,8 +21,13 @@ class ExportSettings:
     @staticmethod
     def load() -> dict:
         """Carica le impostazioni salvate."""
+        # Usa user_path_manager per la directory
+        last_dir = user_path_manager.get_export_dir()
+        if not last_dir:
+            last_dir = Path.home()
+        
         default_settings = {
-            'last_directory': str(Path.home() / "Salvataggi"),
+            'last_directory': str(last_dir),
             'last_quality': ExportQuality.MEDIUM.name
         }
         
@@ -29,8 +35,9 @@ class ExportSettings:
             if EXPORT_SETTINGS_FILE.exists():
                 with open(EXPORT_SETTINGS_FILE, 'r') as f:
                     saved = json.load(f)
-                    # Merge con default per nuove chiavi
-                    default_settings.update(saved)
+                    # Merge solo per quality (directory viene da user_path_manager)
+                    if 'last_quality' in saved:
+                        default_settings['last_quality'] = saved['last_quality']
         except Exception:
             pass  # Usa default se caricamento fallisce
         
@@ -40,9 +47,12 @@ class ExportSettings:
     def save(directory: Path, quality: ExportQuality) -> None:
         """Salva le impostazioni."""
         try:
+            # Salva directory in user_path_manager
+            user_path_manager.set_export_dir(directory)
+            
+            # Salva solo quality in EXPORT_SETTINGS_FILE
             EXPORT_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
             settings = {
-                'last_directory': str(directory),
                 'last_quality': quality.name
             }
             with open(EXPORT_SETTINGS_FILE, 'w') as f:

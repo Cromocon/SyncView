@@ -170,14 +170,6 @@ else
     echo -e "${GREEN}✓${NC} FFmpeg trovato"
 fi
 
-# Crea directory necessarie se non esistono
-for dir in Feed-1 Feed-2 Feed-3 Feed-4 Salvataggi; do
-    if [ ! -d "$dir" ]; then
-        mkdir -p "$dir"
-        echo -e "${GREEN}✓${NC} Creata directory: $dir"
-    fi
-done
-
 echo ""
 echo -e "${GREEN}═══════════════════════════════════════${NC}"
 echo -e "${GREEN}    Avvio SyncView in corso...${NC}"

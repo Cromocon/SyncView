@@ -22,7 +22,6 @@ from datetime import datetime
 
 from core.markers import Marker
 from core.logger import logger
-from config.settings import EXPORT_DIR
 
 
 class ExportQuality(Enum):
@@ -142,7 +141,11 @@ class ExportQueue:
     """Gestisce una coda di export con persistenza su disco."""
     
     def __init__(self, queue_file: Optional[Path] = None):
-        self.queue_file = queue_file or (EXPORT_DIR / "export_queue.json")
+        # Se non specificato, usa la directory home dell'utente
+        if queue_file is None:
+            queue_file = Path.home() / ".syncview" / "export_queue.json"
+            queue_file.parent.mkdir(parents=True, exist_ok=True)
+        self.queue_file = queue_file
         self.jobs: Dict[str, ExportJob] = {}
         self.load_queue()
     
@@ -310,7 +313,7 @@ class AdvancedVideoExporter(QObject):
                  markers: List[Marker],
                  sec_before: int,
                  sec_after: int,
-                 export_dir: Optional[Path] = None,
+                 export_dir: Path,  # Ora obbligatorio
                  quality: ExportQuality = ExportQuality.MEDIUM,
                  max_workers: Optional[int] = None,
                  enable_hardware: bool = True,
@@ -322,7 +325,7 @@ class AdvancedVideoExporter(QObject):
         self.markers = markers
         self.sec_before_ms = sec_before * 1000
         self.sec_after_ms = sec_after * 1000
-        self.export_dir = export_dir if export_dir else EXPORT_DIR
+        self.export_dir = export_dir  # Ora sempre fornito dal chiamante
         self.quality = quality
         self.enable_hardware = enable_hardware
         self.is_running = True
@@ -333,9 +336,7 @@ class AdvancedVideoExporter(QObject):
         self.max_workers = max_workers if max_workers else max(1, cpu_count - 1)
         
         # Export queue
-        self.queue = ExportQueue()
-        
-        # Rileva hardware encoder disponibili
+        self.queue = ExportQueue()        # Rileva hardware encoder disponibili
         self.available_encoders = HardwareAccelerationDetector.detect_available_encoders()
         
         # Seleziona miglior encoder

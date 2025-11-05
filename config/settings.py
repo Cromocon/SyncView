@@ -9,19 +9,6 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # --- MODIFICA: Aggiunto percorso a requirements.txt ---
 REQUIREMENTS_FILE = PROJECT_ROOT / "requirements.txt"
 # ----------------------------------------------------
-SOURCE_DIRS = [
-    PROJECT_ROOT / "Feed-1",
-    PROJECT_ROOT / "Feed-2",
-    PROJECT_ROOT / "Feed-3",
-    PROJECT_ROOT / "Feed-4"
-]
-EXPORT_DIR = PROJECT_ROOT / "Salvataggi"
-LOG_FILE = PROJECT_ROOT / "syncview_log.txt"
-DEVELOPER_LOG = PROJECT_ROOT / "DEVELOPER_LOG.md"
-
-# --- MODIFICA: Assicura che la directory di esportazione esista ---
-EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-# -----------------------------------------------------------------
 
 # Configurazione video
 MAX_VIDEOS = 4
@@ -35,6 +22,8 @@ FRAME_STEP_OPTIONS = [40, 100, 200] # Mantenuto per frame stepping
 # Configurazione esportazione
 DEFAULT_EXPORT_WINDOW = 5
 EXPORT_SETTINGS_FILE = PROJECT_ROOT / "export_settings.json"  # File per salvare preferenze export
+LOG_FILE = PROJECT_ROOT / "syncview_log.txt"
+DEVELOPER_LOG = PROJECT_ROOT / "DEVELOPER_LOG.md"
 
 # Dipendenze richieste
 REQUIRED_PACKAGES = [

@@ -24,20 +24,11 @@ syncview_markers.json.backup
 *.markers.db
 *.markers.db-journal
 export_settings.json
+user_paths.json
 Export_log.txt
 
 # File temporanei export
 *TEMP_MPY*.mp4
-
-# Esportazioni
-Salvataggi/*
-!Salvataggi/.gitkeep
-
-# Video feed
-Feed-*/*.mp4
-Feed-*/*.avi
-Feed-*/*.mov
-Feed-*/*.mkv
 
 # OS
 .DS_Store

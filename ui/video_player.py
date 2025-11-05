@@ -307,6 +307,14 @@ class VideoPlayerWidget(QWidget):
 
             self.video_path = video_path
             
+            # Salva la path per ricordarla
+            from config.user_paths import user_path_manager
+            user_path_manager.set_video_path(self.video_index, video_path)
+            logger.log_user_action(
+                f"Percorso video salvato",
+                f"Player {self.video_index+1}: {video_path}"
+            )
+            
             # Reset flag per nuovo video
             self._media_ready_logged = False
             
@@ -839,10 +847,26 @@ class VideoPlayerWidget(QWidget):
             self.load_button.hide()
             self.remove_button.show()
 
-    def unload_video(self):
-        """Rimuove il video dal player con cleanup deterministico."""
-        logger.log_video_action(self.video_index, "Video rimosso",
+    def cleanup_video(self, remove_path: bool = False):
+        """Pulisce le risorse del video con cleanup deterministico.
+        
+        Args:
+            remove_path: Se True, rimuove anche il percorso salvato (default: False)
+        """
+        if not self.video_path:
+            return
+            
+        logger.log_video_action(self.video_index, "Video cleanup",
                                 f"{self.video_path.name if self.video_path else 'N/A'}")
+
+        # Cancella la path salvata solo se richiesto esplicitamente
+        if remove_path:
+            from config.user_paths import user_path_manager
+            user_path_manager.clear_video_path(self.video_index)
+            logger.log_user_action(
+                f"Percorso video cancellato",
+                f"Player {self.video_index+1}"
+            )
 
         # Pulisci cache
         if self.frame_cache:
@@ -858,6 +882,14 @@ class VideoPlayerWidget(QWidget):
         # Cleanup media player
         self.media_player.stop()
         self.media_player.setSource(QUrl())
+    
+    def unload_video(self):
+        """Rimuove il video dal player e cancella il percorso salvato."""
+        logger.log_video_action(self.video_index, "Video rimosso",
+                                f"{self.video_path.name if self.video_path else 'N/A'}")
+        
+        # Chiama cleanup con rimozione del percorso
+        self.cleanup_video(remove_path=True)
         
         # Garbage collection per liberare memoria
         gc.collect()
