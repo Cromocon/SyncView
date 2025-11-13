@@ -93,88 +93,115 @@ class VideoPlayerWidget(QWidget):
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(5)
 
-        # Header con titolo e controlli
-        header_layout = QHBoxLayout()
-        # Etichetta titolo (es. "FEED-1")
+        # === Header con titolo e controlli ===
+        header_container = QWidget()
+        header_layout = QHBoxLayout(header_container)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(10)
+
+        # --- CORREZIONE: Contenitore SINISTRO per info video ---
+        info_container = QWidget()
+        info_layout = QHBoxLayout(info_container) # Layout per le info
+        info_layout.setContentsMargins(0, 0, 0, 0)
+        info_layout.setSpacing(10)
+        info_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
+        # Etichetta titolo (FEED-X)
         self.title_label = QLabel(f"FEED-{self.video_index + 1}")
         self.title_label.setObjectName("headerLabel")
-        self.title_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        header_layout.addWidget(self.title_label)
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignLeft) # Assicura allineamento
+        info_layout.addWidget(self.title_label)
 
-        header_layout.addStretch()
-
-        # === SYNC OFF CONTROLS ===
-        # Marker button (visible only in SYNC OFF)
-        self.add_marker_btn = QPushButton("📍")
-        self.add_marker_btn.setObjectName("headerMarkerButton")
-        self.add_marker_btn.setToolTip("Aggiungi marker alla posizione corrente (Ctrl+M)")
-        self.add_marker_btn.setFixedSize(60, 30)  # Windowed iniziale: 60x30
-        self.add_marker_btn.setStyleSheet("padding: 0px; text-align: center;")
-        self.add_marker_btn.clicked.connect(self.add_marker_at_position)
-        self.add_marker_btn.hide()  # Hidden by default (SYNC ON)
-        header_layout.addWidget(self.add_marker_btn)
-
-        # Mute button (visible only in SYNC OFF)
-        self.mute_btn = QPushButton("🔊")
-        self.mute_btn.setObjectName("headerMuteButton")
-        self.mute_btn.setCheckable(True)
-        self.mute_btn.setToolTip("Mute/Unmute audio")
-        self.mute_btn.setFixedSize(60, 30)  # Windowed iniziale: 60x30
-        self.mute_btn.setStyleSheet("padding: 0px; text-align: center;")
-        self.mute_btn.clicked.connect(self.toggle_mute)
-        self.mute_btn.hide()  # Hidden by default (SYNC ON)
-        header_layout.addWidget(self.mute_btn)
-
-        # FPS label (inizialmente nascosto)
+        # Etichetta FPS
         self.fps_label = QLabel("")
         self.fps_label.setStyleSheet("color: #C19A6B; font-size: 14px; font-weight: normal;")
         self.fps_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.fps_label.hide()
-        header_layout.addWidget(self.fps_label)
+        info_layout.addWidget(self.fps_label)
         
-        # Zoom label (mostra livello di zoom corrente)
+        # Etichetta Zoom
         self.zoom_label = QLabel("🔍 100%")
         self.zoom_label.setStyleSheet("color: #5F6F52; font-size: 14px; font-weight: bold;")
         self.zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.zoom_label.setToolTip("Zoom: Ctrl+Scroll per zoomare, drag per muovere\nCtrl+0 per reset")
-        header_layout.addWidget(self.zoom_label)
+        info_layout.addWidget(self.zoom_label)
 
-        # Bottone carica video (visibile quando nessun video è caricato)
-        self.load_button = QPushButton("📁 CARICA")
-        self.load_button.setObjectName("loadVideoButton")
-        self.load_button.setProperty("compactMode", True)  # Inizia in modalità compatta (windowed)
-        self.load_button.setToolTip("Carica un video per questo slot")
-        self.load_button.clicked.connect(self.on_load_clicked)
-        header_layout.addWidget(self.load_button)
-
-        # Bottone rimuovi video (visibile quando video è caricato)
         self.remove_button = QPushButton("✕ RIMUOVI")
         self.remove_button.setObjectName("removeVideoButton")
         self.remove_button.setProperty("compactMode", True)  # Inizia in modalità compatta (windowed)
         self.remove_button.setToolTip("Rimuovi il video da questo slot")
         self.remove_button.clicked.connect(self.unload_video)
         self.remove_button.hide()
-        header_layout.addWidget(self.remove_button)
+        info_layout.addWidget(self.remove_button)
         
-        # Bottone aggiorna video dalla directory (visibile solo se c'è una directory salvata)
         self.refresh_button = QPushButton("🔄 AGGIORNA")
         self.refresh_button.setObjectName("refreshVideoButton")
         self.refresh_button.setProperty("compactMode", True)  # Inizia in modalità compatta (windowed)
         self.refresh_button.setToolTip("Carica il video più recente dalla directory")
         self.refresh_button.clicked.connect(self.refresh_video_from_directory)
         self.refresh_button.hide()
-        header_layout.addWidget(self.refresh_button)
+        info_layout.addWidget(self.refresh_button)
+
+        # --- CORREZIONE: Aggiungi stretch per spingere lo status a destra ---
+        info_layout.addStretch()
+
+        # Etichetta di stato
+        self.status_label = QLabel("NO VIDEO")
+        self.status_label.setObjectName("statusLabel")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignRight) # Allineato a destra nel suo gruppo
+        info_layout.addWidget(self.status_label)
+        # --------------------------------------------------------------------
+
+        header_layout.addWidget(info_container)
+        header_layout.addStretch()  # Spazio elastico centrale
+
+        # --- Contenitore DESTRO per pulsanti di azione ---
+        actions_container = QWidget()
+        actions_layout = QHBoxLayout(actions_container)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setSpacing(10)
+        actions_layout.setAlignment(Qt.AlignmentFlag.AlignRight)
+
+        # Pulsante Marker
+        self.add_marker_btn = QPushButton("📍")
+        self.add_marker_btn.setObjectName("headerMarkerButton")
+        self.add_marker_btn.setToolTip("Aggiungi marker alla posizione corrente (Ctrl+M)")
+        self.add_marker_btn.setFixedSize(60, 30)
+        self.add_marker_btn.setStyleSheet("padding: 0px; text-align: center;")
+        self.add_marker_btn.clicked.connect(self.add_marker_at_position)
+        self.add_marker_btn.hide()
+        actions_layout.addWidget(self.add_marker_btn)
+
+        # Pulsante Mute
+        self.mute_btn = QPushButton("🔊")
+        self.mute_btn.setObjectName("headerMuteButton")
+        self.mute_btn.setCheckable(True)
+        self.mute_btn.setToolTip("Mute/Unmute audio")
+        self.mute_btn.setFixedSize(60, 30)
+        self.mute_btn.setStyleSheet("padding: 0px; text-align: center;")
+        self.mute_btn.clicked.connect(self.toggle_mute)
+        self.mute_btn.hide()
+        actions_layout.addWidget(self.mute_btn)
+
+        # Pulsante di caricamento
+        self.load_button = QPushButton("📁 CARICA")
+        self.load_button.setObjectName("loadVideoButton")
+        self.load_button.setProperty("compactMode", True)
+        self.load_button.setToolTip("Carica un video per questo slot")
+        self.load_button.clicked.connect(self.on_load_clicked)
+        actions_layout.addWidget(self.load_button)
         
         # Forza l'applicazione degli stili compatti all'avvio (dopo che i widget sono stati aggiunti al layout)
         QTimer.singleShot(0, lambda: self._apply_compact_mode_styles())
 
-        # Status label
-        self.status_label = QLabel("NO VIDEO")
-        self.status_label.setObjectName("statusLabel")
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-        header_layout.addWidget(self.status_label)
+        header_layout.addWidget(actions_container)
 
-        layout.addLayout(header_layout)
+        # --- CORREZIONE FINALE: Aggiungi il contenitore dell'header e uno stretch sotto ---
+        layout.addWidget(header_container)
+        # Questo stretch verticale spinge l'intero header (header_container)
+        # verso l'alto, risolvendo il problema del centraggio.
+        layout.addStretch(1)
+        # --------------------------------------------------------------------------------
 
         # Container per il video
         self.video_container = QFrame()
@@ -201,7 +228,7 @@ class VideoPlayerWidget(QWidget):
         container_layout.addWidget(self.video_widget)
         self.video_widget.hide()
 
-        layout.addWidget(self.video_container, 1)
+        layout.addWidget(self.video_container)
 
         # Controlli individuali (nascosti inizialmente)
         self.controls_widget = self.create_controls()

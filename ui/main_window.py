@@ -1082,6 +1082,8 @@ class MainWindow(QMainWindow):
             for player in self.video_players:
                 player.show_controls(False)
                 # Rimuovi il limite del 80% quando torni a SYNC ON
+                # --- CORREZIONE: Rimuovi anche qualsiasi vincolo impostato da "FIT VIDEO" ---
+                # Questo ripristina il comportamento di "stretch" del layout verticale.
                 player.video_container.setMaximumHeight(16777215)
 
             # Nascondi pulsante resync
@@ -1253,12 +1255,27 @@ class MainWindow(QMainWindow):
                 available_width = player.video_widget.width()
                 
                 # Calcola l'altezza ideale mantenendo l'aspect ratio del video nativo
-                video_aspect_ratio = player.video_width / player.video_height
-                ideal_height = int(available_width / video_aspect_ratio)
+                video_aspect_ratio = player.video_width / player.video_height if player.video_height > 0 else 1.0
+                ideal_container_height = int(available_width / video_aspect_ratio)
+                
+                # --- CORREZIONE: Sottrai l'altezza dei controlli se SYNC è OFF ---
+                if not self.sync_enabled:
+                    # --- NUOVA CORREZIONE: Usa altezze fisse invece di quelle dinamiche ---
+                    # L'altezza dinamica (.height()) può essere 0 se il layout non è finalizzato.
+                    # Usiamo i valori fissi definiti nella UI.
+                    CONTROLS_FIXED_HEIGHT = 38  # Altezza dei pulsanti di controllo individuali
+                    TIMELINE_FIXED_HEIGHT = 80  # Altezza della timeline individuale
+                    
+                    total_controls_height = CONTROLS_FIXED_HEIGHT + TIMELINE_FIXED_HEIGHT
+                    
+                    # Sottrai l'altezza dei controlli dall'altezza ideale
+                    ideal_container_height -= total_controls_height
+                    
+                    logger.log_video_action(player.video_index, "Fit video (SYNC OFF)", f"Altezza controlli (fissa): {total_controls_height}px, Altezza video corretta: {ideal_container_height}px")
                 
                 # Imposta SOLO il minimum height, lascia che il maximum si adatti ai controlli
-                player.video_container.setMinimumHeight(ideal_height)
-                player.video_container.setMaximumHeight(16777215)  # Rimuovi vincolo massimo
+                player.video_container.setMinimumHeight(ideal_container_height)
+                player.video_container.setMaximumHeight(ideal_container_height)  # Imposta anche il massimo per evitare espansioni
                 
                 # Rimuovi vincoli dal widget interno per permettere adattamento
                 player.video_widget.setMinimumHeight(0)
@@ -1300,7 +1317,7 @@ class MainWindow(QMainWindow):
                     player.video_index,
                     "Video adattato",
                     f"Video nativo: {player.video_width}x{player.video_height}, "
-                    f"Altezza ideale calcolata: {ideal_height}px (aspect ratio: {video_aspect_ratio:.2f}), "
+                    f"Altezza ideale calcolata: {ideal_container_height}px (aspect ratio: {video_aspect_ratio:.2f}), "
                     f"Container: h{container_height_before}→h{container_height_after}, "
                     f"Widget: {widget_width_before}x{widget_height_before}→{widget_width_after}x{widget_height_after}, "
                     f"Viewport: {viewport_width_before}x{viewport_height_before}→{viewport_width_after}x{viewport_height_after}, "
@@ -2588,4 +2605,3 @@ class MainWindow(QMainWindow):
 
         event.accept()
         logger.log_user_action("Applicazione chiusa")
-

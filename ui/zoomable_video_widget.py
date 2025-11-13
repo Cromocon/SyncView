@@ -63,22 +63,29 @@ class ZoomableVideoWidget(QGraphicsView):
                 old_zoom = self.zoom_level
                 
                 # Salva il punto della scena sotto il mouse prima dello zoom
-                mouse_pos_view = event.position()
-                mouse_pos_scene = self.mapToScene(int(mouse_pos_view.x()), int(mouse_pos_view.y()))
+                mouse_pos_scene_raw = self.mapToScene(event.position().toPoint())
                 
-                # Verifica se il mouse è dentro il video item
-                mouse_in_video = self.video_item.contains(self.video_item.mapFromScene(mouse_pos_scene))
+                # --- FIX: Limita il punto di zoom ai bordi del video ---
+                # Questo evita che lo zoom "scappi" se il mouse è fuori dal video.
+                video_rect_scene = self.video_item.sceneBoundingRect()
+                
+                # Limita le coordinate del mouse ai bordi del video
+                clamped_x = max(video_rect_scene.left(), min(mouse_pos_scene_raw.x(), video_rect_scene.right()))
+                clamped_y = max(video_rect_scene.top(), min(mouse_pos_scene_raw.y(), video_rect_scene.bottom()))
+                
+                # Usa il punto "clamped" (limitato) come target per lo zoom
+                zoom_target_scene = QPointF(clamped_x, clamped_y)
+                # ---------------------------------------------------------
                 
                 self.zoom_level = new_zoom
                 self._apply_transform()
                 
                 if self.zoom_level == self.min_zoom:
-                    # Se torniamo a 100%, centra sul video
+                    # Se torniamo allo zoom minimo, centra sempre sul video
                     self.centerOn(self.video_item)
-                elif mouse_in_video and old_zoom >= self.min_zoom:
-                    # Se il mouse è sul video, zoom verso il punto del mouse
-                    # Calcola dove centrare la vista per mantenere il punto sotto il mouse
-                    self.centerOn(mouse_pos_scene)
+                elif old_zoom >= self.min_zoom:
+                    # Altrimenti, centra sul punto target calcolato (che sia dentro o sul bordo del video)
+                    self.centerOn(zoom_target_scene)
                 else:
                     # Altrimenti zoom al centro del video
                     self.centerOn(self.video_item)
