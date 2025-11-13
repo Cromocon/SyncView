@@ -5,13 +5,14 @@ Gestisce la griglia video 2x2 e i controlli globali.
 
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QGridLayout, QPushButton, QLabel, QComboBox,
-                             QGroupBox, QCheckBox, QMessageBox, QFileDialog)
+                             QGroupBox, QCheckBox, QMessageBox, QFileDialog,
+                             QApplication)
 # --- MODIFICHE IMPORT ---
 from PyQt6.QtCore import Qt, QTimer, QEvent, QObject, QThread
 # ------------------------
 from PyQt6.QtGui import QKeySequence, QMouseEvent
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Any
 import sys
 import subprocess
 import shutil
@@ -317,6 +318,9 @@ class MainWindow(QMainWindow):
         else:
             logger.log_user_action("Auto-load disabilitato", "I video vanno caricati manualmente")
 
+        # Inizializza i controlli in modalità windowed (compatta) all'avvio
+        QTimer.singleShot(100, lambda: self._initialize_window_mode())
+
         logger.log_user_action("Finestra principale creata", "Fase 1 avviata")
 
     def setup_ui(self):
@@ -357,12 +361,12 @@ class MainWindow(QMainWindow):
         content_layout.setContentsMargins(10, 10, 10, 10)
         content_layout.setSpacing(10)
 
-        # === SIDEBAR SINISTRA CON CONTROLLI ===
+        # === SIDEBAR SINISTRA CON CONTROLLI (25% della larghezza) ===
         sidebar_widget = QWidget()
         sidebar_layout = QVBoxLayout(sidebar_widget)
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
         sidebar_layout.setSpacing(10)
-        sidebar_widget.setFixedWidth(280)  # Larghezza fissa per sidebar
+        # Rimosso setFixedWidth per usare stretch factor
 
         # Controlli globali in sidebar
         controls = self.create_global_controls()
@@ -383,10 +387,10 @@ class MainWindow(QMainWindow):
 
         sidebar_layout.addStretch()  # Push controls to top
 
-        # Aggiungi sidebar al layout principale
-        content_layout.addWidget(sidebar_widget)
+        # Aggiungi sidebar al layout principale con stretch 1 (25% se right ha stretch 3)
+        content_layout.addWidget(sidebar_widget, 1)
 
-        # === CONTENUTO DESTRO (VIDEO + TIMELINE) ===
+        # === CONTENUTO DESTRO (VIDEO + TIMELINE) (75% della larghezza) ===
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -404,8 +408,8 @@ class MainWindow(QMainWindow):
         self.timeline_widget.marker_remove_requested.connect(self.on_marker_remove_requested)
         right_layout.addWidget(self.timeline_widget)
 
-        # Aggiungi contenuto destro al layout principale
-        content_layout.addWidget(right_widget, 1)  # Stretch per occupare tutto lo spazio
+        # Aggiungi contenuto destro al layout principale con stretch 3 (75%)
+        content_layout.addWidget(right_widget, 3)  # 3:1 ratio = 75%:25%
 
         # Aggiungi content al container interno
         inner_layout.addWidget(content_widget)
@@ -465,6 +469,24 @@ class MainWindow(QMainWindow):
         drag_spacer.installEventFilter(title_bar)
         layout.addWidget(drag_spacer, 1)
 
+        # Pulsante Guida (compatto, nella title bar)
+        self.help_button_title = QPushButton("❓")
+        self.help_button_title.setFixedSize(35, 40)
+        self.help_button_title.setToolTip("Mostra Guida (F1)")
+        self.help_button_title.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                color: #d4a356;
+                font-size: 16px;
+            }
+            QPushButton:hover {
+                background-color: rgba(212, 163, 86, 0.2);
+            }
+        """)
+        self.help_button_title.clicked.connect(self.show_help)
+        layout.addWidget(self.help_button_title)
+
         # Status indicator (QLabel normale - event filter gestirà il drag)
         self.status_indicator = QLabel("● SISTEMA OPERATIVO")
         self.status_indicator.setStyleSheet("color: #5fa373; font-weight: bold; font-size: 12px; padding-right: 15px;")
@@ -503,6 +525,14 @@ class MainWindow(QMainWindow):
         """Crea la griglia 2x2 dei player video."""
         grid = QGridLayout()
         grid.setSpacing(10)
+        
+        # Imposta stretch uniforme per le colonne (50% ciascuna)
+        grid.setColumnStretch(0, 1)  # Colonna sinistra: 50%
+        grid.setColumnStretch(1, 1)  # Colonna destra: 50%
+        
+        # Imposta stretch uniforme per le righe (50% ciascuna)
+        grid.setRowStretch(0, 1)  # Riga superiore: 50%
+        grid.setRowStretch(1, 1)  # Riga inferiore: 50%
 
         # Crea 4 player video in griglia 2x2
         for i in range(4):
@@ -547,26 +577,66 @@ class MainWindow(QMainWindow):
         playback_label.setStyleSheet("font-weight: bold; color: #d4a356;")
         layout.addWidget(playback_label)
 
-        # Pulsante Play/Pausa unificato (largo)
+        # Pulsante Play/Pausa unificato (largo) - salvato in un contenitore per gestire il layout
+        self.play_pause_container = QWidget()
+        play_pause_layout = QVBoxLayout(self.play_pause_container)
+        play_pause_layout.setContentsMargins(0, 0, 0, 0)
+        play_pause_layout.setSpacing(0)
+        
         self.play_pause_button = QPushButton("▶ PLAY")
         self.play_pause_button.setObjectName("playButton")
         self.play_pause_button.setToolTip("Play/Pausa (Spazio)")
         self.play_pause_button.setMinimumHeight(40)
         self.play_pause_button.clicked.connect(self.toggle_play_pause_global)
-        layout.addWidget(self.play_pause_button)
+        play_pause_layout.addWidget(self.play_pause_button)
+        layout.addWidget(self.play_pause_container)
 
-        # Pulsanti navigazione (compatti)
-        nav_layout = QHBoxLayout()
+        # Pulsanti navigazione (compatti) - contenitore per layout normale
+        self.nav_normal_container = QWidget()
+        nav_normal_layout = QHBoxLayout(self.nav_normal_container)
+        nav_normal_layout.setContentsMargins(0, 0, 0, 0)
+        nav_normal_layout.setSpacing(5)
+        
         self.to_start_button = QPushButton("⏮")
         self.to_start_button.setToolTip("Vai all'inizio (Home)")
         self.to_start_button.clicked.connect(self.global_to_start)
-        nav_layout.addWidget(self.to_start_button)
+        nav_normal_layout.addWidget(self.to_start_button)
 
         self.to_end_button = QPushButton("⏭")
         self.to_end_button.setToolTip("Vai alla fine (End)")
         self.to_end_button.clicked.connect(self.global_to_end)
-        nav_layout.addWidget(self.to_end_button)
-        layout.addLayout(nav_layout)
+        nav_normal_layout.addWidget(self.to_end_button)
+        layout.addWidget(self.nav_normal_container)
+        
+        # Contenitore compatto per frame mode (play/pause e navigazione sulla stessa riga)
+        self.nav_compact_container = QWidget()
+        nav_compact_layout = QHBoxLayout(self.nav_compact_container)
+        nav_compact_layout.setContentsMargins(0, 0, 0, 0)
+        nav_compact_layout.setSpacing(5)
+        
+        self.to_start_button_compact = QPushButton("⏮")
+        self.to_start_button_compact.setObjectName("compactNavButton")
+        self.to_start_button_compact.setToolTip("Vai all'inizio (Home)")
+        self.to_start_button_compact.setFixedSize(75, 35)
+        self.to_start_button_compact.clicked.connect(self.global_to_start)
+        nav_compact_layout.addWidget(self.to_start_button_compact)
+        
+        self.play_pause_button_compact = QPushButton("▶")
+        self.play_pause_button_compact.setObjectName("compactPlayButton")
+        self.play_pause_button_compact.setToolTip("Play/Pausa (Spazio)")
+        self.play_pause_button_compact.setFixedSize(75, 35)
+        self.play_pause_button_compact.clicked.connect(self.toggle_play_pause_global)
+        nav_compact_layout.addWidget(self.play_pause_button_compact)
+        
+        self.to_end_button_compact = QPushButton("⏭")
+        self.to_end_button_compact.setObjectName("compactNavButton")
+        self.to_end_button_compact.setToolTip("Vai alla fine (End)")
+        self.to_end_button_compact.setFixedSize(75, 35)
+        self.to_end_button_compact.clicked.connect(self.global_to_end)
+        nav_compact_layout.addWidget(self.to_end_button_compact)
+        
+        layout.addWidget(self.nav_compact_container)
+        self.nav_compact_container.hide()  # Nascosto di default
 
         # Audio master
         self.master_mute_button = QPushButton("🔊 AUDIO MASTER")
@@ -582,18 +652,20 @@ class MainWindow(QMainWindow):
         settings_label.setStyleSheet("font-weight: bold; color: #d4a356;")
         layout.addWidget(settings_label)
 
-        # FPS selector
-        fps_layout = QVBoxLayout()
+        # FPS selector (salvato come attributo per nascondere in frame mode)
+        self.fps_selector_widget = QWidget()
+        fps_layout = QVBoxLayout(self.fps_selector_widget)
+        fps_layout.setContentsMargins(0, 0, 0, 0)
         fps_label = QLabel("FPS:")
         fps_layout.addWidget(fps_label)
 
         self.fps_combo = QComboBox()
         self.fps_combo.addItems(DEFAULT_FPS_OPTIONS)
         self.fps_combo.setCurrentText("Auto")
-        self.fps_combo.setToolTip("Seleziona FPS (non influenza la velocità)")
+        self.fps_combo.setToolTip("Seleziona FPS target per riproduzione (adatta la velocità mantenendo la durata)")
         self.fps_combo.currentTextChanged.connect(self.on_fps_changed)
         fps_layout.addWidget(self.fps_combo)
-        layout.addLayout(fps_layout)
+        layout.addWidget(self.fps_selector_widget)
 
         # Sync checkbox
         self.sync_checkbox = QCheckBox("Sincronizzazione Attiva")
@@ -610,6 +682,12 @@ class MainWindow(QMainWindow):
         self.resync_button.clicked.connect(self.resync_all)
         self.resync_button.hide()
         layout.addWidget(self.resync_button)
+        
+        # Fit video button (sempre visibile)
+        self.fit_video_button = QPushButton("📐 FIT VIDEO")
+        self.fit_video_button.setToolTip("Adatta i video ai container (Ctrl+R)")
+        self.fit_video_button.clicked.connect(self.fit_all_videos)
+        layout.addWidget(self.fit_video_button)
 
         # Frame mode checkbox
         self.frame_mode_checkbox = QCheckBox("Modalità Frame")
@@ -618,12 +696,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.frame_mode_checkbox)
 
         layout.addSpacing(10)
-
-        # Guida button
-        help_button = QPushButton("❓ GUIDA")
-        help_button.setToolTip("Mostra Guida (F1)")
-        help_button.clicked.connect(self.show_help)
-        layout.addWidget(help_button)
 
         return group_box
 
@@ -708,6 +780,10 @@ class MainWindow(QMainWindow):
         # Ctrl+F per toggle frame mode
         frame_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
         frame_shortcut.activated.connect(lambda: self.frame_mode_checkbox.toggle())
+        
+        # Ctrl+R per fit video
+        fit_shortcut = QShortcut(QKeySequence("Ctrl+R"), self)
+        fit_shortcut.activated.connect(self.fit_all_videos)
 
         # Rimosso duplicato per Spazio
         # play_pause_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Space), self)
@@ -756,6 +832,17 @@ class MainWindow(QMainWindow):
         # --- MODIFICA CONNESSIONE ESPORTA ---
         export_markers_shortcut.activated.connect(self.start_export_process)
         # ------------------------------------
+        
+        # Ctrl+0 per reset zoom su tutti i video
+        reset_zoom_shortcut = QShortcut(QKeySequence("Ctrl+0"), self)
+        reset_zoom_shortcut.activated.connect(self.reset_all_zoom)
+
+    def reset_all_zoom(self):
+        """Resetta lo zoom e pan di tutti i video player."""
+        for player in self.video_players:
+            if player.is_loaded:
+                player.reset_zoom()
+        logger.log_user_action("Zoom reset globale", "Tutti i video resettati a 100%")
 
     def on_left_arrow_pressed(self):
         """Gestisce la pressione della freccia sinistra."""
@@ -863,6 +950,8 @@ class MainWindow(QMainWindow):
                     player.pause()
             self.play_pause_button.setText("▶ PLAY")
             self.play_pause_button.setObjectName("playButton")
+            self.play_pause_button_compact.setText("▶")
+            self.play_pause_button_compact.setObjectName("compactPlayButton")
         else:
             # Play tutti
             logger.log_user_action("Play globale")
@@ -875,6 +964,8 @@ class MainWindow(QMainWindow):
                     player.play()
             self.play_pause_button.setText("⏸ PAUSA")
             self.play_pause_button.setObjectName("pauseButton")
+            self.play_pause_button_compact.setText("⏸")
+            self.play_pause_button_compact.setObjectName("compactPauseButton")
             # Aggiorna anche current_playback_rate interno
             self.current_playback_rate = 1.0
             # Resetta il combo box a "Auto" senza emettere segnale
@@ -883,11 +974,15 @@ class MainWindow(QMainWindow):
             self.fps_combo.blockSignals(False)
 
 
-        # Riapplica lo stile
+        # Riapplica lo stile a entrambi i pulsanti
         style = self.play_pause_button.style()
         if style:
             style.unpolish(self.play_pause_button)  # type: ignore[attr-defined]
             style.polish(self.play_pause_button)  # type: ignore[attr-defined]
+        style_compact = self.play_pause_button_compact.style()
+        if style_compact:
+            style_compact.unpolish(self.play_pause_button_compact)  # type: ignore[attr-defined]
+            style_compact.polish(self.play_pause_button_compact)  # type: ignore[attr-defined]
 
     def global_to_start(self):
         """Porta tutti i video all'inizio."""
@@ -919,9 +1014,27 @@ class MainWindow(QMainWindow):
 
         self.master_mute_button.setText("🔇 AUDIO MUTO" if is_muted else "🔊 AUDIO MASTER")
 
-    # --- MODIFICA: on_fps_changed ora non imposta il playbackRate ---
+    def get_selected_fps(self):
+        """Ottiene il valore FPS attualmente selezionato nel combo box.
+        
+        Returns:
+            float: FPS selezionato, o None se "Auto"
+        """
+        fps_text = self.fps_combo.currentText()
+        
+        if fps_text == "Auto":
+            return None
+        elif fps_text == "Personalizzato":
+            return self.custom_fps
+        else:
+            # Estrae il numero dalla stringa (es. "24 fps" -> 24.0)
+            try:
+                return float(fps_text.replace(" fps", ""))
+            except ValueError:
+                return None
+    
     def on_fps_changed(self, fps_text):
-        """Gestisce il cambio di selezione FPS (non influenza la velocità)."""
+        """Gestisce il cambio di selezione FPS e applica il playback rate appropriato."""
         logger.log_user_action("Selezione FPS cambiata", fps_text)
 
         # Se si seleziona "Personalizzato", apri il dialog
@@ -930,19 +1043,33 @@ class MainWindow(QMainWindow):
             if custom_fps is not None:
                 self.custom_fps = custom_fps
                 logger.log_user_action("FPS Personalizzato selezionato", f"{custom_fps:.3f} fps")
-                # Qui potremmo salvare questo valore per usarlo altrove (es. export)
             else:
                 # L'utente ha annullato, reimposta il combo box a "Auto"
                 self.fps_combo.blockSignals(True)
                 self.fps_combo.setCurrentText("Auto")
                 self.fps_combo.blockSignals(False)
+                return
 
-        # Altrimenti, semplicemente registra la selezione
-        # Nessuna modifica al playbackRate
-        # self.current_playback_rate rimane 1.0
-        # for player in self.video_players:
-        #     if player.is_loaded:
-        #         player.set_playback_rate(1.0) # Assicura che sia sempre 1.0x
+        # Applica il playback rate a tutti i video caricati
+        target_fps = self.get_selected_fps()
+        
+        for player in self.video_players:
+            if player.is_loaded and player.detected_fps > 0:
+                if target_fps is None:
+                    # Auto: playback rate = 1.0 (velocità normale)
+                    player.set_playback_rate(1.0)
+                    logger.log_video_action(player.video_index, "Playback rate", "1.0x (Auto)")
+                else:
+                    # Calcola il playback rate: native_fps / target_fps
+                    # Es: video 24fps, target 60fps -> rate = 24/60 = 0.4 (rallenta)
+                    # Es: video 60fps, target 24fps -> rate = 60/24 = 2.5 (accelera)
+                    rate = player.detected_fps / target_fps
+                    player.set_playback_rate(rate)
+                    logger.log_video_action(
+                        player.video_index, 
+                        "Playback rate adattato per FPS", 
+                        f"{rate:.3f}x (nativo: {player.detected_fps:.2f}fps -> target: {target_fps:.2f}fps)"
+                    )
 
 
     def toggle_sync(self, state):
@@ -951,9 +1078,11 @@ class MainWindow(QMainWindow):
         self.sync_manager.set_sync_enabled(self.sync_enabled)
 
         if self.sync_enabled:
-            # SYNC ON: Nascondi controlli individuali
+            # SYNC ON: Nascondi controlli individuali e rimuovi limite altezza video
             for player in self.video_players:
                 player.show_controls(False)
+                # Rimuovi il limite del 80% quando torni a SYNC ON
+                player.video_container.setMaximumHeight(16777215)
 
             # Nascondi pulsante resync
             self.resync_button.hide()
@@ -970,11 +1099,24 @@ class MainWindow(QMainWindow):
             for player in self.video_players:
                 player.hide_timeline()
         else:
-            # SYNC OFF: Mostra controlli solo per video caricati
+            # SYNC OFF: Mostra controlli e limita video all'80% dell'altezza player
             for player in self.video_players:
                 # Mostra controlli solo se il video è caricato
                 if player.is_loaded:
                     player.show_controls(True)
+                    
+                    # Calcola l'80% dell'altezza totale del player per il video container
+                    player_total_height = player.height()
+                    max_video_height = int(player_total_height * 0.8)
+                    
+                    # Limita il container video all'80% lasciando 20% per i controlli
+                    player.video_container.setMaximumHeight(max_video_height)
+                    
+                    logger.log_video_action(
+                        player.video_index,
+                        "Container limitato per controlli",
+                        f"Player h:{player_total_height}px, Container max: {max_video_height}px (80%)"
+                    )
                 else:
                     player.show_controls(False)
 
@@ -995,11 +1137,24 @@ class MainWindow(QMainWindow):
                     player.show_timeline()
                 else:
                     player.hide_timeline()
+        
+        # Forza aggiornamento layout dopo cambio visibilità controlli
+        QApplication.processEvents()
+        for player in self.video_players:
+            if player.is_loaded:
+                # Invalida il layout per far spazio ai controlli se necessario
+                player.layout().invalidate()
+                player.layout().activate()
+                player.updateGeometry()
+        QApplication.processEvents()
+        
+        logger.log_user_action("Sincronizzazione", "ON" if self.sync_enabled else "OFF")
 
     def on_video_load_state_changed(self, video_index: int, is_loaded: bool):
         """Gestisce il cambio di stato di caricamento di un video.
         
         Aggiorna la visibilità dei controlli individuali in base allo stato di sync.
+        Applica il playback rate basato sul FPS selezionato se il video è appena stato caricato.
         """
         player = self.video_players[video_index]
         
@@ -1011,6 +1166,22 @@ class MainWindow(QMainWindow):
             else:
                 player.show_controls(False)
                 player.hide_timeline()
+        
+        # Se il video è appena stato caricato, applica il playback rate basato sul FPS selezionato
+        if is_loaded and player.detected_fps > 0:
+            target_fps = self.get_selected_fps()
+            if target_fps is None:
+                # Auto: mantieni velocità normale
+                player.set_playback_rate(1.0)
+            else:
+                # Applica il rate calcolato
+                rate = player.detected_fps / target_fps
+                player.set_playback_rate(rate)
+                logger.log_video_action(
+                    video_index,
+                    "Playback rate applicato al caricamento",
+                    f"{rate:.3f}x (nativo: {player.detected_fps:.2f}fps -> target: {target_fps:.2f}fps)"
+                )
         
         logger.log_video_action(
             video_index,
@@ -1056,6 +1227,93 @@ class MainWindow(QMainWindow):
 
             if not fallback_success:
                  QMessageBox.warning(self, "Errore", "Nessun video caricato da usare come riferimento!")
+    
+    def fit_all_videos(self):
+        """Adatta i container video alle dimensioni native dei video (100% zoom).
+        
+        Calcola le dimensioni che il video avrebbe al 100% di zoom (senza zoom)
+        e adatta il container a quelle dimensioni mantenendo l'aspect ratio.
+        """
+        logger.log_user_action("Fit video manuale", "Adattamento container alle dimensioni native")
+        
+        # Forza processamento eventi pending per stabilizzare layout
+        QApplication.processEvents()
+        
+        fitted_count = 0
+        for player in self.video_players:
+            if player.is_loaded and player.video_width > 0 and player.video_height > 0:
+                # Log dimensioni PRIMA dell'adattamento
+                widget_width_before = player.video_widget.width()
+                widget_height_before = player.video_widget.height()
+                viewport_width_before = player.video_widget.viewport().rect().width()
+                viewport_height_before = player.video_widget.viewport().rect().height()
+                container_height_before = player.video_container.height()
+                
+                # Calcola la larghezza disponibile per il video (rispettando i margini)
+                available_width = player.video_widget.width()
+                
+                # Calcola l'altezza ideale mantenendo l'aspect ratio del video nativo
+                video_aspect_ratio = player.video_width / player.video_height
+                ideal_height = int(available_width / video_aspect_ratio)
+                
+                # Imposta SOLO il minimum height, lascia che il maximum si adatti ai controlli
+                player.video_container.setMinimumHeight(ideal_height)
+                player.video_container.setMaximumHeight(16777215)  # Rimuovi vincolo massimo
+                
+                # Rimuovi vincoli dal widget interno per permettere adattamento
+                player.video_widget.setMinimumHeight(0)
+                player.video_widget.setMaximumHeight(16777215)
+                
+                # Invalida il layout per forzare il ricalcolo
+                player.layout().invalidate()
+                player.layout().activate()
+                
+                # Aggiorna geometry
+                player.video_widget.updateGeometry()
+                player.video_container.updateGeometry()
+                player.updateGeometry()
+                
+                # Process events per permettere al layout di ricalcolare
+                QApplication.processEvents()
+                
+                # Reset zoom per mostrare il video al 100% (senza zoom)
+                player.video_widget.reset_zoom_pan()
+                
+                # Se i controlli sono visibili (SYNC OFF), ridimensionali
+                if player.controls_widget.isVisible():
+                    QTimer.singleShot(100, player.resize_controls_to_video)
+                
+                fitted_count += 1
+                
+                # Log dimensioni dopo l'adattamento
+                widget_width_after = player.video_widget.width()
+                widget_height_after = player.video_widget.height()
+                viewport_width_after = player.video_widget.viewport().rect().width()
+                viewport_height_after = player.video_widget.viewport().rect().height()
+                container_height_after = player.video_container.height()
+                
+                # Calcola percentuale di copertura del container (quanto il viewport copre il container)
+                coverage_before = (viewport_height_before / container_height_before * 100) if container_height_before > 0 else 0
+                coverage_after = (viewport_height_after / container_height_after * 100) if container_height_after > 0 else 0
+                
+                logger.log_video_action(
+                    player.video_index,
+                    "Video adattato",
+                    f"Video nativo: {player.video_width}x{player.video_height}, "
+                    f"Altezza ideale calcolata: {ideal_height}px (aspect ratio: {video_aspect_ratio:.2f}), "
+                    f"Container: h{container_height_before}→h{container_height_after}, "
+                    f"Widget: {widget_width_before}x{widget_height_before}→{widget_width_after}x{widget_height_after}, "
+                    f"Viewport: {viewport_width_before}x{viewport_height_before}→{viewport_width_after}x{viewport_height_after}, "
+                    f"Copertura: {coverage_before:.1f}%→{coverage_after:.1f}%"
+                )
+        
+        if fitted_count > 0:
+            logger.log_user_action(
+                "Fit video completato",
+                f"{fitted_count} video adattati"
+            )
+        else:
+            logger.log_user_action("Fit video", "Nessun video caricato da adattare")
 
     # --- MODIFICA: Accetta master_position e master_index ---
     def _force_timeline_updates(self, master_position: int, master_index: int):
@@ -1118,15 +1376,34 @@ class MainWindow(QMainWindow):
             for player in self.video_players:
                 if player.is_loaded:
                     player.pause()
-            self.play_pause_button.setText("▶ PLAY")
-            self.play_pause_button.setObjectName("playButton")
-            style = self.play_pause_button.style()
+            
+            # Aggiorna pulsanti compatti
+            self.play_pause_button_compact.setText("▶")
+            self.play_pause_button_compact.setObjectName("compactPlayButton")
+            style = self.play_pause_button_compact.style()
             if style:
-                style.unpolish(self.play_pause_button)  # type: ignore[attr-defined]
-                style.polish(self.play_pause_button)  # type: ignore[attr-defined]
+                style.unpolish(self.play_pause_button_compact)  # type: ignore[attr-defined]
+                style.polish(self.play_pause_button_compact)  # type: ignore[attr-defined]
+            
+            # Nascondi FPS selector
+            self.fps_selector_widget.hide()
+            
+            # Cambia layout pulsanti: nascondi normali, mostra compatti
+            self.play_pause_container.hide()
+            self.nav_normal_container.hide()
+            self.nav_compact_container.show()
+            
             # Mostra controlli frame
             self.frame_controls_widget.show()
         else:
+            # Mostra FPS selector
+            self.fps_selector_widget.show()
+            
+            # Ripristina layout normale
+            self.play_pause_container.show()
+            self.nav_normal_container.show()
+            self.nav_compact_container.hide()
+            
             # Nasconde controlli frame
             self.frame_controls_widget.hide()
 
@@ -1180,6 +1457,7 @@ class MainWindow(QMainWindow):
             "<li><b>Ctrl+E:</b> Esporta clip</li>"
             "<li><b>Ctrl+S:</b> Toggle sincronizzazione</li>"
             "<li><b>Ctrl+F:</b> Toggle modalità frame</li>"
+            "<li><b>Ctrl+R:</b> Fit video ai container</li>"
             "<li><b>F11:</b> Toggle fullscreen</li>"
             "</ul>"
             "<p><b>Controlli Video:</b></p>"
@@ -1598,6 +1876,18 @@ class MainWindow(QMainWindow):
         # 3. Ottieni i secondi N e M dai controlli timeline
         sec_before, sec_after = self.timeline_controls.get_export_times()
         
+        # 3.5 VALIDAZIONE MARKER: Controlla se ci sono marker con tempo insufficiente
+        problematic_markers = self._validate_markers_for_export(
+            markers, video_paths, sec_before, sec_after
+        )
+        
+        if problematic_markers:
+            # Mostra warning dialog con i marker problematici
+            if not self._show_marker_validation_warning(problematic_markers, sec_before, sec_after):
+                # L'utente ha scelto di annullare
+                logger.log_export_action("Esportazione annullata - marker con tempo insufficiente")
+                return
+        
         # 4. Apri dialog semplificato (solo destinazione e qualità)
         config = SimpleExportDialog.get_export_config_simple(self)
         
@@ -1650,6 +1940,202 @@ class MainWindow(QMainWindow):
             "Export avviato",
             f"FFmpeg, {max_workers} workers, {config['quality'].name}, HW: Enabled, Retry: 3"
         )
+    
+    def _validate_markers_for_export(
+        self, 
+        markers: List[Marker], 
+        video_paths: Dict[int, Path], 
+        sec_before: float, 
+        sec_after: float
+    ) -> List[Dict[str, Any]]:
+        """Valida i marker per l'export e ritorna una lista di marker problematici.
+        
+        Args:
+            markers: Lista di marker da validare
+            video_paths: Dict di video paths {video_index: Path}
+            sec_before: Secondi richiesti prima del marker
+            sec_after: Secondi richiesti dopo il marker
+            
+        Returns:
+            Lista di dict con informazioni sui marker problematici:
+            {
+                'marker': Marker,
+                'video_index': int,
+                'issue': str ('before'|'after'|'both'),
+                'position_sec': float,
+                'duration_sec': float,
+                'available_before': float,
+                'available_after': float
+            }
+        """
+        problematic = []
+        
+        for marker in markers:
+            # Per marker globali (video_index is None), controlla tutti i video
+            videos_to_check = video_paths.keys() if marker.video_index is None else [marker.video_index]
+            
+            for video_idx in videos_to_check:
+                if video_idx not in video_paths:
+                    continue
+                
+                # Ottieni durata del video
+                player = self.video_players[video_idx]
+                if not player.is_loaded:
+                    continue
+                
+                duration_ms = player.get_duration()
+                if duration_ms <= 0:
+                    continue
+                
+                duration_sec = duration_ms / 1000.0
+                marker_pos_sec = marker.timestamp / 1000.0
+                
+                # Calcola tempo disponibile prima e dopo
+                available_before = marker_pos_sec
+                available_after = duration_sec - marker_pos_sec
+                
+                # Determina il problema
+                issue = None
+                if available_before < sec_before and available_after < sec_after:
+                    issue = 'both'
+                elif available_before < sec_before:
+                    issue = 'before'
+                elif available_after < sec_after:
+                    issue = 'after'
+                
+                if issue:
+                    problematic.append({
+                        'marker': marker,
+                        'video_index': video_idx,
+                        'issue': issue,
+                        'position_sec': marker_pos_sec,
+                        'duration_sec': duration_sec,
+                        'available_before': available_before,
+                        'available_after': available_after
+                    })
+        
+        return problematic
+    
+    def _show_marker_validation_warning(
+        self, 
+        problematic_markers: List[Dict[str, Any]], 
+        sec_before: float, 
+        sec_after: float
+    ) -> bool:
+        """Mostra un dialog di warning per i marker problematici.
+        
+        Args:
+            problematic_markers: Lista di marker problematici dal metodo validate
+            sec_before: Secondi richiesti prima del marker
+            sec_after: Secondi richiesti dopo del marker
+            
+        Returns:
+            True se l'utente vuole procedere comunque, False se annulla
+        """
+        from PyQt6.QtWidgets import QMessageBox, QTextEdit
+        
+        # Costruisci messaggio dettagliato
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.setWindowTitle("⚠ Marker con Tempo Insufficiente")
+        msg.setStandardButtons(
+            QMessageBox.StandardButton.Yes | 
+            QMessageBox.StandardButton.No
+        )
+        
+        # Testo principale
+        count = len(problematic_markers)
+        msg.setText(
+            f"Trovati {count} marker con tempo insufficiente per i requisiti di export.\n\n"
+            f"Requisiti: {sec_before:.1f}s prima + {sec_after:.1f}s dopo del marker\n\n"
+            "I clip esportati saranno più corti del previsto."
+        )
+        
+        # Dettagli dei marker problematici
+        details = []
+        for item in problematic_markers:
+            marker = item['marker']
+            video_idx = item['video_index']
+            issue = item['issue']
+            pos_sec = item['position_sec']
+            available_before = item['available_before']
+            available_after = item['available_after']
+            
+            # Formatta posizione
+            pos_str = self._format_time_for_display(pos_sec)
+            
+            # Descrizione problema
+            if issue == 'both':
+                problem = f"Tempo insufficiente PRIMA ({available_before:.2f}s disponibili) e DOPO ({available_after:.2f}s disponibili)"
+            elif issue == 'before':
+                problem = f"Tempo insufficiente PRIMA del marker (disponibili: {available_before:.2f}s, richiesti: {sec_before:.1f}s)"
+            else:  # after
+                problem = f"Tempo insufficiente DOPO del marker (disponibili: {available_after:.2f}s, richiesti: {sec_after:.1f}s)"
+            
+            # Descrizione marker o posizione
+            marker_label = marker.description if marker.description else f"Marker @ {pos_str}"
+            feed_name = "Tutti i feed" if marker.video_index is None else f"Feed-{video_idx + 1}"
+            
+            details.append(f"• {marker_label} ({feed_name})\n  Posizione: {pos_str}\n  {problem}\n")
+        
+        details_text = "\n".join(details)
+        msg.setInformativeText("Dettagli marker problematici:")
+        msg.setDetailedText(details_text)
+        
+        # Personalizza pulsanti
+        yes_btn = msg.button(QMessageBox.StandardButton.Yes)
+        no_btn = msg.button(QMessageBox.StandardButton.No)
+        
+        if yes_btn:
+            yes_btn.setText("Procedi Comunque")
+        if no_btn:
+            no_btn.setText("Annulla Export")
+        
+        # Stile
+        msg.setStyleSheet("""
+            QMessageBox {
+                background-color: #1C1C1E;
+                color: #e0e0e0;
+            }
+            QLabel {
+                color: #e0e0e0;
+                font-size: 13px;
+            }
+            QPushButton {
+                background-color: #5F6F52;
+                color: #ffffff;
+                border: 1px solid #798969;
+                border-radius: 3px;
+                padding: 8px 15px;
+                min-width: 120px;
+            }
+            QPushButton:hover {
+                background-color: #798969;
+            }
+        """)
+        
+        logger.log_export_action(
+            "Marker validation warning",
+            f"{count} marker con tempo insufficiente"
+        )
+        
+        # Mostra dialog e ritorna la scelta
+        result = msg.exec()
+        return result == QMessageBox.StandardButton.Yes
+    
+    def _format_time_for_display(self, seconds: float) -> str:
+        """Formatta i secondi in formato HH:MM:SS.mmm
+        
+        Args:
+            seconds: Tempo in secondi (può avere decimali)
+            
+        Returns:
+            Stringa formattata come HH:MM:SS.mmm
+        """
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = seconds % 60
+        return f"{hours:02d}:{minutes:02d}:{secs:06.3f}"
     
     def _enter_export_modal_state(self):
         """Disabilita controlli durante export."""
@@ -2023,6 +2509,11 @@ class MainWindow(QMainWindow):
                     obj.setToolTip("")
         
         return super().eventFilter(obj, event)
+    
+    def _initialize_window_mode(self):
+        """Inizializza i controlli dei video player in modalità windowed all'avvio."""
+        for player in self.video_players:
+            player.update_controls_for_fullscreen(False)  # False = windowed mode
 
     def changeEvent(self, event):  # type: ignore[override]
         """Gestisce i cambiamenti di stato della finestra (es. fullscreen/maximized)."""
@@ -2038,7 +2529,6 @@ class MainWindow(QMainWindow):
             
             # Aggiorna i controlli di tutti i video player
             for player in self.video_players:
-                player.is_fullscreen = is_fullscreen
                 player.update_controls_for_fullscreen(is_fullscreen)
             
             logger.log_user_action(

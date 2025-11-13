@@ -69,9 +69,18 @@ def get_main_stylesheet():
     QPushButton#loadVideoButton {{
         background-color: {THEME_COLORS['verde_ranger']};
         border-color: {THEME_COLORS['verde_ranger_hover']};
-        min-width: 70px;
+        min-width: 90px;
         padding: 5px 10px;
         font-size: 11px;
+    }}
+    
+    QPushButton#loadVideoButton[compactMode="true"] {{
+        min-width: 45px;
+        max-width: 45px;
+        min-height: 35px;
+        max-height: 35px;
+        padding: 0px;
+        font-size: 16px;
     }}
     
     QPushButton#loadVideoButton:hover {{
@@ -81,13 +90,80 @@ def get_main_stylesheet():
     QPushButton#removeVideoButton {{
         background-color: {THEME_COLORS['rosso_squadra']};
         border-color: {THEME_COLORS['rosso_squadra_hover']};
-        min-width: 70px;
+        min-width: 90px;
         padding: 5px 10px;
         font-size: 11px;
     }}
     
+    QPushButton#removeVideoButton[compactMode="true"] {{
+        min-width: 45px;
+        max-width: 45px;
+        min-height: 35px;
+        max-height: 35px;
+        padding: 0px;
+        font-size: 16px;
+    }}
+    
     QPushButton#removeVideoButton:hover {{
         background-color: {THEME_COLORS['rosso_squadra_hover']};
+    }}
+    
+    QPushButton#refreshVideoButton {{
+        background-color: {THEME_COLORS['verde_ranger']};
+        border-color: {THEME_COLORS['verde_ranger_hover']};
+        min-width: 110px;
+        padding: 5px 10px;
+        font-size: 11px;
+    }}
+    
+    QPushButton#refreshVideoButton[compactMode="true"] {{
+        min-width: 45px;
+        max-width: 45px;
+        min-height: 35px;
+        max-height: 35px;
+        padding: 0px;
+        font-size: 16px;
+    }}
+    
+    QPushButton#refreshVideoButton:hover {{
+        background-color: {THEME_COLORS['verde_ranger_hover']};
+    }}
+    
+    /* Pulsanti compatti per Frame Mode */
+    QPushButton#compactPlayButton, QPushButton#compactPauseButton {{
+        background-color: {THEME_COLORS['verde_ranger']};
+        border: 2px solid {THEME_COLORS['verde_ranger_hover']};
+        border-radius: 4px;
+        padding: 0px;
+        min-width: 75px;
+        max-width: 75px;
+        min-height: 35px;
+        max-height: 35px;
+        font-weight: bold;
+        font-size: 14px;
+    }}
+    
+    QPushButton#compactPlayButton:hover, QPushButton#compactPauseButton:hover {{
+        background-color: {THEME_COLORS['verde_ranger_hover']};
+    }}
+    
+    QPushButton#compactNavButton {{
+        background-color: {THEME_COLORS['bg_input']};
+        color: {THEME_COLORS['text']};
+        border: 2px solid {THEME_COLORS['grigio_lupo']};
+        border-radius: 4px;
+        padding: 0px;
+        min-width: 75px;
+        max-width: 75px;
+        min-height: 35px;
+        max-height: 35px;
+        font-weight: bold;
+        font-size: 14px;
+    }}
+    
+    QPushButton#compactNavButton:hover {{
+        background-color: {THEME_COLORS['bg_hover']};
+        border-color: {THEME_COLORS['desert_tan']};
     }}
     
     /* ComboBox */

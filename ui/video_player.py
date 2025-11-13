@@ -5,7 +5,7 @@ Versione 2.0 - Con resource management deterministico.
 """
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton,
-                             QHBoxLayout, QFrame)
+                             QHBoxLayout, QFrame, QApplication)
 from PyQt6.QtCore import Qt, QUrl, pyqtSignal, QTimer
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
@@ -19,6 +19,7 @@ from core.markers import MarkerManager
 from core.video_loader import AsyncVideoLoader
 from core.frame_cache import FrameCache
 from ui.loading_states import VideoLoadingSkeleton, ModalStateManager
+from ui.zoomable_video_widget import ZoomableVideoWidget
 from typing import TYPE_CHECKING, Optional
 
 
@@ -41,6 +42,8 @@ class VideoPlayerWidget(QWidget):
         self.is_loading = False  # Flag per indicare caricamento in corso
         self.is_fullscreen = False  # Flag per tracciare stato fullscreen
         self.detected_fps = 0.0  # FPS rilevato dal video
+        self.video_width = 0  # Larghezza nativa del video
+        self.video_height = 0  # Altezza nativa del video
         self.marker_manager: MarkerManager | None = None  # Sarà impostato dal main window
         
         # Async loader (condiviso)
@@ -55,15 +58,22 @@ class VideoPlayerWidget(QWidget):
         
         # Modal state manager per operazioni lunghe
         self.modal_manager = ModalStateManager()
+        
+        # Timer attivi che devono essere fermati durante cleanup
+        self._active_timers: list[QTimer] = []
 
         # Media player
         self.media_player = QMediaPlayer(self)
         self.audio_output = QAudioOutput(self)
         self.media_player.setAudioOutput(self.audio_output)
 
-        # Video widget
-        self.video_widget = QVideoWidget()
-        self.media_player.setVideoOutput(self.video_widget)
+        # Zoomable Video widget
+        self.video_widget = ZoomableVideoWidget()
+        self.media_player.setVideoOutput(self.video_widget.video_item)
+        
+        # Connetti segnali zoom/pan
+        self.video_widget.zoom_changed.connect(self.on_zoom_changed)
+        self.video_widget.pan_changed.connect(self.on_pan_changed)
 
         # Connessioni
         self.media_player.positionChanged.connect(self.on_position_changed)
@@ -117,14 +127,22 @@ class VideoPlayerWidget(QWidget):
 
         # FPS label (inizialmente nascosto)
         self.fps_label = QLabel("")
-        self.fps_label.setStyleSheet("color: #C19A6B; font-size: 11px; font-weight: normal;")
+        self.fps_label.setStyleSheet("color: #C19A6B; font-size: 14px; font-weight: normal;")
         self.fps_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.fps_label.hide()
         header_layout.addWidget(self.fps_label)
+        
+        # Zoom label (mostra livello di zoom corrente)
+        self.zoom_label = QLabel("🔍 100%")
+        self.zoom_label.setStyleSheet("color: #5F6F52; font-size: 14px; font-weight: bold;")
+        self.zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.zoom_label.setToolTip("Zoom: Ctrl+Scroll per zoomare, drag per muovere\nCtrl+0 per reset")
+        header_layout.addWidget(self.zoom_label)
 
         # Bottone carica video (visibile quando nessun video è caricato)
         self.load_button = QPushButton("📁 CARICA")
         self.load_button.setObjectName("loadVideoButton")
+        self.load_button.setProperty("compactMode", True)  # Inizia in modalità compatta (windowed)
         self.load_button.setToolTip("Carica un video per questo slot")
         self.load_button.clicked.connect(self.on_load_clicked)
         header_layout.addWidget(self.load_button)
@@ -132,10 +150,23 @@ class VideoPlayerWidget(QWidget):
         # Bottone rimuovi video (visibile quando video è caricato)
         self.remove_button = QPushButton("✕ RIMUOVI")
         self.remove_button.setObjectName("removeVideoButton")
+        self.remove_button.setProperty("compactMode", True)  # Inizia in modalità compatta (windowed)
         self.remove_button.setToolTip("Rimuovi il video da questo slot")
         self.remove_button.clicked.connect(self.unload_video)
         self.remove_button.hide()
         header_layout.addWidget(self.remove_button)
+        
+        # Bottone aggiorna video dalla directory (visibile solo se c'è una directory salvata)
+        self.refresh_button = QPushButton("🔄 AGGIORNA")
+        self.refresh_button.setObjectName("refreshVideoButton")
+        self.refresh_button.setProperty("compactMode", True)  # Inizia in modalità compatta (windowed)
+        self.refresh_button.setToolTip("Carica il video più recente dalla directory")
+        self.refresh_button.clicked.connect(self.refresh_video_from_directory)
+        self.refresh_button.hide()
+        header_layout.addWidget(self.refresh_button)
+        
+        # Forza l'applicazione degli stili compatti all'avvio (dopo che i widget sono stati aggiunti al layout)
+        QTimer.singleShot(0, lambda: self._apply_compact_mode_styles())
 
         # Status label
         self.status_label = QLabel("NO VIDEO")
@@ -184,9 +215,10 @@ class VideoPlayerWidget(QWidget):
         self.timeline_widget.timeline_clicked.connect(self.on_timeline_clicked)
         layout.addWidget(self.timeline_widget)
 
-        # Info label
+        # Info label (nascosto - non più utilizzato)
         self.info_label = QLabel("00:00:00 / 00:00:00")
         self.info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.info_label.hide()  # Nascondi permanentemente
         layout.addWidget(self.info_label)
 
     def create_controls(self):
@@ -195,6 +227,9 @@ class VideoPlayerWidget(QWidget):
         layout = QHBoxLayout(controls)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(3)  # Spacing ridotto tra i pulsanti
+        
+        # Aggiungi stretch per centrare i pulsanti
+        layout.addStretch()
 
         # Pulsante -10 frame
         self.prev_frame_btn = QPushButton("-10")
@@ -230,6 +265,10 @@ class VideoPlayerWidget(QWidget):
         self.next_frame_btn.setFixedSize(60, 38)  # Windowed iniziale: 60x38
         self.next_frame_btn.clicked.connect(lambda: self.step_frames(10))
         layout.addWidget(self.next_frame_btn)
+        
+        # Aggiungi stretch per centrare i pulsanti
+        layout.addStretch()
+        layout.addWidget(self.next_frame_btn)
 
         return controls
 
@@ -239,6 +278,8 @@ class VideoPlayerWidget(QWidget):
         Args:
             is_fullscreen: True se in fullscreen/maximized, False se windowed
         """
+        self.is_fullscreen = is_fullscreen
+        
         if is_fullscreen:
             # Fullscreen/Maximized: pulsanti più larghi con testo descrittivo
             self.prev_frame_btn.setText("◀◀ -10")
@@ -259,6 +300,14 @@ class VideoPlayerWidget(QWidget):
             # Header buttons: marker e mute - Fullscreen 80x30
             self.add_marker_btn.setFixedSize(80, 30)
             self.mute_btn.setFixedSize(80, 30)
+            
+            # Video action buttons - Fullscreen: più larghi con testo
+            self.load_button.setText("📁 CARICA")
+            self.remove_button.setText("✕ RIMUOVI")
+            self.refresh_button.setText("🔄 AGGIORNA")
+            self.load_button.setProperty("compactMode", False)
+            self.remove_button.setProperty("compactMode", False)
+            self.refresh_button.setProperty("compactMode", False)
         else:
             # Windowed: pulsanti compatti, solo numeri/icone
             self.prev_frame_btn.setText("-10")
@@ -276,9 +325,82 @@ class VideoPlayerWidget(QWidget):
             self.next_frame_btn.setText("+10")
             self.next_frame_btn.setFixedSize(60, 38)
             
-            # Header buttons: marker e mute - Windowed 60x30
-            self.add_marker_btn.setFixedSize(60, 30)
-            self.mute_btn.setFixedSize(60, 30)
+            # Header buttons: marker e mute - Windowed: compatti (45x35)
+            self.add_marker_btn.setFixedSize(45, 35)
+            self.mute_btn.setFixedSize(45, 35)
+            
+            # Video action buttons - Windowed: compatti, solo emoji
+            self.load_button.setText("📁")  # Solo emoji
+            self.remove_button.setText("✕")  # Solo emoji
+            self.refresh_button.setText("🔄")  # Solo emoji
+            self.load_button.setProperty("compactMode", True)
+            self.remove_button.setProperty("compactMode", True)
+            self.refresh_button.setProperty("compactMode", True)
+        
+        # Riapplica gli stili per i video action buttons
+        for btn in [self.load_button, self.remove_button, self.refresh_button]:
+            style = btn.style()
+            if style:
+                style.unpolish(btn)  # type: ignore[attr-defined]
+                style.polish(btn)  # type: ignore[attr-defined]
+    
+    def _apply_compact_mode_styles(self):
+        """Helper method per applicare gli stili della modalità compatta."""
+        for btn in [self.load_button, self.remove_button, self.refresh_button]:
+            style = btn.style()
+            if style:
+                style.unpolish(btn)  # type: ignore[attr-defined]
+                style.polish(btn)  # type: ignore[attr-defined]
+    
+    def resize_controls_to_video(self):
+        """Ridimensiona i controlli in base alla larghezza del video container.
+        
+        In SYNC OFF:
+        - Ogni pulsante: circa 1/6 della larghezza del video
+        - Spacing totale tra pulsanti: 1/6 della larghezza del video
+        - Pulsanti centrati
+        """
+        if not self.is_loaded:
+            return
+        
+        # Ottieni la larghezza del video container
+        video_width = self.video_widget.width()
+        
+        if video_width <= 0:
+            # Se non abbiamo ancora una larghezza valida, riprova dopo
+            QTimer.singleShot(100, self.resize_controls_to_video)
+            return
+        
+        # Calcola dimensioni:
+        # - 5 pulsanti, ognuno ~1/6 della larghezza
+        # - Spacing totale ~1/6 della larghezza (diviso per 4 gap tra 5 pulsanti)
+        button_width = int(video_width / 6)
+        total_spacing = int(video_width / 6)
+        spacing_between = int(total_spacing / 4)  # 4 gap tra 5 pulsanti
+        
+        # Altezza fissa proporzionale
+        button_height = max(38, int(button_width / 3))
+        
+        # Dimensioni speciali per il pulsante play (centrale, leggermente più largo)
+        play_button_width = int(button_width * 1.2)
+        
+        # Applica dimensioni ai pulsanti
+        self.prev_frame_btn.setFixedSize(button_width, button_height)
+        self.prev_1_frame_btn.setFixedSize(button_width, button_height)
+        self.play_btn.setFixedSize(play_button_width, button_height)
+        self.next_1_frame_btn.setFixedSize(button_width, button_height)
+        self.next_frame_btn.setFixedSize(button_width, button_height)
+        
+        # Aggiorna lo spacing del layout
+        controls_layout = self.controls_widget.layout()
+        if controls_layout:
+            controls_layout.setSpacing(spacing_between)
+        
+        logger.log_video_action(
+            self.video_index,
+            "Controlli ridimensionati",
+            f"Video: {video_width}px, Pulsante: {button_width}x{button_height}px, Spacing: {spacing_between}px"
+        )
 
     def set_async_loader(self, loader: AsyncVideoLoader):
         """Imposta l'async loader condiviso."""
@@ -400,7 +522,9 @@ class VideoPlayerWidget(QWidget):
             f"FPS: {info['fps']:.2f}, Size: {info['width']}x{info['height']}"
         )
         
-        # Salva FPS
+        # Salva dimensioni e FPS
+        self.video_width = info['width']
+        self.video_height = info['height']
         self.detected_fps = info['fps']
         if self.detected_fps > 0:
             self.fps_label.setText(f"📹 {self.detected_fps:.2f} fps")
@@ -426,12 +550,16 @@ class VideoPlayerWidget(QWidget):
         # Aggiorna visibilità bottoni
         self.load_button.hide()
         self.remove_button.show()
+        self.update_refresh_button_visibility()
         
         # Emetti segnale di cambio stato
         self.video_load_state_changed.emit(self.video_index, True)
         
         # Salva video path per la cache
         self.video_path = info['path']
+        
+        # Forza il video widget a riempire la vista dopo il caricamento
+        self.video_widget._fit_video_to_view()
         
         logger.log_video_action(self.video_index, "Video caricato (async)", f"{info['path'].name}")
 
@@ -503,7 +631,12 @@ class VideoPlayerWidget(QWidget):
             logger.log_video_action(self.video_index, "Preview frame caricato", f"Posizione: {preview_position}ms")
         else:
             # Se la durata non è ancora disponibile, riprova tra poco
-            QTimer.singleShot(100, self.load_preview_frame)
+            # Crea timer e traccialo per cleanup
+            timer = QTimer()
+            timer.setSingleShot(True)
+            timer.timeout.connect(self.load_preview_frame)
+            timer.start(100)
+            self._active_timers.append(timer)
 
     def show_error(self, message):
         """Mostra un messaggio di errore."""
@@ -585,6 +718,67 @@ class VideoPlayerWidget(QWidget):
         self.audio_output.setMuted(muted)
         self.mute_btn.setText("🔇 Muto" if muted else "🔊 Audio")
         self.mute_btn.setChecked(muted)
+    
+    def on_zoom_changed(self, zoom_level: float):
+        """Callback chiamata quando il livello di zoom cambia.
+        
+        Args:
+            zoom_level: Nuovo livello di zoom (1.0 = 100%)
+        """
+        # Aggiorna il label
+        zoom_info = self.video_widget.get_zoom_info()
+        self.zoom_label.setText(f"🔍 {zoom_info}")
+        
+        # Cambia colore in base al livello
+        if zoom_level > 1.0:
+            self.zoom_label.setStyleSheet("color: #d4a356; font-size: 14px; font-weight: bold;")
+        else:
+            self.zoom_label.setStyleSheet("color: #5F6F52; font-size: 14px; font-weight: bold;")
+        
+        logger.log_video_action(self.video_index, "Zoom cambiato", f"{zoom_info}")
+    
+    def on_pan_changed(self, pan_x: float, pan_y: float):
+        """Callback chiamata quando la posizione del pan cambia.
+        
+        Args:
+            pan_x: Posizione X del centro della vista
+            pan_y: Posizione Y del centro della vista
+        """
+        # Per ora logghiamo solo, in futuro potremmo mostrare indicatori
+        pass
+    
+    def reset_zoom(self):
+        """Resetta zoom e pan del video."""
+        self.video_widget.reset_zoom_pan()
+    
+    def adapt_video_container(self):
+        """Adatta il container del video alle dimensioni correnti.
+        
+        Da chiamare quando cambia il layout (fullscreen/windowed, sync on/off, frame mode on/off)
+        per garantire che il video sia correttamente dimensionato nel suo container.
+        """
+        if self.is_loaded:
+            # Forza aggiornamento immediato del geometry
+            self.video_widget.updateGeometry()
+            self.updateGeometry()
+            
+            # Forza il processamento degli eventi pending
+            QApplication.processEvents()
+            
+            # Chiama _fit_video_to_view multiple volte con delay crescenti
+            # per assicurarsi che il layout sia stabile
+            self.video_widget._fit_video_to_view()  # Immediato
+            QTimer.singleShot(50, self.video_widget._fit_video_to_view)
+            QTimer.singleShot(150, self.video_widget._fit_video_to_view)
+            QTimer.singleShot(300, self.video_widget._fit_video_to_view)
+            
+            logger.log_video_action(
+                self.video_index,
+                "Container adattato",
+                "Video ridimensionato per nuovo layout"
+            )
+    
+    # Riproduzione e Controlli
 
     def seek_position(self, position, emit_signal=False):
         """Salta a una posizione specifica.
@@ -750,7 +944,12 @@ class VideoPlayerWidget(QWidget):
                 self._media_ready_logged = True
                 
                 # Carica il frame di preview solo al primo caricamento
-                QTimer.singleShot(200, self.load_preview_frame)
+                # Usa timer tracciato per cleanup
+                timer = QTimer()
+                timer.setSingleShot(True)
+                timer.timeout.connect(self.load_preview_frame)
+                timer.start(200)
+                self._active_timers.append(timer)
             
             # Inizializza la cache se non esiste e abbiamo un video path
             if not self.frame_cache and self.video_path and self.cache_enabled:
@@ -787,6 +986,9 @@ class VideoPlayerWidget(QWidget):
             # In SYNC OFF, mostra anche marker e mute buttons in header
             self.add_marker_btn.show()
             self.mute_btn.show()
+            # Ridimensiona i controlli in base alla larghezza del video
+            QTimer.singleShot(0, self.resize_controls_to_video)
+            QTimer.singleShot(100, self.resize_controls_to_video)
         else:
             self.controls_widget.hide()
             # In SYNC ON, nascondi marker e mute buttons in header
@@ -796,12 +998,12 @@ class VideoPlayerWidget(QWidget):
     def hide_timeline(self):
         """Nasconde la timeline del video."""
         self.timeline_widget.hide()
-        self.info_label.hide() # Nascondi anche l'info label
+        # info_label rimane sempre nascosto
 
     def show_timeline(self):
         """Mostra la timeline del video."""
         self.timeline_widget.show()
-        self.info_label.show() # Mostra anche l'info label
+        # info_label rimane sempre nascosto
 
     def set_marker_manager(self, marker_manager: MarkerManager):
         """Imposta il marker manager e crea una vista filtrata per questo video.
@@ -846,6 +1048,68 @@ class VideoPlayerWidget(QWidget):
             # Aggiorna visibilità bottoni
             self.load_button.hide()
             self.remove_button.show()
+            self.update_refresh_button_visibility()
+    
+    def refresh_video_from_directory(self):
+        """Carica il video più recente dalla directory del video corrente."""
+        if not self.video_path:
+            logger.log_video_action(self.video_index, "Refresh fallito", "Nessun video caricato")
+            return
+        
+        # Ottieni la directory del video corrente
+        video_dir = self.video_path.parent
+        
+        if not video_dir.exists():
+            logger.log_video_action(self.video_index, "Refresh fallito", f"Directory non trovata: {video_dir}")
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Directory non trovata", 
+                              f"La directory {video_dir} non esiste più.")
+            return
+        
+        # Trova tutti i video nella directory
+        from config.settings import SUPPORTED_VIDEO_FORMATS
+        video_files = []
+        for fmt in SUPPORTED_VIDEO_FORMATS:
+            video_files.extend(video_dir.glob(f"*{fmt}"))
+        
+        if not video_files:
+            logger.log_video_action(self.video_index, "Refresh fallito", "Nessun video trovato nella directory")
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Nessun video", 
+                                   f"Nessun video trovato in {video_dir}")
+            return
+        
+        # Ordina per data di modifica (più recente prima)
+        video_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        newest_video = video_files[0]
+        
+        # Se il video più recente è lo stesso, informa l'utente
+        if newest_video == self.video_path:
+            logger.log_video_action(self.video_index, "Refresh", "Video già aggiornato")
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Già aggiornato", 
+                                   f"Il video {newest_video.name} è già il più recente nella directory.")
+            return
+        
+        # Carica il nuovo video
+        logger.log_video_action(self.video_index, "Refresh video", 
+                               f"Da: {self.video_path.name} -> A: {newest_video.name}")
+        self.load_video(newest_video)
+        
+        # Mostra notifica
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.information(self, "Video aggiornato", 
+                               f"Caricato: {newest_video.name}\nData: {newest_video.stat().st_mtime}")
+    
+    def update_refresh_button_visibility(self):
+        """Aggiorna la visibilità del pulsante refresh in base alla presenza di una directory."""
+        # Il pulsante refresh è visibile solo se:
+        # 1. C'è un video caricato
+        # 2. La directory del video esiste
+        if self.video_path and self.video_path.parent.exists():
+            self.refresh_button.show()
+        else:
+            self.refresh_button.hide()
 
     def cleanup_video(self, remove_path: bool = False):
         """Pulisce le risorse del video con cleanup deterministico.
@@ -868,6 +1132,19 @@ class VideoPlayerWidget(QWidget):
                 f"Player {self.video_index+1}"
             )
 
+        # === FIX MEMORY LEAK: Ferma tutti i timer attivi ===
+        logger.log_video_action(self.video_index, "Stopping timers", 
+                                f"Active timers: {len(self._active_timers)}")
+        for timer in self._active_timers:
+            if timer.isActive():
+                timer.stop()
+            # Disconnetti tutti i segnali del timer
+            try:
+                timer.timeout.disconnect()
+            except TypeError:
+                pass  # Già disconnesso
+        self._active_timers.clear()
+
         # Pulisci cache
         if self.frame_cache:
             stats = self.frame_cache.get_stats()
@@ -879,9 +1156,42 @@ class VideoPlayerWidget(QWidget):
             self.frame_cache.clear()
             self.frame_cache = None
 
-        # Cleanup media player
+        # === FIX MEMORY LEAK: Cleanup media player con disconnessione segnali ===
+        # Ferma playback
         self.media_player.stop()
+        
+        # Disconnetti segnali per evitare riferimenti circolari
+        try:
+            self.media_player.positionChanged.disconnect(self.on_position_changed)
+        except TypeError:
+            pass  # Già disconnesso
+            
+        try:
+            self.media_player.durationChanged.disconnect(self.on_duration_changed)
+        except TypeError:
+            pass
+            
+        try:
+            self.media_player.errorOccurred.disconnect(self.on_error)
+        except TypeError:
+            pass
+            
+        try:
+            self.media_player.mediaStatusChanged.disconnect(self.on_media_status_changed)
+        except TypeError:
+            pass
+        
+        # Rimuovi source dal media player
         self.media_player.setSource(QUrl())
+        
+        # Disconnetti audio output dal media player per rompere riferimenti circolari
+        self.media_player.setAudioOutput(None)
+        
+        logger.log_video_action(
+            self.video_index,
+            "Media player cleanup",
+            "Segnali disconnessi, source e audio output rimossi"
+        )
     
     def unload_video(self):
         """Rimuove il video dal player e cancella il percorso salvato."""
@@ -890,6 +1200,9 @@ class VideoPlayerWidget(QWidget):
         
         # Chiama cleanup con rimozione del percorso
         self.cleanup_video(remove_path=True)
+        
+        # Riconnetti segnali per il prossimo video
+        self._reconnect_signals()
         
         # Garbage collection per liberare memoria
         gc.collect()
@@ -914,6 +1227,7 @@ class VideoPlayerWidget(QWidget):
         # Aggiorna visibilità bottoni
         self.load_button.show()
         self.remove_button.hide()
+        self.refresh_button.hide()
         
         # Emetti segnale di cambio stato
         self.video_load_state_changed.emit(self.video_index, False)
@@ -923,6 +1237,56 @@ class VideoPlayerWidget(QWidget):
             "Resource cleanup",
             "Media player e cache puliti, memoria rilasciata"
         )
+    
+    def _reconnect_signals(self):
+        """Riconnette i segnali del media player dopo cleanup.
+        
+        Necessario per permettere il caricamento di un nuovo video dopo unload.
+        """
+        # Riconnetti audio output
+        self.media_player.setAudioOutput(self.audio_output)
+        
+        # Riconnetti segnali
+        self.media_player.positionChanged.connect(self.on_position_changed)
+        self.media_player.durationChanged.connect(self.on_duration_changed)
+        self.media_player.errorOccurred.connect(self.on_error)
+        self.media_player.mediaStatusChanged.connect(self.on_media_status_changed)
+        
+        logger.log_video_action(
+            self.video_index,
+            "Media player reconnected",
+            "Segnali e audio output riconnessi"
+        )
+    
+    def closeEvent(self, a0):  # type: ignore[override]
+        """Gestisce la chiusura del widget con cleanup completo."""
+        logger.log_video_action(self.video_index, "Widget closing", "Cleanup finale risorse")
+        
+        # Cleanup completo senza rimuovere il percorso salvato
+        # (il percorso rimane per il prossimo avvio)
+        self.cleanup_video(remove_path=False)
+        
+        # Cleanup modalità di caricamento
+        if self.is_loading:
+            self.modal_manager.exit_modal_state()
+            self.is_loading = False
+        
+        # Cleanup async loader callbacks
+        if self.async_loader:
+            # Nota: l'async loader è condiviso, non va distrutto qui
+            self.async_loader = None
+        
+        super().closeEvent(a0)
+        logger.log_video_action(self.video_index, "Widget closed", "Cleanup completato")
+    
+    def resizeEvent(self, event):  # type: ignore[override]
+        """Gestisce il ridimensionamento del widget."""
+        super().resizeEvent(event)
+        
+        # Se i controlli sono visibili (SYNC OFF) e il video è caricato,
+        # ridimensiona i controlli in base alla nuova larghezza
+        if self.controls_widget.isVisible() and self.is_loaded:
+            QTimer.singleShot(50, self.resize_controls_to_video)
 
     # Drag & Drop
 

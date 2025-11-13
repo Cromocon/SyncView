@@ -176,8 +176,9 @@ echo -e "${GREEN}    Avvio SyncView in corso...${NC}"
 echo -e "${GREEN}═══════════════════════════════════════${NC}"
 echo ""
 
-# Avvia l'applicazione
-python main.py
+# Avvia l'applicazione con redirect di stdout e stderr al file di log
+# Usa tee per scrivere sia su terminale che su file
+python main.py 2>&1 | tee -a syncview_log.txt
 
 # Disattiva ambiente virtuale
 deactivate
