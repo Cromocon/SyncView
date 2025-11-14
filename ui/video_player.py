@@ -15,13 +15,25 @@ from core.logger import logger
 # --- FIX IMPORTAZIONE ---
 from ui.timeline_widget import TimelineWidget
 # --- FINE FIX ---
-from core.markers import MarkerManager
+from core.markers import MarkerManager # type: ignore
 from core.video_loader import AsyncVideoLoader
 from core.frame_cache import FrameCache
+from core.utils import format_time
 from ui.loading_states import VideoLoadingSkeleton, ModalStateManager
 from ui.zoomable_video_widget import ZoomableVideoWidget
 from typing import TYPE_CHECKING, Optional
 
+
+class ZoomLabelContainer(QWidget):
+    """Contenitore personalizzato per l'etichetta dello zoom che emette un segnale al doppio click."""
+    doubleClicked = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def mouseDoubleClickEvent(self, event): # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.doubleClicked.emit()
 
 class VideoPlayerWidget(QWidget):
     """Widget per la riproduzione di un singolo video."""
@@ -90,90 +102,38 @@ class VideoPlayerWidget(QWidget):
     def setup_ui(self):
         """Configura l'interfaccia utente."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
+        layout.setContentsMargins(0, 0, 0, 0) # Rimuove tutti i margini
+        layout.setContentsMargins(5, 0, 5, 5) # Rimosso margine superiore
+        layout.setSpacing(0) # Impostato a 0 per evitare spaziature indesiderate
 
         # === Header con titolo e controlli ===
         header_container = QWidget()
+        header_container.setObjectName("headerContainer") # Aggiunto per lo stile
+        header_container.setProperty("nickname", f"Header Feed {self.video_index + 1}")
         header_layout = QHBoxLayout(header_container)
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(10)
 
-        # --- CORREZIONE: Contenitore SINISTRO per info video ---
-        info_container = QWidget()
-        info_layout = QHBoxLayout(info_container) # Layout per le info
-        info_layout.setContentsMargins(0, 0, 0, 0)
-        info_layout.setSpacing(10)
-        info_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-
-        # Etichetta titolo (FEED-X)
         self.title_label = QLabel(f"FEED-{self.video_index + 1}")
+        self.title_label.setProperty("nickname", f"Titolo Feed {self.video_index + 1}")
         self.title_label.setObjectName("headerLabel")
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignLeft) # Assicura allineamento
-        info_layout.addWidget(self.title_label)
+        header_layout.addWidget(self.title_label)
 
-        # Etichetta FPS
-        self.fps_label = QLabel("")
-        self.fps_label.setStyleSheet("color: #C19A6B; font-size: 14px; font-weight: normal;")
-        self.fps_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.fps_label.hide()
-        info_layout.addWidget(self.fps_label)
-        
-        # Etichetta Zoom
-        self.zoom_label = QLabel("🔍 100%")
-        self.zoom_label.setStyleSheet("color: #5F6F52; font-size: 14px; font-weight: bold;")
-        self.zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.zoom_label.setToolTip("Zoom: Ctrl+Scroll per zoomare, drag per muovere\nCtrl+0 per reset")
-        info_layout.addWidget(self.zoom_label)
-
-        self.remove_button = QPushButton("✕ RIMUOVI")
-        self.remove_button.setObjectName("removeVideoButton")
-        self.remove_button.setProperty("compactMode", True)  # Inizia in modalità compatta (windowed)
-        self.remove_button.setToolTip("Rimuovi il video da questo slot")
-        self.remove_button.clicked.connect(self.unload_video)
-        self.remove_button.hide()
-        info_layout.addWidget(self.remove_button)
-        
-        self.refresh_button = QPushButton("🔄 AGGIORNA")
-        self.refresh_button.setObjectName("refreshVideoButton")
-        self.refresh_button.setProperty("compactMode", True)  # Inizia in modalità compatta (windowed)
-        self.refresh_button.setToolTip("Carica il video più recente dalla directory")
-        self.refresh_button.clicked.connect(self.refresh_video_from_directory)
-        self.refresh_button.hide()
-        info_layout.addWidget(self.refresh_button)
-
-        # --- CORREZIONE: Aggiungi stretch per spingere lo status a destra ---
-        info_layout.addStretch()
-
-        # Etichetta di stato
-        self.status_label = QLabel("NO VIDEO")
-        self.status_label.setObjectName("statusLabel")
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignRight) # Allineato a destra nel suo gruppo
-        info_layout.addWidget(self.status_label)
-        # --------------------------------------------------------------------
-
-        header_layout.addWidget(info_container)
-        header_layout.addStretch()  # Spazio elastico centrale
-
-        # --- Contenitore DESTRO per pulsanti di azione ---
-        actions_container = QWidget()
-        actions_layout = QHBoxLayout(actions_container)
-        actions_layout.setContentsMargins(0, 0, 0, 0)
-        actions_layout.setSpacing(10)
-        actions_layout.setAlignment(Qt.AlignmentFlag.AlignRight)
-
-        # Pulsante Marker
+        # Pulsante Marker (visibile solo in SYNC OFF)
         self.add_marker_btn = QPushButton("📍")
+        self.add_marker_btn.setProperty("nickname", f"Pulsante Aggiungi Marker Feed {self.video_index + 1}")
         self.add_marker_btn.setObjectName("headerMarkerButton")
         self.add_marker_btn.setToolTip("Aggiungi marker alla posizione corrente (Ctrl+M)")
         self.add_marker_btn.setFixedSize(60, 30)
         self.add_marker_btn.setStyleSheet("padding: 0px; text-align: center;")
         self.add_marker_btn.clicked.connect(self.add_marker_at_position)
         self.add_marker_btn.hide()
-        actions_layout.addWidget(self.add_marker_btn)
+        header_layout.addWidget(self.add_marker_btn)
 
-        # Pulsante Mute
+        # Pulsante Mute (sempre visibile con video caricato)
         self.mute_btn = QPushButton("🔊")
+        self.mute_btn.setProperty("nickname", f"Pulsante Mute Feed {self.video_index + 1}")
         self.mute_btn.setObjectName("headerMuteButton")
         self.mute_btn.setCheckable(True)
         self.mute_btn.setToolTip("Mute/Unmute audio")
@@ -181,30 +141,83 @@ class VideoPlayerWidget(QWidget):
         self.mute_btn.setStyleSheet("padding: 0px; text-align: center;")
         self.mute_btn.clicked.connect(self.toggle_mute)
         self.mute_btn.hide()
-        actions_layout.addWidget(self.mute_btn)
+        header_layout.addWidget(self.mute_btn)
 
-        # Pulsante di caricamento
+        # Etichetta FPS (visibile con video caricato)
+        self.fps_label = QLabel("")
+        self.fps_label.setProperty("nickname", f"Etichetta FPS Feed {self.video_index + 1}")
+        self.fps_label.setObjectName("fpsLabel")
+        self.fps_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.fps_label.hide()
+        header_layout.addWidget(self.fps_label)
+        
+        # Contenitore Etichetta Zoom (visibile con video caricato)
+        zoom_container = ZoomLabelContainer() # Usa il nuovo contenitore
+        zoom_container.setProperty("nickname", f"Contenitore Etichetta Zoom Feed {self.video_index + 1}")
+        zoom_layout = QVBoxLayout(zoom_container)
+        zoom_layout.setContentsMargins(0, 0, 0, 0)
+        zoom_layout.setSpacing(0)
+        
+        self.zoom_title_label = QLabel("ZOOM")
+        self.zoom_title_label.setProperty("nickname", f"Titolo Etichetta Zoom Feed {self.video_index + 1}")
+        self.zoom_title_label.setObjectName("zoomTitleLabel")
+        self.zoom_title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        zoom_layout.addWidget(self.zoom_title_label)
+        
+        self.zoom_value_label = QLabel("100%")
+        self.zoom_value_label.setProperty("nickname", f"Valore Etichetta Zoom Feed {self.video_index + 1}")
+        self.zoom_value_label.setObjectName("zoomValueLabel")
+        self.zoom_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        zoom_layout.addWidget(self.zoom_value_label)
+        
+        zoom_container.setToolTip("Zoom: Ctrl+Scroll per zoomare, drag per muovere\nCtrl+0 per reset")
+        zoom_container.doubleClicked.connect(self.reset_zoom) # Connetti il segnale
+        header_layout.addWidget(zoom_container)
+
+        # Spazio elastico per spingere i pulsanti a destra
+        header_layout.addStretch()
+        self.refresh_button = QPushButton("🔄 AGGIORNA")
+        self.refresh_button.setObjectName("refreshVideoButton")
+        self.refresh_button.setProperty("nickname", f"Pulsante Aggiorna Video Feed {self.video_index + 1}")
+        self.refresh_button.setProperty("compactMode", True)
+        self.refresh_button.setToolTip("Carica il video più recente dalla directory")
+        self.refresh_button.clicked.connect(self.refresh_video_from_directory)
+        self.refresh_button.hide()
+        header_layout.addWidget(self.refresh_button)
+
+        self.remove_button = QPushButton("✕ RIMUOVI")
+        self.remove_button.setObjectName("removeVideoButton")
+        self.remove_button.setProperty("nickname", f"Pulsante Rimuovi Video Feed {self.video_index + 1}")
+        self.remove_button.setProperty("compactMode", True)
+        self.remove_button.setToolTip("Rimuovi il video da questo slot")
+        self.remove_button.clicked.connect(self.unload_video)
+        self.remove_button.hide()
+        header_layout.addWidget(self.remove_button)
+
         self.load_button = QPushButton("📁 CARICA")
+        self.load_button.setProperty("nickname", f"Pulsante Carica Video Feed {self.video_index + 1}")
         self.load_button.setObjectName("loadVideoButton")
         self.load_button.setProperty("compactMode", True)
         self.load_button.setToolTip("Carica un video per questo slot")
         self.load_button.clicked.connect(self.on_load_clicked)
-        actions_layout.addWidget(self.load_button)
+        header_layout.addWidget(self.load_button)
+
+        # Etichetta di stato (NO VIDEO, CARICANDO, etc.) - Posizionata qui per apparire a destra del pulsante Carica
+        self.status_label = QLabel("NO VIDEO")
+        self.status_label.setProperty("nickname", f"Etichetta Stato Feed {self.video_index + 1}")
+        self.status_label.setObjectName("statusLabel")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        header_layout.addWidget(self.status_label)
         
         # Forza l'applicazione degli stili compatti all'avvio (dopo che i widget sono stati aggiunti al layout)
         QTimer.singleShot(0, lambda: self._apply_compact_mode_styles())
 
-        header_layout.addWidget(actions_container)
-
-        # --- CORREZIONE FINALE: Aggiungi il contenitore dell'header e uno stretch sotto ---
+        # Aggiungi il contenitore dell'header al layout principale
         layout.addWidget(header_container)
-        # Questo stretch verticale spinge l'intero header (header_container)
-        # verso l'alto, risolvendo il problema del centraggio.
-        layout.addStretch(1)
-        # --------------------------------------------------------------------------------
 
         # Container per il video
         self.video_container = QFrame()
+        self.video_container.setProperty("nickname", f"Contenitore Video Feed {self.video_index + 1}")
         self.video_container.setObjectName("videoFrame")
         # Imposta altezza minima sul container
         self.video_container.setMinimumHeight(200)
@@ -213,6 +226,7 @@ class VideoPlayerWidget(QWidget):
 
         # Placeholder o video widget
         self.placeholder_label = QLabel("Trascina un video qui\no\nClicca per selezionare")
+        self.placeholder_label.setProperty("nickname", f"Placeholder Feed {self.video_index + 1}")
         self.placeholder_label.setObjectName("placeholderLabel")
         self.placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder_label.setWordWrap(True)
@@ -221,10 +235,12 @@ class VideoPlayerWidget(QWidget):
 
         # Loading skeleton per caricamento asincrono
         self.loading_skeleton = VideoLoadingSkeleton(self.video_container)
+        self.loading_skeleton.setProperty("nickname", f"Scheletro di Caricamento Feed {self.video_index + 1}")
         self.loading_skeleton.hide()
 
         container_layout.addWidget(self.placeholder_label)
         container_layout.addWidget(self.loading_skeleton)
+        self.video_widget.setProperty("nickname", f"Area Video Zoomabile Feed {self.video_index + 1}")
         container_layout.addWidget(self.video_widget)
         self.video_widget.hide()
 
@@ -237,8 +253,9 @@ class VideoPlayerWidget(QWidget):
 
         # Timeline widget con markers
         self.timeline_widget = TimelineWidget()
-        self.timeline_widget.setMinimumHeight(80) # Altezza nuova UI
-        self.timeline_widget.setMaximumHeight(80) # Altezza nuova UI
+        self.timeline_widget.setProperty("nickname", f"Timeline Individuale Feed {self.video_index + 1}")
+        self.timeline_widget.setMinimumHeight(40) # Altezza ridotta per essere meno invasiva
+        self.timeline_widget.setMaximumHeight(40) # Altezza ridotta per essere meno invasiva
         self.timeline_widget.timeline_clicked.connect(self.on_timeline_clicked)
         layout.addWidget(self.timeline_widget)
 
@@ -251,6 +268,7 @@ class VideoPlayerWidget(QWidget):
     def create_controls(self):
         """Crea i controlli individuali del player - 5 pulsanti compatti."""
         controls = QWidget()
+        controls.setProperty("nickname", f"Controlli Individuali Feed {self.video_index + 1}")
         layout = QHBoxLayout(controls)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(3)  # Spacing ridotto tra i pulsanti
@@ -260,6 +278,7 @@ class VideoPlayerWidget(QWidget):
 
         # Pulsante -10 frame
         self.prev_frame_btn = QPushButton("-10")
+        self.prev_frame_btn.setProperty("nickname", f"Pulsante -10 Frame Feed {self.video_index + 1}")
         self.prev_frame_btn.setToolTip("Torna indietro di 10 frame (Shift + ←)")
         self.prev_frame_btn.setFixedSize(60, 38)  # Windowed iniziale: 60x38
         self.prev_frame_btn.clicked.connect(lambda: self.step_frames(-10))
@@ -267,6 +286,7 @@ class VideoPlayerWidget(QWidget):
         
         # Pulsante -1 frame
         self.prev_1_frame_btn = QPushButton("-1")
+        self.prev_1_frame_btn.setProperty("nickname", f"Pulsante -1 Frame Feed {self.video_index + 1}")
         self.prev_1_frame_btn.setToolTip("Torna indietro di 1 frame (←)")
         self.prev_1_frame_btn.setFixedSize(60, 38)  # Windowed iniziale: 60x38
         self.prev_1_frame_btn.clicked.connect(lambda: self.step_frames(-1))
@@ -274,6 +294,7 @@ class VideoPlayerWidget(QWidget):
 
         # Play/Pause (centrale)
         self.play_btn = QPushButton("▶")
+        self.play_btn.setProperty("nickname", f"Pulsante Play/Pausa Feed {self.video_index + 1}")
         self.play_btn.setToolTip("Play/Pausa (Spazio)")
         self.play_btn.setFixedSize(70, 38)  # Windowed iniziale: 70x38
         self.play_btn.clicked.connect(self.toggle_play_pause)
@@ -281,6 +302,7 @@ class VideoPlayerWidget(QWidget):
 
         # Pulsante +1 frame
         self.next_1_frame_btn = QPushButton("+1")
+        self.next_1_frame_btn.setProperty("nickname", f"Pulsante +1 Frame Feed {self.video_index + 1}")
         self.next_1_frame_btn.setToolTip("Avanza di 1 frame (→)")
         self.next_1_frame_btn.setFixedSize(60, 38)  # Windowed iniziale: 60x38
         self.next_1_frame_btn.clicked.connect(lambda: self.step_frames(1))
@@ -288,6 +310,7 @@ class VideoPlayerWidget(QWidget):
 
         # Pulsante +10 frame
         self.next_frame_btn = QPushButton("+10")
+        self.next_frame_btn.setProperty("nickname", f"Pulsante +10 Frame Feed {self.video_index + 1}")
         self.next_frame_btn.setToolTip("Avanza di 10 frame (Shift + →)")
         self.next_frame_btn.setFixedSize(60, 38)  # Windowed iniziale: 60x38
         self.next_frame_btn.clicked.connect(lambda: self.step_frames(10))
@@ -474,7 +497,8 @@ class VideoPlayerWidget(QWidget):
             
             # Status bar update
             self.status_label.setText("⏳ CARICANDO...")
-            self.status_label.setStyleSheet("color: #C19A6B;")  # Desert tan
+            self.status_label.setProperty("status", "loading")
+            self.status_label.show() # Mostra durante il caricamento
             
             # Entra in modal state: disabilita controlli durante caricamento
             widgets_to_disable = [
@@ -520,7 +544,8 @@ class VideoPlayerWidget(QWidget):
         self.placeholder_label.hide()
         self.video_widget.show()
         self.status_label.setText("✓ PRONTO")
-        self.status_label.setStyleSheet("color: #5F6F52;")
+        self.status_label.setProperty("status", "ready")
+        self.status_label.hide() # Nascondi quando pronto
         self.is_loaded = True
         self.is_loading = False
         
@@ -554,9 +579,9 @@ class VideoPlayerWidget(QWidget):
         self.video_height = info['height']
         self.detected_fps = info['fps']
         if self.detected_fps > 0:
-            self.fps_label.setText(f"📹 {self.detected_fps:.2f} fps")
+            self.fps_label.setText(f"{self.detected_fps:.2f} FPS")
         else:
-            self.fps_label.setText("📹 Auto")
+            self.fps_label.setText("AUTO FPS")
         self.fps_label.show()
         
         # Ora carica effettivamente il video nel media player
@@ -567,7 +592,8 @@ class VideoPlayerWidget(QWidget):
         self.placeholder_label.hide()
         self.video_widget.show()
         self.status_label.setText("✓ PRONTO")
-        self.status_label.setStyleSheet("color: #5F6F52;")
+        self.status_label.setProperty("status", "ready")
+        self.status_label.hide() # Nascondi quando pronto
         self.is_loaded = True
         self.is_loading = False
         
@@ -577,6 +603,7 @@ class VideoPlayerWidget(QWidget):
         # Aggiorna visibilità bottoni
         self.load_button.hide()
         self.remove_button.show()
+        self.mute_btn.show()
         self.update_refresh_button_visibility()
         
         # Emetti segnale di cambio stato
@@ -629,7 +656,7 @@ class VideoPlayerWidget(QWidget):
                     num, den = map(int, fps_str.split('/'))
                     if den > 0:
                         self.detected_fps = num / den
-                        self.fps_label.setText(f"📹 {self.detected_fps:.2f} fps")
+                        self.fps_label.setText(f"{self.detected_fps:.2f} FPS")
                         self.fps_label.show()
                         return
 
@@ -641,7 +668,7 @@ class VideoPlayerWidget(QWidget):
         try:
             # Usa un approccio semplificato - segna come "Auto"
             self.detected_fps = 0.0
-            self.fps_label.setText("📹 Auto")
+            self.fps_label.setText("AUTO FPS")
             self.fps_label.show()
         except Exception:
             self.detected_fps = 0.0
@@ -674,8 +701,9 @@ class VideoPlayerWidget(QWidget):
         self.placeholder_label.setObjectName("errorLabel")
         self.placeholder_label.show()
         self.video_widget.hide()
-        self.status_label.setText("✗ ERRORE")
-        self.status_label.setStyleSheet("color: #B80F0A;")
+        self.status_label.setText("✗ ERRORE") # Lo stile è gestito da [status="error"]
+        self.status_label.setProperty("status", "error")
+        self.status_label.show() # Mostra in caso di errore
         self.fps_label.hide()
         self.is_loaded = False
 
@@ -720,6 +748,12 @@ class VideoPlayerWidget(QWidget):
                 self.play_btn.setText("▶ Play")
             else:
                 self.play_btn.setText("▶")
+            
+            # Riapplica stile
+            style = self.play_btn.style()
+            if style:
+                style.unpolish(self.play_btn) # type: ignore
+                style.polish(self.play_btn) # type: ignore
             logger.log_playback(self.video_index, "STOP")
             
             # Notifica cache
@@ -737,13 +771,13 @@ class VideoPlayerWidget(QWidget):
         """Attiva/disattiva l'audio."""
         is_muted = self.audio_output.isMuted()
         self.audio_output.setMuted(not is_muted)
-        self.mute_btn.setText("🔇 Muto" if not is_muted else "🔊 Audio")
+        self.mute_btn.setText("🔇" if not is_muted else "🔊")
         logger.log_video_action(self.video_index, "Audio", "MUTO" if not is_muted else "ATTIVO")
 
     def set_muted(self, muted):
         """Imposta lo stato mute."""
         self.audio_output.setMuted(muted)
-        self.mute_btn.setText("🔇 Muto" if muted else "🔊 Audio")
+        self.mute_btn.setText("🔇" if muted else "🔊")
         self.mute_btn.setChecked(muted)
     
     def on_zoom_changed(self, zoom_level: float):
@@ -754,13 +788,13 @@ class VideoPlayerWidget(QWidget):
         """
         # Aggiorna il label
         zoom_info = self.video_widget.get_zoom_info()
-        self.zoom_label.setText(f"🔍 {zoom_info}")
+        self.zoom_value_label.setText(zoom_info)
         
         # Cambia colore in base al livello
         if zoom_level > 1.0:
-            self.zoom_label.setStyleSheet("color: #d4a356; font-size: 14px; font-weight: bold;")
+            self.zoom_value_label.setProperty("zoomed", "true")
         else:
-            self.zoom_label.setStyleSheet("color: #5F6F52; font-size: 14px; font-weight: bold;")
+            self.zoom_value_label.setProperty("zoomed", "false")
         
         logger.log_video_action(self.video_index, "Zoom cambiato", f"{zoom_info}")
     
@@ -993,34 +1027,23 @@ class VideoPlayerWidget(QWidget):
 
     def update_time_label(self, position, duration):
         """Aggiorna il label con i tempi."""
-        pos_str = self.format_time(position)
-        dur_str = self.format_time(duration)
+        pos_str = format_time(position)
+        dur_str = format_time(duration)
         self.info_label.setText(f"{pos_str} / {dur_str}")
-
-    @staticmethod
-    def format_time(milliseconds):
-        """Formatta il tempo in HH:MM:SS."""
-        seconds = milliseconds // 1000
-        hours = seconds // 3600
-        minutes = (seconds % 3600) // 60
-        seconds = seconds % 60
-        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
     def show_controls(self, show):
         """Mostra/nasconde i controlli individuali."""
         if show:
             self.controls_widget.show()
-            # In SYNC OFF, mostra anche marker e mute buttons in header
+            # In SYNC OFF, mostra anche il pulsante marker nell'header
             self.add_marker_btn.show()
-            self.mute_btn.show()
             # Ridimensiona i controlli in base alla larghezza del video
             QTimer.singleShot(0, self.resize_controls_to_video)
             QTimer.singleShot(100, self.resize_controls_to_video)
         else:
             self.controls_widget.hide()
-            # In SYNC ON, nascondi marker e mute buttons in header
+            # In SYNC ON, nascondi il pulsante marker individuale
             self.add_marker_btn.hide()
-            self.mute_btn.hide()
 
     def hide_timeline(self):
         """Nasconde la timeline del video."""
@@ -1245,8 +1268,9 @@ class VideoPlayerWidget(QWidget):
         self.placeholder_label.show()
         self.timeline_widget.set_position(0)
         self.timeline_widget.set_duration(0)
-        self.status_label.setText("NO VIDEO")
-        self.status_label.setStyleSheet("color: #808080;")
+        self.status_label.setText("NO VIDEO") # Lo stile è gestito da [status="empty"]
+        self.status_label.setProperty("status", "empty")
+        self.status_label.show() # Mostra quando vuoto
         self.info_label.setText("00:00:00 / 00:00:00")
         self.fps_label.hide()
         self.fps_label.setText("")
@@ -1254,6 +1278,7 @@ class VideoPlayerWidget(QWidget):
         # Aggiorna visibilità bottoni
         self.load_button.show()
         self.remove_button.hide()
+        self.mute_btn.hide()
         self.refresh_button.hide()
         
         # Emetti segnale di cambio stato

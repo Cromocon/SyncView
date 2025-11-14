@@ -7,477 +7,337 @@ from config.settings import THEME_COLORS
 def get_main_stylesheet():
     """Ritorna il foglio di stile principale dell'applicazione."""
     return f"""
-    /* Stile generale dell'applicazione */
-    QMainWindow {{
-        background-color: {THEME_COLORS['nero_tattico']};
-        color: {THEME_COLORS['text']};
-    }}
-    
-    QWidget {{
-        background-color: {THEME_COLORS['nero_tattico']};
-        color: {THEME_COLORS['text']};
-        font-family: 'Monospace', 'Courier New';
-    }}
-    
-    /* Pulsanti */
-    QPushButton {{
-        background-color: {THEME_COLORS['bg_input']};
-        color: {THEME_COLORS['text']};
-        border: 2px solid {THEME_COLORS['grigio_lupo']};
-        border-radius: 4px;
-        padding: 8px 16px;
-        font-weight: bold;
-        min-width: 80px;
-    }}
-    
-    QPushButton:hover {{
-        background-color: {THEME_COLORS['bg_hover']};
-        border-color: {THEME_COLORS['desert_tan']};
-    }}
-    
-    QPushButton:pressed {{
-        background-color: {THEME_COLORS['bg_pressed']};
-        border-color: {THEME_COLORS['desert_tan_hover']};
-    }}
-    
-    QPushButton:disabled {{
-        background-color: {THEME_COLORS['nero_tattico']};
-        color: {THEME_COLORS['grigio_lupo']};
-        border-color: {THEME_COLORS['grigio_lupo']};
-    }}
-    
-    QPushButton#playButton, QPushButton#pauseButton {{
-        background-color: {THEME_COLORS['verde_ranger']};
-        border-color: {THEME_COLORS['verde_ranger_hover']};
-        min-width: 100px;
-    }}
-    
-    QPushButton#playButton:hover, QPushButton#pauseButton:hover {{
-        background-color: {THEME_COLORS['verde_ranger_hover']};
-    }}
-    
-    QPushButton#stopButton {{
-        background-color: {THEME_COLORS['rosso_squadra']};
-        border-color: {THEME_COLORS['rosso_squadra_hover']};
-    }}
-    
-    QPushButton#stopButton:hover {{
-        background-color: {THEME_COLORS['rosso_squadra_hover']};
-    }}
-    
-    /* Bottoni video player */
-    QPushButton#loadVideoButton {{
-        background-color: {THEME_COLORS['verde_ranger']};
-        border-color: {THEME_COLORS['verde_ranger_hover']};
-        min-width: 90px;
-        padding: 5px 10px;
+    /* ================================================================== */
+    /* ==                  SYNCVIEW THEME - NIGHT OPS                  == */
+    /* ================================================================== */
+
+    /* --- Base & Finestra Principale --- */
+    QMainWindow, QDialog {{ /* Aggiunto gradiente per profondità */
+        background: qradialgradient(cx: 0.5, cy: 0.5, radius: 1.2, fx: 0.5, fy: 0.5, stop: 0 #222224, stop: 1 {THEME_COLORS['bg_base']});
+        color: {THEME_COLORS['text_primary']};
+        font-family: 'Monospace', 'Courier New', 'Lucida Console', monospace;
         font-size: 11px;
     }}
     
-    QPushButton#loadVideoButton[compactMode="true"] {{
-        min-width: 45px;
-        max-width: 45px;
-        min-height: 35px;
-        max-height: 35px;
-        padding: 0px;
-        font-size: 16px;
+    QWidget#centralWidget {{ /* Riferimento: Widget Centrale Principale */
+        border: 1px solid {THEME_COLORS['border_primary']};
+        border-radius: 5px;
     }}
-    
-    QPushButton#loadVideoButton:hover {{
-        background-color: {THEME_COLORS['verde_ranger_hover']};
+
+    /* --- Title Bar --- */
+    QWidget#customTitleBar {{ /* Riferimento: Barra del Titolo Personalizzata */
+        background-color: {THEME_COLORS['bg_surface']};
+        border-bottom: 1px solid {THEME_COLORS['border_primary']};
     }}
-    
-    QPushButton#removeVideoButton {{
-        background-color: {THEME_COLORS['rosso_squadra']};
-        border-color: {THEME_COLORS['rosso_squadra_hover']};
-        min-width: 90px;
-        padding: 5px 10px;
-        font-size: 11px;
-    }}
-    
-    QPushButton#removeVideoButton[compactMode="true"] {{
-        min-width: 45px;
-        max-width: 45px;
-        min-height: 35px;
-        max-height: 35px;
-        padding: 0px;
-        font-size: 16px;
-    }}
-    
-    QPushButton#removeVideoButton:hover {{
-        background-color: {THEME_COLORS['rosso_squadra_hover']};
-    }}
-    
-    QPushButton#refreshVideoButton {{
-        background-color: {THEME_COLORS['verde_ranger']};
-        border-color: {THEME_COLORS['verde_ranger_hover']};
-        min-width: 110px;
-        padding: 5px 10px;
-        font-size: 11px;
-    }}
-    
-    QPushButton#refreshVideoButton[compactMode="true"] {{
-        min-width: 45px;
-        max-width: 45px;
-        min-height: 35px;
-        max-height: 35px;
-        padding: 0px;
-        font-size: 16px;
-    }}
-    
-    QPushButton#refreshVideoButton:hover {{
-        background-color: {THEME_COLORS['verde_ranger_hover']};
-    }}
-    
-    /* Pulsanti compatti per Frame Mode */
-    QPushButton#compactPlayButton, QPushButton#compactPauseButton {{
-        background-color: {THEME_COLORS['verde_ranger']};
-        border: 2px solid {THEME_COLORS['verde_ranger_hover']};
-        border-radius: 4px;
-        padding: 0px;
-        min-width: 75px;
-        max-width: 75px;
-        min-height: 35px;
-        max-height: 35px;
-        font-weight: bold;
-        font-size: 14px;
-    }}
-    
-    QPushButton#compactPlayButton:hover, QPushButton#compactPauseButton:hover {{
-        background-color: {THEME_COLORS['verde_ranger_hover']};
-    }}
-    
-    QPushButton#compactNavButton {{
-        background-color: {THEME_COLORS['bg_input']};
-        color: {THEME_COLORS['text']};
-        border: 2px solid {THEME_COLORS['grigio_lupo']};
-        border-radius: 4px;
-        padding: 0px;
-        min-width: 75px;
-        max-width: 75px;
-        min-height: 35px;
-        max-height: 35px;
-        font-weight: bold;
-        font-size: 14px;
-    }}
-    
-    QPushButton#compactNavButton:hover {{
-        background-color: {THEME_COLORS['bg_hover']};
-        border-color: {THEME_COLORS['desert_tan']};
-    }}
-    
-    /* ComboBox */
-    QComboBox {{
-        background-color: {THEME_COLORS['bg_input']};
-        color: {THEME_COLORS['text']};
-        border: 2px solid {THEME_COLORS['grigio_lupo']};
-        border-radius: 4px;
-        padding: 5px 10px;
-        min-width: 100px;
-    }}
-    
-    QComboBox:hover {{
-        border-color: {THEME_COLORS['desert_tan']};
-    }}
-    
-    QComboBox::drop-down {{
-        border: none;
-        padding-right: 10px;
-    }}
-    
-    QComboBox::down-arrow {{
-        image: none;
-        border-left: 5px solid transparent;
-        border-right: 5px solid transparent;
-        border-top: 5px solid {THEME_COLORS['desert_tan']};
-        margin-right: 5px;
-    }}
-    
-    QComboBox QAbstractItemView {{
-        background-color: {THEME_COLORS['bg_input']};
-        color: {THEME_COLORS['text']};
-        border: 2px solid {THEME_COLORS['desert_tan']};
-        selection-background-color: {THEME_COLORS['verde_ranger']};
-    }}
-    
-    /* Labels */
-    QLabel {{
-        color: {THEME_COLORS['text']};
-        font-weight: bold;
-    }}
-    
-    QLabel#headerLabel {{
-        color: {THEME_COLORS['desert_tan']};
-        font-size: 18px;
-        font-weight: bold;
-        padding: 10px;
-    }}
-    
-    QLabel#statusLabel {{
-        color: {THEME_COLORS['desert_tan']};
+    QLabel#titleLabel {{ /* Riferimento: Etichetta Titolo App */
+        color: {THEME_COLORS['text_secondary']};
         font-size: 12px;
+        padding-left: 10px;
+    }}
+    QPushButton#minimizeButton, QPushButton#maximizeButton, QPushButton#closeButton, QPushButton#helpButtonTitle {{ /* Riferimento: Pulsante Minimizza, Massimizza, Chiudi, Aiuto (Titolo) */
+        background-color: transparent;
+        border: none;
+        font-size: 16px;
+    }}
+    QPushButton#closeButton:hover {{ /* Riferimento: Pulsante Chiudi */
+        background-color: {THEME_COLORS['accent_negative']};
+    }}
+    QPushButton#minimizeButton:hover, QPushButton#maximizeButton:hover, QPushButton#helpButtonTitle:hover {{ /* Riferimento: Pulsante Minimizza, Massimizza, Aiuto (Titolo) */
+        background-color: {THEME_COLORS['bg_surface_hover']};
+    }}
+
+    /* --- Pulsanti Generici --- */
+    QPushButton {{ /* Riferimento: Pulsanti generici (es. Vai a Inizio, Vai a Fine, Audio Master, Risincronizza, Fit Video, etc.) */
+        background-color: {THEME_COLORS['bg_surface']};
+        color: {THEME_COLORS['text_primary']};
+        border: 1px solid {THEME_COLORS['border_primary']};
+        border-radius: 4px;
+        padding: 6px 12px;
+        font-weight: 600; /* Semi-bold */
+        font-size: 10px;
+        text-transform: uppercase;
+    }}
+    QPushButton:hover {{ /* Riferimento: Pulsanti generici */
+        background-color: {THEME_COLORS['bg_surface_hover']};
+        border-color: {THEME_COLORS['border_accent']};
+    }}
+    QPushButton:pressed {{ /* Aggiunto per feedback tattile */
+        background-color: {THEME_COLORS['accent_positive']};
+        border-color: {THEME_COLORS['accent_positive_hover']};
+        color: #ffffff;
+    }}
+    QPushButton:disabled {{ /* Riferimento: Pulsanti generici */
+        background-color: {THEME_COLORS['bg_base']};
+        color: {THEME_COLORS['text_disabled']};
+        border-color: {THEME_COLORS['border_primary']};
+    }}
+
+    /* --- Pulsanti con Accento --- */
+    QPushButton#playButton, QPushButton#pauseButton,  /* Riferimento: Pulsante Play/Pausa Globale */
+    QPushButton#compactPlayButton, QPushButton#compactPauseButton,
+    QPushButton#loadVideoButton, QPushButton#refreshVideoButton, /* Riferimento: Pulsante Carica/Aggiorna Video Feed X */
+    QPushButton#okButton {{ /* Riferimento: Pulsante Avvia Export (Dialog) */
+        background-color: {THEME_COLORS['accent_positive']};
+        border-color: {THEME_COLORS['accent_positive_hover']};
+        font-weight: bold;
+        color: #ffffff;
+    }}
+    QPushButton#playButton:hover, QPushButton#pauseButton:hover, /* Riferimento: Pulsante Play/Pausa Globale */
+    QPushButton#compactPlayButton:hover, QPushButton#compactPauseButton:hover,
+    QPushButton#loadVideoButton:hover, QPushButton#refreshVideoButton:hover, /* Riferimento: Pulsante Carica/Aggiorna Video Feed X */
+    QPushButton#okButton:hover {{ /* Riferimento: Pulsante Avvia Export (Dialog) */
+        background-color: {THEME_COLORS['accent_positive_hover']};
+    }}
+
+    QPushButton#removeVideoButton, /* Riferimento: Pulsante Rimuovi Video Feed X */
+    QPushButton#deleteButton,      /* Riferimento: Pulsante Elimina/Cancella Tutti Marker (Dialog) */
+    QPushButton#cancelButton {{     /* Riferimento: Pulsante Annulla (Dialog) */
+        background-color: {THEME_COLORS['accent_negative']};
+        border-color: {THEME_COLORS['accent_negative_hover']};
+        font-weight: bold;
+        color: #ffffff;
+    }}
+    QPushButton#removeVideoButton:hover, QPushButton#deleteButton:hover, QPushButton#cancelButton:hover {{ /* Riferimento: Pulsanti negativi */
+        background-color: {THEME_COLORS['accent_negative_hover']};
+    }}
+    
+    /* Stile per pulsanti compatti (solo icona) in VideoPlayerWidget */
+    QPushButton[compactMode="true"] {{
+        font-size: 14px; /* Icona più grande */
+        padding: 5px 8px;
+        min-width: 35px;
+    }}
+    QPushButton#loadVideoButton[compactMode="true"] {{
+        font-size: 16px;
+    }}
+
+    /* --- Input Fields (ComboBox, SpinBox, etc.) --- */
+    QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit {{ /* Riferimento: Selettore FPS, Selettore Step Frame, Filtro Categoria, etc. */
+        background-color: {THEME_COLORS['bg_surface']};
+        color: {THEME_COLORS['text_primary']};
+        border: 1px solid {THEME_COLORS['border_primary']};
+        border-radius: 4px;
         padding: 5px;
     }}
-    
-    /* Slider */
-    QSlider::groove:horizontal {{
-        background: {THEME_COLORS['bg_input']};
+    QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover, QLineEdit:hover {{ /* Riferimento: Input fields */
+        border-color: {THEME_COLORS['border_accent']};
+    }}
+    QComboBox::drop-down {{ /* Riferimento: Dropdown dei ComboBox */
+        border: none;
+        width: 20px;
+    }}
+    QComboBox::down-arrow {{ /* Riferimento: Dropdown dei ComboBox */
+        border-left: 5px solid transparent;
+        border-right: 5px solid transparent;
+        border-top: 5px solid {THEME_COLORS['text_secondary']};
+        width: 0;
+        margin-right: 5px;
+    }}
+    QComboBox QAbstractItemView {{ /* Riferimento: Dropdown dei ComboBox */
+        background-color: {THEME_COLORS['bg_surface']};
+        border: 1px solid {THEME_COLORS['border_accent']};
+        selection-background-color: {THEME_COLORS['accent_positive']};
+        outline: 0px;
+        padding: 4px;
+    }}
+    QComboBox QAbstractItemView::item {{
+        min-height: 24px;
+        border-radius: 2px;
+    }}
+
+    /* --- Etichette (Labels) --- */
+    QLabel {{ /* Riferimento: Etichette generiche */
+        background-color: transparent;
+        color: {THEME_COLORS['text_primary']};
+        font-weight: normal;
+    }}
+    QLabel#headerLabel {{ /* Riferimento: Titolo Feed X */
+        color: {THEME_COLORS['accent_primary']};
+        font-size: 18px;
+        font-weight: bold;
+    }}
+    QLabel#groupBoxTitle, QLabel#dialogTitle, QLabel#frameModeActiveLabel {{ /* Riferimento: Titoli di sezioni e dialog */
+        font-weight: bold;
+        color: {THEME_COLORS['accent_primary']};
+    }}
+    QLabel#frameModeActiveLabel {{
+        font-size: 12px;
+        padding: 5px;
+        border-radius: 3px;
+        background-color: {THEME_COLORS['accent_primary_hover']};
+        color: #ffffff;
+    }}
+    QLabel#exportInfoLabel, QLabel#qualityInfoLabel {{ /* Riferimento: Etichetta Info Export (Dialog) */
+        background-color: {THEME_COLORS['bg_surface']};
+        color: {THEME_COLORS['text_secondary']};
+        border-radius: 3px;
+        padding: 8px;
+    }}
+    QLabel#statusIndicator[status="ok"] {{ color: {THEME_COLORS['accent_positive']}; }} /* Riferimento: Indicatore di Stato Sistema */
+    QLabel#statusIndicator[status="warning"] {{ color: {THEME_COLORS['accent_primary']}; }} /* Riferimento: Indicatore di Stato Sistema */
+    QLabel#statusIndicator[status="error"] {{ color: {THEME_COLORS['accent_negative']}; }} /* Riferimento: Indicatore di Stato Sistema */
+    QLabel#statusIndicator[status="loading"], /* Riferimento: Indicatore di Stato Sistema */
+    QLabel#statusIndicator[status="exporting"],
+    QLabel#statusIndicator[status="ready"] {{ color: {THEME_COLORS['accent_info']}; }} /* Riferimento: Indicatore di Stato Sistema */
+
+    /* --- Slider & Timeline --- */
+    QSlider::groove:horizontal {{ /* Riferimento: Slider per Export */
+        background: {THEME_COLORS['bg_surface']};
         height: 8px;
         border-radius: 4px;
-        border: 1px solid {THEME_COLORS['grigio_lupo']};
+        border: 1px solid {THEME_COLORS['border_primary']};
     }}
-    
-    QSlider::handle:horizontal {{
-        background: {THEME_COLORS['desert_tan']};
+    QSlider::handle:horizontal {{ /* Riferimento: Slider per Export */
+        background: {THEME_COLORS['accent_primary']};
         width: 16px;
         height: 16px;
         margin: -5px 0;
         border-radius: 8px;
-        border: 2px solid {THEME_COLORS['nero_tattico']};
+        border: 1px solid {THEME_COLORS['accent_primary_hover']};
     }}
-    
-    QSlider::handle:horizontal:hover {{
-        background: {THEME_COLORS['desert_tan_hover']};
+    QSlider::handle:horizontal:hover {{ /* Riferimento: Slider per Export */
+        background: {THEME_COLORS['accent_primary_hover']};
+        border: 1px solid {THEME_COLORS['accent_primary']};
     }}
-    
-    QSlider::sub-page:horizontal {{
-        background: {THEME_COLORS['verde_ranger']};
+    QSlider::sub-page:horizontal {{ /* Riferimento: Timeline Globale e Individuale */
+        background: {THEME_COLORS['accent_positive']};
         border-radius: 4px;
     }}
     
-    /* GroupBox */
-    QGroupBox {{
-        color: {THEME_COLORS['desert_tan']};
-        border: 2px solid {THEME_COLORS['grigio_lupo']};
+    /* --- Contenitori (GroupBox, Frame) --- */
+    QGroupBox {{ /* Stile più pulito per i contenitori */
+        color: {THEME_COLORS['accent_primary']};
+        border: 1px solid transparent;
+        border-top: 2px solid {THEME_COLORS['border_primary']};
         border-radius: 5px;
         margin-top: 10px;
         font-weight: bold;
         padding-top: 10px;
+        font-size: 10px;
+        text-transform: uppercase;
     }}
-    
-    QGroupBox::title {{
+    QGroupBox::title {{ /* Riferimento: Titoli dei GroupBox */
         subcontrol-origin: margin;
         subcontrol-position: top left;
-        padding: 0 5px;
-        color: {THEME_COLORS['desert_tan']};
+        padding: 10px 5px 0 5px; /* Sposta il titolo sopra il bordo */
+        color: {THEME_COLORS['accent_primary']};
     }}
-    
-    /* CheckBox */
-    QCheckBox {{
-        color: {THEME_COLORS['text']};
+    QFrame#videoFrame {{ /* Riferimento: Contenitore Video Feed X */
+        background-color: #000000;
+        border: 1px solid {THEME_COLORS['border_primary']};
+        border-radius: 5px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+    }}
+    QFrame#videoFrame:hover {{ /* Aggiunto box-shadow per un effetto "glow" */
+        border-color: {THEME_COLORS['border_accent']};
+        box-shadow: 0 0 15px {THEME_COLORS['border_accent']};
+    }}
+
+    /* --- Altri Controlli --- */
+    QCheckBox {{ /* Riferimento: Checkbox Sincronizzazione, Checkbox Modalità Frame */
+        color: {THEME_COLORS['text_primary']};
         spacing: 8px;
     }}
-    
-    QCheckBox::indicator {{
+    QCheckBox::indicator {{ /* Riferimento: Indicatore dei CheckBox */
         width: 18px;
         height: 18px;
-        border: 2px solid {THEME_COLORS['grigio_lupo']};
+        border: 1px solid {THEME_COLORS['border_primary']};
         border-radius: 3px;
-        background-color: {THEME_COLORS['bg_input']};
+        background-color: {THEME_COLORS['bg_surface']};
     }}
-    
-    QCheckBox::indicator:checked {{
-        background-color: {THEME_COLORS['verde_ranger']};
-        border-color: {THEME_COLORS['verde_ranger_hover']};
+    QCheckBox::indicator:checked {{ /* Riferimento: Indicatore dei CheckBox */
+        background-color: {THEME_COLORS['accent_positive']};
+        border-color: {THEME_COLORS['accent_positive_hover']};
     }}
-    
-    QCheckBox::indicator:hover {{
-        border-color: {THEME_COLORS['desert_tan']};
+    QCheckBox::indicator:hover {{ /* Riferimento: Indicatore dei CheckBox */
+        border-color: {THEME_COLORS['border_accent']};
     }}
-    
-    /* SpinBox */
-    QSpinBox, QDoubleSpinBox {{
-        background-color: {THEME_COLORS['bg_input']};
-        color: {THEME_COLORS['text']};
-        border: 2px solid {THEME_COLORS['grigio_lupo']};
-        border-radius: 4px;
-        padding: 5px;
-    }}
-    
-    QSpinBox:hover, QDoubleSpinBox:hover {{
-        border-color: {THEME_COLORS['desert_tan']};
-    }}
-    
-    /* ScrollBar */
-    QScrollBar:vertical {{
-        background: {THEME_COLORS['bg_input']};
+
+    QScrollBar:vertical {{ /* Riferimento: Barre di scorrimento */
+        background: {THEME_COLORS['bg_surface']};
         width: 12px;
-        border: 1px solid {THEME_COLORS['grigio_lupo']};
+        border: 1px solid {THEME_COLORS['border_primary']};
     }}
-    
-    QScrollBar::handle:vertical {{
-        background: {THEME_COLORS['desert_tan']};
+    QScrollBar::handle:vertical {{ /* Riferimento: Barre di scorrimento */
+        background: {THEME_COLORS['accent_primary']};
         min-height: 20px;
         border-radius: 5px;
     }}
-    
-    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ /* Riferimento: Barre di scorrimento */
         height: 0px;
     }}
-    
-    /* Frame per video */
-    QFrame#videoFrame {{
-        background-color: #000000;
-        border: 2px solid {THEME_COLORS['grigio_lupo']};
-        border-radius: 5px;
-    }}
-    
-    QFrame#videoFrame:hover {{
-        border-color: {THEME_COLORS['desert_tan']};
-        border-width: 3px;
-    }}
-    
-    /* ToolTip */
-    QToolTip {{
-        background-color: {THEME_COLORS['bg_input']};
-        color: {THEME_COLORS['text']};
-        border: 2px solid {THEME_COLORS['desert_tan']};
+
+    QToolTip {{ /* Riferimento: Tooltip generici */
+        background-color: {THEME_COLORS['bg_surface']};
+        color: {THEME_COLORS['text_primary']};
+        border: 1px solid {THEME_COLORS['border_accent']};
         padding: 5px;
         border-radius: 3px;
     }}
-    
-    /* Menu */
-    QMenuBar {{
-        background-color: {THEME_COLORS['bg_input']};
-        color: {THEME_COLORS['text']};
-        border-bottom: 2px solid {THEME_COLORS['grigio_lupo']};
-    }}
-    
-    QMenuBar::item {{
-        padding: 5px 10px;
-    }}
-    
-    QMenuBar::item:selected {{
-        background-color: {THEME_COLORS['verde_ranger']};
-        color: {THEME_COLORS['text']};
-    }}
-    
-    QMenu {{
-        background-color: {THEME_COLORS['bg_input']};
-        color: {THEME_COLORS['text']};
-        border: 2px solid {THEME_COLORS['grigio_lupo']};
-    }}
-    
-    QMenu::item {{
-        padding: 5px 30px 5px 20px;
-    }}
-    
-    QMenu::item:selected {{
-        background-color: {THEME_COLORS['verde_ranger']};
-    }}
-    
-    /* Dialog */
-    QDialog {{
-        background-color: {THEME_COLORS['nero_tattico']};
-        color: {THEME_COLORS['text']};
-    }}
-    
-    /* TextEdit */
-    QTextEdit, QPlainTextEdit {{
-        background-color: {THEME_COLORS['bg_input']};
-        color: {THEME_COLORS['text']};
-        border: 2px solid {THEME_COLORS['grigio_lupo']};
-        border-radius: 4px;
-        padding: 5px;
-    }}
-    
-    /* ProgressBar */
-    QProgressBar {{
-        background-color: {THEME_COLORS['bg_input']};
-        border: 2px solid {THEME_COLORS['grigio_lupo']};
+
+    QProgressBar {{ /* Riferimento: Barre di progresso */
+        background-color: {THEME_COLORS['bg_surface']};
+        border: 1px solid {THEME_COLORS['border_primary']};
         border-radius: 4px;
         text-align: center;
-        color: {THEME_COLORS['text']};
+        color: {THEME_COLORS['text_primary']};
     }}
-    
-    QProgressBar::chunk {{
-        background-color: {THEME_COLORS['verde_ranger']};
+    QProgressBar::chunk {{ /* Riferimento: Barre di progresso */
+        background-color: {THEME_COLORS['accent_positive']};
         border-radius: 2px;
     }}
-    """
 
-def get_video_player_stylesheet():
-    """Ritorna lo stile per i player video."""
-    return f"""
-    QFrame {{
-        background-color: #000000;
-        border: 2px solid {THEME_COLORS['grigio_lupo']};
-        border-radius: 5px;
+    /* --- Stili Specifici Video Player --- */
+    QWidget#headerContainer {{ /* Riferimento: Header Feed X */
+        min-height: 40px;
+        max-height: 40px;
+        display: flex;
+        align-items: space-between;
     }}
-    
-    QLabel#placeholderLabel {{
-        color: {THEME_COLORS['text']};
-        font-size: 14px;
-        background-color: #0a0a0a;
-    }}
-    
-    QLabel#errorLabel {{
-        color: {THEME_COLORS['rosso_squadra']};
+
+    QLabel#fpsLabel {{ /* Riferimento: Etichetta FPS Feed X */
+        color: {THEME_COLORS['accent_primary']};
         font-size: 12px;
-        background-color: #1a0a0a;
-    }}
-    """
-
-def get_dialog_stylesheet():
-    """Ritorna il foglio di stile per i dialog."""
-    return f"""
-    QDialog {{
-        background-color: {THEME_COLORS['nero_tattico']};
-        color: {THEME_COLORS['text']};
-        font-family: 'Monospace', 'Courier New';
+        font-weight: normal;
     }}
 
-    QLabel {{
-        color: {THEME_COLORS['text']};
+    QLabel#zoomTitleLabel {{ /* Riferimento: Titolo Etichetta Zoom Feed X */
+        color: {THEME_COLORS['text_secondary']};
+        font-size: 9px;
+        font-weight: normal;
+    }}
+
+    QLabel#zoomValueLabel {{ /* Riferimento: Valore Etichetta Zoom Feed X */
+        color: {THEME_COLORS['accent_positive']};
+        font-size: 12px;
         font-weight: bold;
     }}
+    QLabel#zoomValueLabel[zoomed="true"] {{
+        color: {THEME_COLORS['accent_primary']};
+    }}
 
-    QPushButton {{
-        background-color: {THEME_COLORS['bg_input']};
-        color: {THEME_COLORS['text']};
-        border: 2px solid {THEME_COLORS['grigio_lupo']};
+    QLabel#statusLabel {{ /* Riferimento: Etichetta Stato Feed X */
+        font-size: 18px;      /* Come #headerLabel */
+        font-weight: bold;    /* Come #headerLabel */
+        color: {THEME_COLORS['accent_primary']}; /* Colore base come #headerLabel */
+    }}
+    QLabel#statusLabel[status="ready"] {{ color: {THEME_COLORS['accent_positive']}; }}
+    QLabel#statusLabel[status="loading"] {{ color: {THEME_COLORS['accent_primary']}; }}
+    QLabel#statusLabel[status="error"] {{ color: {THEME_COLORS['accent_negative']}; }}
+    QLabel#statusLabel[status="empty"] {{ color: {THEME_COLORS['text_secondary']}; }}
+
+    QLabel#placeholderLabel {{ /* Riferimento: Placeholder Feed X */
+        color: {THEME_COLORS['text_disabled']};
+        font-size: 14px;
+        background-color: transparent;
+        border: 2px dashed {THEME_COLORS['border_primary']};
         border-radius: 4px;
-        padding: 8px 16px;
-        font-weight: bold;
-        min-width: 80px;
     }}
-
-    QPushButton:hover {{
-        background-color: {THEME_COLORS['bg_hover']};
-        border-color: {THEME_COLORS['desert_tan']};
-    }}
-
-    QPushButton:pressed {{
-        background-color: {THEME_COLORS['bg_pressed']};
-        border-color: {THEME_COLORS['desert_tan_hover']};
-    }}
-
-    QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {{
-        background-color: {THEME_COLORS['bg_input']};
-        color: {THEME_COLORS['text']};
-        border: 2px solid {THEME_COLORS['grigio_lupo']};
+    QLabel#errorLabel {{ /* Riferimento: Placeholder Feed X (stato errore) */
+        color: {THEME_COLORS['accent_negative']};
+        font-size: 12px;
+        background-color: transparent;
+        border: 2px dashed {THEME_COLORS['accent_negative']};
         border-radius: 4px;
-        padding: 5px;
-    }}
-
-    QComboBox:hover, QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover {{
-        border-color: {THEME_COLORS['desert_tan']};
-    }}
-
-    QGroupBox {{
-.
-        color: {THEME_COLORS['desert_tan']};
-        border: 2px solid {THEME_COLORS['grigio_lupo']};
-        border-radius: 5px;
-        margin-top: 10px;
-        font-weight: bold;
-        padding-top: 10px;
-    }}
-
-    QGroupBox::title {{
-        subcontrol-origin: margin;
-        subcontrol-position: top left;
-        padding: 0 5px;
-        color: {THEME_COLORS['desert_tan']};
     }}
     """

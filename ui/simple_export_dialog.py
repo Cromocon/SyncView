@@ -13,6 +13,7 @@ import json
 from core.advanced_exporter import ExportQuality
 from config.settings import EXPORT_SETTINGS_FILE
 from config.user_paths import user_path_manager
+from ui.styles import get_main_stylesheet
 
 
 class ExportSettings:
@@ -81,79 +82,21 @@ class SimpleExportDialog(QDialog):
         layout.setSpacing(15)
         
         # Stile
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1C1C1E;
-                color: #e0e0e0;
-            }
-            QLabel {
-                color: #e0e0e0;
-                font-size: 13px;
-            }
-            QLineEdit {
-                background-color: #808080;
-                color: #ffffff;
-                border: 1px solid #808080;
-                border-radius: 3px;
-                padding: 5px;
-                font-size: 12px;
-            }
-            QPushButton {
-                background-color: #5F6F52;
-                color: #ffffff;
-                border: 1px solid #798969;
-                border-radius: 3px;
-                padding: 8px 15px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #798969;
-            }
-            QComboBox {
-                background-color: #808080;
-                color: #ffffff;
-                border: 1px solid #808080;
-                border-radius: 3px;
-                padding: 5px;
-            }
-            QComboBox::drop-down {
-                border: none;
-            }
-            QComboBox::down-arrow {
-                image: url(none);
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 5px solid #ffffff;
-                margin-right: 5px;
-            }
-            QGroupBox {
-                border: 2px solid #808080;
-                border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
-                font-weight: bold;
-                color: #C19A6B;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }
-        """)
+        self.setStyleSheet(get_main_stylesheet())
         
         # Titolo
-        title = QLabel("⚙ Configurazione Export")
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #C19A6B; margin-bottom: 10px;")
+        title = QLabel("⚙️ Configurazione Export")
+        title.setObjectName("dialogTitle")
         layout.addWidget(title)
         
         # Info sistema
         info_label = QLabel(
-            "🚀 Export automatizzato con:\n"
+            "🚀 Export automatizzato con:\n" # Stile spostato in styles.py
             "• Hardware acceleration (se disponibile)\n"
             "• Export parallelo multi-core\n"
             "• Retry automatico (3 tentativi)"
         )
-        info_label.setStyleSheet("color: #5F6F52; font-size: 11px; margin-bottom: 10px; padding: 10px; background-color: #252527; border-radius: 3px;")
+        info_label.setObjectName("exportInfoLabel")
         layout.addWidget(info_label)
         
         # === SEZIONE DESTINAZIONE ===
@@ -202,8 +145,8 @@ class SimpleExportDialog(QDialog):
             "• Fast: Ideale per anteprime rapide\n"
             "• Medium: Ottimo bilanciamento qualità/velocità\n"
             "• High/Best: Per rendering finali di alta qualità"
-        )
-        quality_info.setStyleSheet("color: #b0b0b0; font-size: 11px; margin-top: 5px;")
+        ) # Stile spostato in styles.py
+        quality_info.setObjectName("qualityInfoLabel")
         quality_layout.addWidget(quality_info)
         
         layout.addWidget(quality_group)
@@ -220,18 +163,12 @@ class SimpleExportDialog(QDialog):
         ok_button = button_box.button(QDialogButtonBox.StandardButton.Ok)
         if ok_button:
             ok_button.setText("🚀 Avvia Export")
-            ok_button.setStyleSheet(
-                "background-color: #5F6F52; border: 1px solid #798969; "
-                "padding: 10px 25px; font-size: 14px;"
-            )
+            ok_button.setObjectName("okButton") # Stile spostato in styles.py
         
         cancel_button = button_box.button(QDialogButtonBox.StandardButton.Cancel)
         if cancel_button:
-            cancel_button.setText("✖ Annulla")
-            cancel_button.setStyleSheet(
-                "background-color: #B80F0A; border: 1px solid #D41813; "
-                "padding: 10px 25px; font-size: 14px;"
-            )
+            cancel_button.setText("✖️ Annulla")
+            cancel_button.setObjectName("cancelButton") # Stile spostato in styles.py
         
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)

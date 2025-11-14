@@ -11,6 +11,8 @@ from PyQt6.QtGui import QColor
 from pathlib import Path
 
 from core.markers import MarkerManager, Marker
+from ui.styles import get_main_stylesheet
+from core.utils import format_time
 
 
 class MarkerManagerDialog(QDialog):
@@ -28,52 +30,7 @@ class MarkerManagerDialog(QDialog):
         self.setup_ui()
         self.load_markers()
         
-        # Stile
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1C1C1E;
-            }
-            QLabel {
-                color: #cccccc;
-            }
-            QTableWidget {
-                background-color: #252527;
-                color: #ffffff;
-                gridline-color: #808080;
-                border: 1px solid #808080;
-            }
-            QTableWidget::item:selected {
-                background-color: #0047AB;
-            }
-            QHeaderView::section {
-                background-color: #252527;
-                color: #0047AB;
-                border: 1px solid #808080;
-                padding: 5px;
-                font-weight: bold;
-            }
-            QPushButton {
-                background-color: #5F6F52;
-                color: #ffffff;
-                border: 1px solid #798969;
-                border-radius: 3px;
-                padding: 8px 15px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #798969;
-            }
-            QPushButton:pressed {
-                background-color: #5F6F52;
-            }
-            QComboBox, QLineEdit {
-                background-color: #252527;
-                color: #ffffff;
-                border: 1px solid #808080;
-                border-radius: 3px;
-                padding: 5px;
-            }
-        """)
+        self.setStyleSheet(get_main_stylesheet())
     
     def setup_ui(self):
         """Configura l'interfaccia utente."""
@@ -81,9 +38,11 @@ class MarkerManagerDialog(QDialog):
         
         # Header con statistiche
         stats_group = QGroupBox("📊 Statistiche")
+        stats_group.setProperty("nickname", "Gruppo Statistiche Marker")
         stats_layout = QHBoxLayout()
         
         self.stats_label = QLabel()
+        self.stats_label.setProperty("nickname", "Etichetta Statistiche")
         stats_layout.addWidget(self.stats_label)
         stats_layout.addStretch()
         
@@ -92,10 +51,14 @@ class MarkerManagerDialog(QDialog):
         
         # Filtri
         filter_group = QGroupBox("🔍 Filtri")
+        filter_group.setProperty("nickname", "Gruppo Filtri Marker")
         filter_layout = QHBoxLayout()
         
-        filter_layout.addWidget(QLabel("Categoria:"))
+        category_label = QLabel("Categoria:")
+        category_label.setProperty("nickname", "Etichetta Filtro Categoria")
+        filter_layout.addWidget(category_label)
         self.category_filter = QComboBox()
+        self.category_filter.setProperty("nickname", "ComboBox Filtro Categoria")
         self.category_filter.addItem("Tutte", None)
         for category in MarkerManager.DEFAULT_CATEGORIES:
             self.category_filter.addItem(category.title(), category)
@@ -109,6 +72,7 @@ class MarkerManagerDialog(QDialog):
         
         # Tabella markers
         self.table = QTableWidget()
+        self.table.setProperty("nickname", "Tabella dei Marker")
         self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels([
             "Timestamp", "Tempo", "Categoria", "Colore", "Descrizione"
@@ -127,42 +91,31 @@ class MarkerManagerDialog(QDialog):
         actions_layout = QHBoxLayout()
         
         btn_add = QPushButton("➕ Aggiungi")
+        btn_add.setProperty("nickname", "Pulsante Aggiungi Marker (Dialog)")
         btn_add.clicked.connect(self.add_marker)
         actions_layout.addWidget(btn_add)
         
         btn_edit = QPushButton("✏️ Modifica")
+        btn_edit.setProperty("nickname", "Pulsante Modifica Marker (Dialog)")
         btn_edit.clicked.connect(self.edit_selected_marker)
         actions_layout.addWidget(btn_edit)
         
         btn_delete = QPushButton("🗑️ Elimina")
-        btn_delete.setStyleSheet("""
-            QPushButton {
-                background-color: #B80F0A;
-                border: 1px solid #D41813;
-            }
-            QPushButton:hover {
-                background-color: #D41813;
-            }
-        """)
+        btn_delete.setProperty("nickname", "Pulsante Elimina Marker (Dialog)")
+        btn_delete.setObjectName("deleteButton") # Stile spostato in styles.py
         btn_delete.clicked.connect(self.delete_selected_marker)
         actions_layout.addWidget(btn_delete)
         
         actions_layout.addStretch()
         
         btn_export = QPushButton("📤 Esporta CSV")
+        btn_export.setProperty("nickname", "Pulsante Esporta CSV (Dialog)")
         btn_export.clicked.connect(self.export_csv)
         actions_layout.addWidget(btn_export)
         
         btn_clear = QPushButton("🗑️ Cancella Tutti")
-        btn_clear.setStyleSheet("""
-            QPushButton {
-                background-color: #B80F0A;
-                border: 1px solid #D41813;
-            }
-            QPushButton:hover {
-                background-color: #D41813;
-            }
-        """)
+        btn_clear.setProperty("nickname", "Pulsante Cancella Tutti i Marker (Dialog)")
+        btn_clear.setObjectName("deleteButton") # Stile spostato in styles.py
         btn_clear.clicked.connect(self.clear_all_markers)
         actions_layout.addWidget(btn_clear)
         
@@ -173,6 +126,7 @@ class MarkerManagerDialog(QDialog):
         bottom_layout.addStretch()
         
         btn_close = QPushButton("Chiudi")
+        btn_close.setProperty("nickname", "Pulsante Chiudi (Dialog)")
         btn_close.clicked.connect(self.accept)
         bottom_layout.addWidget(btn_close)
         
@@ -192,7 +146,7 @@ class MarkerManagerDialog(QDialog):
             self.table.setItem(row, 0, QTableWidgetItem(str(marker.timestamp)))
             
             # Tempo formattato
-            time_str = self._format_time(marker.timestamp)
+            time_str = format_time(marker.timestamp)
             self.table.setItem(row, 1, QTableWidgetItem(time_str))
             
             # Categoria
@@ -298,7 +252,7 @@ class MarkerManagerDialog(QDialog):
             QMessageBox.warning(self, "Attenzione", "Nessun marker selezionato.")
             return
         
-        time_str = self._format_time(marker.timestamp)
+        time_str = format_time(marker.timestamp)
         reply = QMessageBox.question(
             self,
             "Conferma Eliminazione",
@@ -355,12 +309,3 @@ class MarkerManagerDialog(QDialog):
                     "Errore",
                     "Errore durante l'esportazione del file CSV."
                 )
-    
-    def _format_time(self, ms: int) -> str:
-        """Formatta millisecondi in HH:MM:SS.mmm."""
-        total_seconds = ms / 1000
-        hours = int(total_seconds // 3600)
-        minutes = int((total_seconds % 3600) // 60)
-        seconds = int(total_seconds % 60)
-        millis = int(ms % 1000)
-        return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"

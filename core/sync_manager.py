@@ -4,8 +4,8 @@ Gestisce offset, drift tolerance e sincronizzazione precisa.
 """
 
 from core.logger import logger
-# Import necessari per il type hinting
-from typing import List, TYPE_CHECKING
+# Import necessari per il type hinting (Dict per offset, List per players)
+from typing import List, Dict, TYPE_CHECKING
 
 # --- CORREZIONE PER L'ERRORE PYLANCE ---
 # Questo blocco viene letto solo dall'analizzatore statico (Pylance)
@@ -18,10 +18,16 @@ if TYPE_CHECKING:
 class SyncManager:
     """Gestisce la sincronizzazione avanzata tra i video."""
 
-    def __init__(self):
+    def __init__(self, num_players: int = 4):
+        """
+        Inizializza il SyncManager.
+        
+        Args:
+            num_players: Il numero di video player da gestire.
+        """
         self.sync_enabled = True
-        self.video_offsets = [0, 0, 0, 0]  # Offset in millisecondi per ogni video
-        self.drift_tolerance = 100  # Tolleranza drift in millisecondi
+        self.num_players = num_players
+        self.video_offsets: Dict[int, int] = {i: 0 for i in range(num_players)}
         self.master_video_index = 0  # Indice del video master (default: primo)
 
     def set_sync_enabled(self, enabled):
@@ -29,7 +35,7 @@ class SyncManager:
         self.sync_enabled = enabled
         logger.log_user_action("Sincronizzazione", "ON" if enabled else "OFF")
 
-    def is_sync_enabled(self):
+    def is_sync_enabled(self) -> bool:
         """Verifica se la sincronizzazione è abilitata."""
         return self.sync_enabled
 
@@ -37,7 +43,7 @@ class SyncManager:
         """Imposta l'offset di un video specifico."""
         if 0 <= video_index < 4:
             old_offset = self.video_offsets[video_index]
-            self.video_offsets[video_index] = offset_ms
+            self.video_offsets[video_index] = int(offset_ms)
             logger.log_user_action(
                 f"Offset Video {video_index + 1}",
                 f"{old_offset}ms → {offset_ms}ms"
@@ -46,12 +52,11 @@ class SyncManager:
     def get_video_offset(self, video_index):
         """Ottiene l'offset di un video specifico."""
         if 0 <= video_index < 4:
-            return self.video_offsets[video_index]
-        return 0
+            return self.video_offsets.get(video_index, 0)
 
     def reset_all_offsets(self):
         """Resetta tutti gli offset a zero."""
-        self.video_offsets = [0, 0, 0, 0]
+        self.video_offsets = {i: 0 for i in range(self.num_players)}
         logger.log_user_action("Reset Offset", "Tutti gli offset azzerati")
 
     def calculate_sync_position(self, source_position, source_index, target_index):
@@ -75,52 +80,6 @@ class SyncManager:
 
         # Assicura che la posizione sia >= 0
         return max(0, sync_position)
-
-    def check_drift(self, positions):
-        """
-        Verifica se c'è drift eccessivo tra i video.
-
-        Args:
-            positions: Lista delle posizioni attuali di tutti i video in ms
-
-        Returns:
-            True se c'è drift oltre la tolleranza
-        """
-        if not self.sync_enabled or len(positions) < 2:
-            return False
-
-        # Filtra posizioni valide (video caricati)
-        valid_positions = [p for p in positions if p is not None and p >= 0]
-
-        if len(valid_positions) < 2:
-            return False
-
-        # Calcola drift massimo
-        min_pos = min(valid_positions)
-        max_pos = max(valid_positions)
-        drift = max_pos - min_pos
-
-        if drift > self.drift_tolerance:
-            logger.log_user_action(
-                "Drift Rilevato",
-                f"{drift}ms (tolleranza: {self.drift_tolerance}ms)"
-            )
-            return True
-
-        return False
-
-    def set_drift_tolerance(self, tolerance_ms):
-        """Imposta la tolleranza del drift."""
-        old_tolerance = self.drift_tolerance
-        self.drift_tolerance = max(0, tolerance_ms)
-        logger.log_user_action(
-            "Tolleranza Drift",
-            f"{old_tolerance}ms → {self.drift_tolerance}ms"
-        )
-
-    def get_drift_tolerance(self):
-        """Ottiene la tolleranza del drift."""
-        return self.drift_tolerance
 
     def set_master_video(self, video_index):
         """Imposta il video master per la sincronizzazione."""
@@ -181,14 +140,3 @@ class SyncManager:
             "Sync Manager: Fine sync_all_to_master",
             f"Tutti i video (eccetto master) spostati e messi in pausa."
         )
-
-
-    def get_sync_info(self):
-        """Ritorna informazioni sullo stato della sincronizzazione."""
-        return {
-            "enabled": self.sync_enabled,
-            "offsets": self.video_offsets.copy(),
-            "drift_tolerance": self.drift_tolerance,
-            "master_video": self.master_video_index
-        }
-

@@ -31,7 +31,7 @@ class ZoomableVideoWidget(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setFrameShape(QGraphicsView.Shape.NoFrame)
-        self.setStyleSheet("background-color: black;")
+        # Lo sfondo nero è già gestito dallo stile globale per i video player
         
         self.zoom_level = 1.0
         self.min_zoom = 1.0

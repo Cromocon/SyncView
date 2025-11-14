@@ -6,8 +6,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QDoubleSpinBox, QDialogButtonBox)
 from PyQt6.QtCore import Qt
 
-
-from ui.styles import get_dialog_stylesheet
+from ui.styles import get_main_stylesheet
 
 
 class FPSDialog(QDialog):
@@ -22,7 +21,7 @@ class FPSDialog(QDialog):
         
     def setup_ui(self):
         """Configura l'interfaccia del dialog."""
-        self.setStyleSheet(get_dialog_stylesheet())
+        self.setStyleSheet(get_main_stylesheet())
         layout = QVBoxLayout(self)
         
         # Titolo

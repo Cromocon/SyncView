@@ -1,7 +1,7 @@
 """
 Configurazione globale dell'applicazione SyncView.
 """
-
+import logging
 from pathlib import Path
 
 # Percorsi del progetto
@@ -25,6 +25,12 @@ EXPORT_SETTINGS_FILE = PROJECT_ROOT / "export_settings.json"  # File per salvare
 LOG_FILE = PROJECT_ROOT / "syncview_log.txt"
 DEVELOPER_LOG = PROJECT_ROOT / "DEVELOPER_LOG.md"
 
+# Impostazioni di Logging
+LOG_LEVEL_FILE = logging.DEBUG
+LOG_LEVEL_CONSOLE = logging.INFO
+LOG_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+LOG_BACKUP_COUNT = 3  # Mantiene syncview.log e 3 backup (es. syncview.log.1)
+
 # Dipendenze richieste
 REQUIRED_PACKAGES = [
     "PyQt6",
@@ -33,38 +39,35 @@ REQUIRED_PACKAGES = [
     "PIL"
 ]
 
-# Tema UI - Palette Tattica SyncView
+# Tema UI - Palette Tattica "Night Ops"
 THEME_COLORS = {
-    # Colori Base
-    "nero_tattico": "#1C1C1E",      # Sfondo principale opaco
-    "desert_tan": "#C19A6B",        # Sostituzione giallo/warning/accent
-    "verde_ranger": "#5F6F52",      # Sostituzione verde/success
-    "grigio_lupo": "#808080",       # Elementi secondari/disabilitati
-    "rosso_squadra": "#B80F0A",     # Errori/azioni distruttive
-    "blu_squadra": "#0047AB",       # Info/link/elementi interattivi
+    # --- Sfondi ---
+    "bg_base": "#1a1a1a",           # Sfondo principale, quasi nero
+    "bg_surface": "#2c2c2c",        # Sfondo per elementi "in superficie" (es. input, groupbox)
+    "bg_surface_hover": "#3a3a3a",  # Hover per superfici
     
-    # Alias per compatibilità
-    "primary": "#1C1C1E",           # nero_tattico
-    "secondary": "#808080",         # grigio_lupo
-    "accent": "#C19A6B",            # desert_tan
-    "text": "#E0E0E0",              # Testo principale (bianco sporco)
-    "text_secondary": "#808080",    # Testo secondario (grigio_lupo)
-    "border": "#808080",            # Bordi (grigio_lupo)
-    "error": "#B80F0A",             # rosso_squadra
-    "warning": "#C19A6B",           # desert_tan
-    "success": "#5F6F52",           # verde_ranger
-    "info": "#0047AB",              # blu_squadra
+    # --- Testo ---
+    "text_primary": "#e0e0e0",      # Testo principale, bianco sporco
+    "text_secondary": "#a0a0a0",    # Testo secondario, grigio chiaro
+    "text_disabled": "#6e6e6e",     # Testo per elementi disabilitati
     
-    # Varianti Hover/Pressed (30% più chiare/scure)
-    "desert_tan_hover": "#D4B088",
-    "verde_ranger_hover": "#798969",
-    "grigio_lupo_hover": "#999999",
-    "rosso_squadra_hover": "#D41813",
-    "blu_squadra_hover": "#1A5EC4",
+    # --- Bordi ---
+    "border_primary": "#444444",    # Bordo standard per elementi
+    "border_accent": "#d4a373",     # Bordo per focus o hover (sabbia)
     
-    # Background varianti
-    "bg_hover": "#2A2A2C",
-    "bg_pressed": "#353537",
-    "bg_input": "#252527",
+    # --- Accenti Funzionali ---
+    "accent_primary": "#d4a373",    # Colore principale per accenti (sabbia/oro)
+    "accent_positive": "#6a994e",   # Verde oliva per azioni positive (play, ok)
+    "accent_negative": "#bc4749",   # Rosso mattone per azioni negative (delete, error)
+    "accent_info": "#6c757d",       # Grigio-blu per informazioni
+    
+    # --- Varianti Hover ---
+    "accent_primary_hover": "#e6b88a",
+    "accent_positive_hover": "#8aae6f",
+    "accent_negative_hover": "#d46a6c",
+    
+    # --- Alias per retrocompatibilità (se necessario) ---
+    "text": "#e0e0e0",
+    "error": "#bc4749",
+    "success": "#6a994e",
 }
-

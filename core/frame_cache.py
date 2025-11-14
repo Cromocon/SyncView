@@ -2,8 +2,7 @@
 Sistema di caching dei frame per migliorare le performance di seek e playback.
 Implementa una cache LRU (Least Recently Used) per i frame video.
 """
-
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from typing import Optional, Any
 from pathlib import Path
 import threading
@@ -24,7 +23,6 @@ class LRUCache:
         """
         self.capacity = capacity
         self.cache: OrderedDict[str, Any] = OrderedDict()
-        self.lock = threading.Lock()
         self.hits = 0
         self.misses = 0
     
@@ -37,15 +35,14 @@ class LRUCache:
         Returns:
             L'elemento se presente, altrimenti None
         """
-        with self.lock:
-            if key in self.cache:
-                # Sposta alla fine (più recente)
-                self.cache.move_to_end(key)
-                self.hits += 1
-                return self.cache[key]
-            else:
-                self.misses += 1
-                return None
+        if key in self.cache:
+            # Sposta alla fine (più recente)
+            self.cache.move_to_end(key)
+            self.hits += 1
+            return self.cache[key]
+        else:
+            self.misses += 1
+            return None
     
     def put(self, key: str, value: Any) -> None:
         """Inserisce un elemento nella cache.
@@ -54,24 +51,22 @@ class LRUCache:
             key: Chiave dell'elemento
             value: Valore da cachare
         """
-        with self.lock:
-            if key in self.cache:
-                # Aggiorna e sposta alla fine
-                self.cache.move_to_end(key)
-            else:
-                # Aggiungi nuovo elemento
-                self.cache[key] = value
-                # Se supera la capacità, rimuovi il meno recente
-                if len(self.cache) > self.capacity:
-                    oldest = next(iter(self.cache))
-                    del self.cache[oldest]
+        if key in self.cache:
+            # Aggiorna e sposta alla fine
+            self.cache.move_to_end(key)
+        
+        # Aggiungi/aggiorna elemento
+        self.cache[key] = value
+        
+        # Se supera la capacità, rimuovi il meno recente
+        if len(self.cache) > self.capacity:
+            self.cache.popitem(last=False)
     
     def clear(self) -> None:
         """Svuota la cache."""
-        with self.lock:
-            self.cache.clear()
-            self.hits = 0
-            self.misses = 0
+        self.cache.clear()
+        self.hits = 0
+        self.misses = 0
     
     def get_stats(self) -> dict:
         """Ritorna statistiche sulla cache.
@@ -79,16 +74,15 @@ class LRUCache:
         Returns:
             Dict con hits, misses, size, hit_rate
         """
-        with self.lock:
-            total = self.hits + self.misses
-            hit_rate = (self.hits / total * 100) if total > 0 else 0
-            return {
-                'hits': self.hits,
-                'misses': self.misses,
-                'size': len(self.cache),
-                'capacity': self.capacity,
-                'hit_rate': hit_rate
-            }
+        total = self.hits + self.misses
+        hit_rate = (self.hits / total * 100) if total > 0 else 0
+        return {
+            'hits': self.hits,
+            'misses': self.misses,
+            'size': len(self.cache),
+            'capacity': self.capacity,
+            'hit_rate': hit_rate
+        }
     
     def resize(self, new_capacity: int) -> None:
         """Ridimensiona la capacità della cache.
@@ -96,12 +90,10 @@ class LRUCache:
         Args:
             new_capacity: Nuova capacità massima
         """
-        with self.lock:
-            self.capacity = new_capacity
-            # Rimuovi elementi in eccesso
-            while len(self.cache) > self.capacity:
-                oldest = next(iter(self.cache))
-                del self.cache[oldest]
+        self.capacity = new_capacity
+        # Rimuovi elementi in eccesso
+        while len(self.cache) > self.capacity:
+            self.cache.popitem(last=False)
 
 
 class FrameCache:
@@ -122,8 +114,8 @@ class FrameCache:
         
         # Tracking delle posizioni
         self.last_position = 0
-        self.position_history: list[int] = []
         self.max_history = 10
+        self.position_history: deque[int] = deque(maxlen=self.max_history)
         
         # Predecoding
         self.is_playing = False
@@ -150,12 +142,10 @@ class FrameCache:
             position_ms: Posizione in millisecondi
         """
         key = self._make_key(position_ms)
-        self.cache.put(key, {'timestamp': position_ms, 'visited': True})
+        self.cache.put(key, True) # Memorizza un semplice True
         
         # Aggiorna history
         self.position_history.append(position_ms)
-        if len(self.position_history) > self.max_history:
-            self.position_history.pop(0)
         
         # Determina direzione di playback
         if len(self.position_history) >= 2:

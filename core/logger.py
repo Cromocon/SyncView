@@ -5,54 +5,67 @@ Gestisce il logging di runtime e lo sviluppo.
 
 import logging
 from datetime import datetime
-from config.settings import LOG_FILE, DEVELOPER_LOG
+from config.settings import (LOG_FILE, DEVELOPER_LOG, 
+                             LOG_LEVEL_FILE, LOG_LEVEL_CONSOLE,
+                             LOG_MAX_BYTES, LOG_BACKUP_COUNT)
 
 class SyncViewLogger:
     """Gestisce il logging dell'applicazione."""
     
     def __init__(self):
-        # Pulisci il file di log all'avvio
-        if LOG_FILE.exists():
-            LOG_FILE.unlink()
-        
         self.logger = logging.getLogger('SyncView')
         self.logger.setLevel(logging.DEBUG)
         
         # Rimuovi handler esistenti
-        self.logger.handlers.clear()
+        if self.logger.hasHandlers():
+            self.logger.handlers.clear()
         
-        # Handler per file
-        file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
-        file_handler.setLevel(logging.DEBUG)
+        # Pulisci il file di log precedente e configura gli handler
+        self._clear_log_file()
+        self._setup_handlers()
         
-        # Handler per console
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        
-        # Formato
+        self.logger.info("Istanza del logger creata e configurata")
+
+    def _setup_handlers(self):
+        """Configura e aggiunge gli handler per file e console."""
+        # Formattatore unico per entrambi gli handler
         formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
+        
+        # 1. Handler per file in modalità scrittura ('w') per pulire il file ad ogni avvio.
+        file_handler = logging.FileHandler(LOG_FILE, mode='w', encoding='utf-8')
+        file_handler.setLevel(LOG_LEVEL_FILE)
         file_handler.setFormatter(formatter)
+        # Scrivi l'intestazione all'inizio del nuovo file di log
+        self._write_startup_header(file_handler)
+        
+        # 2. Handler per console
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(LOG_LEVEL_CONSOLE)
         console_handler.setFormatter(formatter)
         
+        # Aggiungi handler al logger
         self.logger.addHandler(file_handler)
         self.logger.addHandler(console_handler)
-        
-        # Scrivi intestazione di avvio
-        self._write_startup_header()
     
-    def _write_startup_header(self):
+    def _clear_log_file(self):
+        """Pulisce il file di log se esiste."""
+        try:
+            if LOG_FILE.exists():
+                LOG_FILE.unlink()
+        except OSError as e:
+            print(f"Errore durante la pulizia del file di log: {e}")
+
+    def _write_startup_header(self, handler: logging.FileHandler):
         """Scrive l'intestazione di avvio nel log."""
         header = f"\n{'=' * 70}\n"
         header += f"  SYNCVIEW - AVVIO APPLICAZIONE\n"
         header += f"  Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         header += f"{'=' * 70}\n"
-        
-        with open(LOG_FILE, 'a', encoding='utf-8') as f:
-            f.write(header)
-        
+        if handler.stream:
+            handler.stream.write(header)
         self.logger.info("Applicazione SyncView avviata")
     
     def log_dependency_check(self, missing_packages):
