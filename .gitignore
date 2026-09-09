@@ -33,3 +33,6 @@ Export_log.txt
 # OS
 .DS_Store
 Thumbs.db
+
+# Serena (MCP coding agent memory/cache)
+.serena/
