@@ -14,6 +14,15 @@ Il piano completo (contesto, analisi del codice originale, architettura, decisio
 
 L'app originale è Python/PyQt6. L'obiettivo di questo branch è ricreare la stessa logica di dominio (motore di sincronizzazione, gestione markers su SQLite, pipeline di export via ffmpeg) in C nativo, con una UI ridisegnata da zero (overhaul completo, non un clone pixel-per-pixel di Qt) basata su GTK4.
 
+## Piattaforme target
+
+L'app dovrà avere build native per **Linux, Windows e macOS**, tutte con comportamento equivalente.
+
+- **Priorità del target di produzione**: macOS > Linux > Windows.
+- **Capacità di test durante lo sviluppo**: Linux > Windows > macOS.
+
+Questo squilibrio (il target più importante è il meno testabile in locale) è gestito con una pipeline CI multi-piattaforma (GitHub Actions, matrice Linux/Windows/macOS) introdotta fin dalle prime milestone — dettagli in [PLAN.md](PLAN.md#strategia-multi-piattaforma).
+
 ## Stack tecnico previsto
 
 - **Linguaggio**: C11
