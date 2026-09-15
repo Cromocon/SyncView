@@ -53,6 +53,26 @@ Questo riferimento sostituisce integralmente la vecchia palette `THEME_COLORS`/Q
 - **GTK ≥ 4.10** come dipendenza minima (necessaria per `GtkFileDialog` moderno e soprattutto `gdk_toplevel_begin_resize()`, che finalmente risolve in modo pulito il resize frameless mai implementato correttamente nell'originale Qt).
 - **Packaging**: solo build da sorgente con Meson per ora; niente Flatpak/AppImage in questa fase.
 
+## Strategia multi-piattaforma
+
+L'app finale deve avere **build native per Linux, Windows e macOS, con comportamento identico su tutte e tre**. Priorità:
+
+- **Importanza del target di produzione**: macOS > Linux > Windows.
+- **Capacità di test in fase di sviluppo**: Linux > Windows > macOS (lo sviluppo avviene principalmente su Linux; macOS, il target più importante, è quello meno testabile localmente).
+
+Questa asimmetria (il target più importante è quello meno verificabile in corso d'opera) è il rischio trasversale più rilevante del progetto e guida diverse scelte:
+
+- **Scelta del toolkit confermata**: GTK4 + GStreamer restano la scelta giusta perché entrambi hanno backend nativi ufficiali su tutte e tre le piattaforme (Linux: X11/Wayland; Windows: Win32; macOS: Quartz) e binari GStreamer precompilati forniti direttamente da gstreamer.freedesktop.org per Windows/macOS — non serve cambiare architettura, ma va trattata la portabilità come vincolo esplicito fin da subito, non come rifinitura finale in M8.
+- **API cross-platform, non Linux-specific**: `gdk_toplevel_begin_resize()`/`begin_move()` sono API GDK4 astratte dal backend (non X11-specifiche), quindi in teoria funzionano su Win32/Quartz allo stesso modo — ma vanno **verificate esplicitamente su Windows e macOS appena possibile** (CI, vedi sotto), non assunte funzionanti solo perché compilano su Linux.
+- **Scorciatoie da tastiera**: l'originale usa sempre `Ctrl+`. Su macOS la convenzione è `Cmd+`. Per rispettare "stesso risultato ovunque" mantenendo comunque le convenzioni di piattaforma, usare la sintassi accelerator astratta di GTK (`"<Primary>"` invece di `"<Control>"` esplicito) che GTK mappa automaticamente a Cmd su macOS e Ctrl altrove — stessa azione, tasto fisico coerente con la piattaforma. Va deciso esplicitamente per ogni shortcut in M5.2 e non lasciato implicito.
+- **CI multi-piattaforma da subito**: dato che lo sviluppatore non può testare macOS localmente in modo continuo, va introdotta una pipeline CI (GitHub Actions, matrice `ubuntu-latest` / `windows-latest` / `macos-latest`) che compili il progetto su tutte e tre le piattaforme ad ogni push, fin dalla milestone M0 (non solo a fine progetto in M8). Questo è l'unico modo per intercettare rotture su macOS/Windows in tempo utile, dato lo squilibrio testabilità/importanza. Aggiunta come nuova sotto-milestone **M0.6**.
+- **Gestione dipendenze per piattaforma**:
+  - Linux: pacchetti di sistema (apt/dnf/pacman) — già coperto.
+  - macOS: Homebrew (`brew install gtk4 gstreamer gst-plugins-base gst-plugins-good sqlite ffmpeg meson ninja`), build con i Command Line Tools di Xcode (clang).
+  - Windows: MSYS2/MinGW-w64 (`pacman -S mingw-w64-x86_64-gtk4 mingw-w64-x86_64-gstreamer ...`) come percorso più semplice per compatibilità con Meson/GLib; vcpkg come alternativa se emergono problemi con MSYS2.
+- **Packaging equivalente per piattaforma** (da bilanciare con "solo Meson per ora", vedi Decisioni confermate): il pacchetto finale sarà comunque diverso per forma (AppImage/pacchetto distro su Linux, `.app` bundle con dylib bundling su macOS, eseguibile+DLL o installer su Windows), ma deve installare le stesse dipendenze runtime e produrre lo stesso comportamento applicativo — questo è oggetto della milestone M8, ora esplicitamente suddivisa per piattaforma (vedi sotto).
+- **Parità dei plugin GStreamer**: i plugin GStreamer disponibili di default possono differire tra le piattaforme (in particolare hardware-decoder plugin). Per garantire "stesso risultato", la milestone M8 deve fissare esplicitamente l'elenco di plugin richiesti (probabilmente `gstreamer1.0-plugins-base` + `-good` come minimo comune, evitando dipendenze da plugin `-bad`/`-ugly` se possibile) e verificarne la presenza/comportamento equivalente su tutte e tre le piattaforme.
+
 ## Architettura
 
 ### Toolkit e librerie
@@ -139,6 +159,7 @@ Ogni sotto-milestone è pensata per essere completabile e verificabile in una si
 - **M0.3** Aggiungere le restanti dipendenze una alla volta nel `meson.build` (gstreamer-1.0, sqlite3, glib-2.0/gio-2.0, json-glib-1.0), per ciascuna una chiamata di init/smoke-test in `main.c` poi rimossa. *Verifica*: `meson setup build` risolve tutte le dipendenze senza errori su ciascuna aggiunta incrementale.
 - **M0.4** `tests/meson.build` con un singolo test fittizio (`assert(1==1)`) collegato a `meson test`. *Verifica*: `meson test -C build` esegue e passa.
 - **M0.5** `README.md` iniziale (dipendenze, comandi build) + `docs/ARCHITECTURE.md` stub + `.gitignore` per `build/`. *Verifica*: file presenti, `git status` pulito dopo build.
+- **M0.6** CI multi-piattaforma (GitHub Actions, matrice `ubuntu-latest`/`windows-latest`/`macos-latest`) che esegue `meson setup && meson compile` su tutte e tre. *Verifica*: workflow verde su tutte e tre le piattaforme per lo scaffolding minimo di M0.1-M0.4 — è l'unico modo di sapere presto se qualcosa non compila su macOS/Windows, dato che lo sviluppo locale è su Linux.
 
 ### M1 — Core logic + unit test (nessuna dipendenza da GTK)
 - **M1.1** `util/time_format.c` (`HH:MM:SS.mmm`) + test unitario con casi limite (0ms, >1h, ms singoli). *Verifica*: test passa.
@@ -225,11 +246,13 @@ Ogni sotto-milestone è pensata per essere completabile e verificabile in una si
 - **M7.8** Stati vuoti/loading/errore (video non caricato, nessun marker, errore probing, errore export) in stile "UI states" del riferimento. *Verifica*: ogni stato raggiungibile manualmente e visivamente coerente.
 - **M7.9** QA manuale completa: ripercorrere tutta la checklist shortcut (M5.2) + tutti i flussi (carica, sync, marker, export, zoom/pan, resize) in un'unica sessione end-to-end senza restart.
 
-### M8 — Packaging
-- **M8.1** Regole `meson install` (binario, risorse, icone).
-- **M8.2** File `.desktop` + icona applicazione.
-- **M8.3** `README.md` definitivo con elenco dipendenze runtime (gtk4 ≥4.10, plugin gstreamer base/good/bad secondo i codec target, sqlite3, ffmpeg/ffprobe esterni) e istruzioni build.
-- **M8.4** Build pulita verificata su una macchina/container "vergine" seguendo solo il README, senza toolchain preesistente. *Verifica*: build+avvio riusciti da zero.
+### M8 — Packaging (per tutte e tre le piattaforme)
+- **M8.1** Regole `meson install` (binario, risorse, icone) — comuni a tutte le piattaforme.
+- **M8.2** **Linux**: file `.desktop` + icona applicazione, eventuale AppImage. *Verifica*: build pulita su container Linux "vergine" seguendo solo il README.
+- **M8.3** **macOS**: `.app` bundle con dylib bundling (GTK4/GStreamer/sqlite non sono di sistema su macOS), build con Homebrew su CI `macos-latest`. *Verifica*: CI produce un `.app` che si avvia su un runner macOS pulito — priorità massima essendo la piattaforma target più importante ma meno testabile localmente.
+- **M8.4** **Windows**: eseguibile + DLL (MSYS2/MinGW) o installer, build su CI `windows-latest`. *Verifica*: CI produce un eseguibile funzionante su un runner Windows pulito.
+- **M8.5** Verifica di parità comportamentale tra le tre build: stesso set di funzionalità testato manualmente (checklist M5.2/M7.9) ripetuto almeno su Linux (locale) e, tramite CI/runner remoti o macchine disponibili, su Windows e macOS — con enfasi su macOS data la priorità.
+- **M8.6** `README.md` definitivo con elenco dipendenze runtime per piattaforma (gtk4 ≥4.10, plugin gstreamer base/good, sqlite3, ffmpeg/ffprobe esterni) e istruzioni di build separate per Linux/macOS/Windows.
 
 ## Rischi e gap noti
 
@@ -238,13 +261,26 @@ Ogni sotto-milestone è pensata per essere completabile e verificabile in una si
 3. **Resize frameless**: risolto deliberatamente in M7 con `gdk_toplevel_begin_resize` (gap mai chiuso nell'originale); fallback esplicito (solo maximize/restore) se emergono complicazioni HiDPI/multi-monitor impreviste.
 4. **Frame-accurate seek assente**: limite ereditato dall'architettura playbin/GtkMediaFile, identico all'originale QMediaPlayer — da documentare per l'utente finale, non risolvibile senza una pipeline GStreamer manuale (fuori scope).
 5. **Memory management manuale**: rischio leak/UAF sistemico nel passaggio da Python GC a C, specialmente su stringhe owned (`Marker.description`) e lifecycle di `SyncviewVideoPlayer` su unload/reload. Da verificare con ASan/valgrind ad ogni milestone, non solo a fine progetto.
-6. **File non ancora letti integralmente** in questa fase di pianificazione — vanno letti per intero all'inizio della milestone che li tocca (non assumere il contenuto a memoria): `core/video_loader.py` (M2, flag ffprobe esatti), `ui/timeline_widget.py` (M4, eventuale zoom timeline), `config/settings.py` (M1, elenco completo costanti), path esatto del file di log in `core/logger.py` (M1).
+6. **Squilibrio priorità/testabilità multi-piattaforma**: macOS è la piattaforma target più importante ma la meno testabile durante lo sviluppo (che avviene su Linux). Mitigazione: CI multi-piattaforma fin da M0.6 (non solo a fine progetto), evitare API/assunzioni Linux-specifiche (X11, path POSIX hardcoded, `Ctrl+` invece degli accelerator astratti `<Primary>`), e trattare ogni milestone UI (M2-M7) come "da verificare anche su CI macOS/Windows", non solo su Linux locale.
+7. **Parità dei plugin GStreamer tra piattaforme**: la disponibilità di default dei plugin (specialmente hardware decoder) differisce tra Linux/macOS/Windows; va fissato esplicitamente in M8 un set minimo comune (base+good) per garantire lo stesso comportamento di playback ovunque.
+8. **File non ancora letti integralmente** in questa fase di pianificazione — vanno letti per intero all'inizio della milestone che li tocca (non assumere il contenuto a memoria): `core/video_loader.py` (M2, flag ffprobe esatti), `ui/timeline_widget.py` (M4, eventuale zoom timeline), `config/settings.py` (M1, elenco completo costanti), path esatto del file di log in `core/logger.py` (M1).
 
 ## Prompt per un'altra IA (se serve ricerca esterna)
 
-Se in una sessione futura serve verificare dettagli API GTK4/GStreamer aggiornati (la cui superficie può essere cambiata rispetto alla conoscenza di training), questo prompt è pronto da incollare in un'IA con accesso web:
+Se in una sessione futura serve verificare dettagli API GTK4/GStreamer aggiornati (la cui superficie può essere cambiata rispetto alla conoscenza di training) e soprattutto il loro comportamento **su Windows e macOS** (le piattaforme meno testabili in locale durante lo sviluppo, ma macOS è il target più importante), questo prompt è pronto da incollare in un'IA con accesso web:
 
-> Sto scrivendo un'app desktop in C puro con GTK4 (>= 4.10) e GStreamer su Linux. Mi servono conferme aggiornate su: (1) l'API esatta di `GtkVideo`/`GtkMediaFile` per leggere `timestamp`/`duration` e ricevere notifiche di cambiamento (property `notify::timestamp` esiste davvero su `GtkMediaStream`? quali sono i nomi esatti delle property GObject?); (2) `gtk_media_stream_set_playback_rate()` — firma esatta e range supportato; (3) `gdk_toplevel_begin_resize()` — firma esatta, enum `GdkSurfaceEdge`, e un esempio minimo di edge-hit-testing per resize di una finestra client-side-decorated senza titlebar nativa; (4) `GtkFileDialog` (sostituto moderno di `GtkFileChooserDialog` da GTK 4.10) — API async esatta per selezione cartella/file in C; (5) se `GstDiscoverer` o l'uso diretto di `playbin` tramite `GtkMediaFile` espone già `fps`/framerate del video o se serve comunque un probing separato. Per ciascun punto, citami la versione GTK4/GStreamer in cui l'API è stabile e link alla documentazione ufficiale (docs.gtk.org / gstreamer.freedesktop.org). Non serve codice completo, solo firme esatte e conferme di esistenza/stabilità delle API.
+> Sto scrivendo un'app desktop **cross-platform** (Linux, Windows, macOS — build native su tutte e tre, stesso comportamento richiesto ovunque) in C puro con GTK4 (>= 4.10) e GStreamer. Sviluppo principalmente su Linux, quindi mi servono conferme aggiornate soprattutto sul comportamento **su Windows e macOS**, dove non posso testare in continuo:
+>
+> 1. `GtkVideo`/`GtkMediaFile` — l'API per leggere `timestamp`/`duration` e ricevere notifiche (`notify::timestamp` esiste su `GtkMediaStream`? nomi esatti delle property GObject?) è la stessa su tutti i backend (Win32, Quartz/macOS, X11/Wayland), o alcuni backend hanno limitazioni note (es. GStreamer non disponibile/diverso su macOS via Homebrew, o backend media diverso su Windows)?
+> 2. `gtk_media_stream_set_playback_rate()` — firma, range supportato, e se il comportamento è garantito identico su Win32/Quartz.
+> 3. `gdk_toplevel_begin_resize()`/`begin_move()` — firma esatta, enum `GdkSurfaceEdge`; **sono realmente implementate e funzionanti sui backend Win32 e Quartz di GDK4**, o sono principalmente testate/stabili solo su X11/Wayland? Serve una finestra frameless (client-side-decorated) con resize manuale su tutte e tre le piattaforme.
+> 4. `GtkFileDialog` (sostituto di `GtkFileChooserDialog` da GTK 4.10) — API async esatta, e se il dialog nativo del sistema operativo viene mostrato correttamente su Windows e macOS (non solo un fallback GTK generico).
+> 5. Se `GstDiscoverer`/`playbin` tramite `GtkMediaFile` espone `fps`/framerate del video in modo equivalente su tutte le piattaforme, o se conviene comunque un probing esterno via `ffprobe` per garantire lo stesso risultato ovunque.
+> 6. **Packaging**: qual è oggi (2026) il modo raccomandato per produrre un `.app` bundle macOS "standalone" (con GTK4/GStreamer/sqlite bundlati, non dipendenti da Homebrew installato sull'utente finale) da un progetto Meson — esiste un tool maturo equivalente a `linuxdeploy`/`windeployqt` per GTK4 su macOS (es. `gtk-mac-bundler`, `dylibbundler`)? E l'equivalente per produrre un eseguibile Windows standalone (DLL bundling) da un progetto MSYS2/MinGW.
+> 7. Disponibilità di default dei plugin GStreamer (base/good/bad, in particolare per decoder hardware) sui pacchetti ufficiali Windows/macOS di gstreamer.freedesktop.org, per capire se il set "base+good" è davvero sufficiente per una parità di comportamento tra le tre piattaforme.
+> 8. La sintassi accelerator GTK `"<Primary>"` mappa davvero automaticamente a Cmd su macOS e Ctrl su Linux/Windows nelle versioni GTK4 recenti? Conferma con riferimento alla documentazione.
+>
+> Per ciascun punto, citami la versione GTK4/GStreamer in cui il comportamento è stabile/documentato e un link alla documentazione ufficiale (docs.gtk.org / gstreamer.freedesktop.org). Non serve codice completo, solo conferme di esistenza/stabilità/parità cross-platform delle API.
 
 ## Verifica end-to-end del piano stesso
 
