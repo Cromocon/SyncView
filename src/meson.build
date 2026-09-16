@@ -1,3 +1,15 @@
+syncview_core_inc = include_directories('.')
+
+syncview_core_sources = [
+  'util/time_format.c',
+]
+
+syncview_core_lib = static_library(
+  'syncview_core',
+  syncview_core_sources,
+  include_directories: syncview_core_inc,
+)
+
 syncview_sources = [
   'main.c',
 ]
@@ -25,5 +37,7 @@ syncview_deps = [
 executable(
   'syncview',
   syncview_sources,
+  include_directories: syncview_core_inc,
+  link_with: syncview_core_lib,
   dependencies: syncview_deps,
 )
