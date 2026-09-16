@@ -19,3 +19,11 @@ test_settings = executable(
   link_with: syncview_core_lib,
 )
 test('settings', test_settings)
+
+test_sync_manager = executable(
+  'test_sync_manager',
+  'test_sync_manager.c',
+  include_directories: syncview_core_inc,
+  link_with: syncview_core_lib,
+)
+test('sync_manager', test_sync_manager)
