@@ -3,6 +3,7 @@ syncview_core_inc = include_directories('.')
 syncview_core_sources = [
   'util/time_format.c',
   'core/settings.c',
+  'core/sync_manager.c',
 ]
 
 syncview_core_lib = static_library(
