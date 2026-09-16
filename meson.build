@@ -10,3 +10,4 @@ project(
 )
 
 subdir('src')
+subdir('tests')
