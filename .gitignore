@@ -36,3 +36,6 @@ Thumbs.db
 
 # Serena (MCP coding agent memory/cache)
 .serena/
+
+# Meson build directory (M0.1)
+build/
