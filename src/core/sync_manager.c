@@ -61,3 +61,17 @@ sync_manager_get_master(const SyncManager *sm)
 {
     return sm->master_video_index;
 }
+
+int64_t
+sync_manager_calculate_sync_position(const SyncManager *sm,
+                                      int64_t source_position_ms,
+                                      int source_index,
+                                      int target_index)
+{
+    int64_t source_offset = sync_manager_get_offset(sm, source_index);
+    int64_t target_offset = sync_manager_get_offset(sm, target_index);
+
+    int64_t sync_position = source_position_ms - source_offset + target_offset;
+
+    return sync_position < 0 ? 0 : sync_position;
+}
