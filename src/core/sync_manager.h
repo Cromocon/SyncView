@@ -49,4 +49,19 @@ void sync_manager_reset_offsets(SyncManager *sm);
 void sync_manager_set_master(SyncManager *sm, int video_index);
 int sync_manager_get_master(const SyncManager *sm);
 
+/*
+ * Porting 1:1 di SyncManager.calculate_sync_position: traduzione
+ * lineare tra gli offset di due video, nessuna correzione di drift.
+ *
+ *   sync_position = source_position - offset[source_index] + offset[target_index]
+ *
+ * Clampata a >= 0. Nessun evento periodico/continuo: va richiamata
+ * solo su eventi discreti (seek, resync, click marker), come
+ * nell'originale.
+ */
+int64_t sync_manager_calculate_sync_position(const SyncManager *sm,
+                                              int64_t source_position_ms,
+                                              int source_index,
+                                              int target_index);
+
 #endif /* SYNCVIEW_CORE_SYNC_MANAGER_H */
