@@ -54,3 +54,20 @@ test_user_paths = executable(
   dependencies: [glib_dep, json_glib_dep],
 )
 test('user_paths', test_user_paths)
+
+test_logger = executable(
+  'test_logger',
+  'test_logger.c',
+  include_directories: syncview_core_inc,
+  link_with: syncview_core_lib,
+  dependencies: [glib_dep],
+)
+test('logger', test_logger)
+
+# Vincolo della modalità debug: nessun output/controllo debug ad-hoc fuori da core/logger.c.
+python = import('python').find_installation('python3')
+test(
+  'no_adhoc_logging',
+  python,
+  args: [files('check_no_adhoc_logging.py'), meson.project_source_root() / 'src'],
+)

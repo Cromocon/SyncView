@@ -165,12 +165,18 @@ Un test C usa `assert()`: se passa non stampa nulla ed esce con codice 0; se una
 - [ ] `syncview:user_paths` → **OK**.
 - [ ] Copre: valori vuoti su file assente e creazione della directory padre, indici non validi (get → `NULL`, set/clear → errore senza scrivere), salvataggio immediato ad ogni set e round-trip su file temporaneo (4 slot + `last_export_dir`, unicode, clear, export dir `NULL`), lettura di un file nel formato Python (stringhe vuote/null → slot vuoto, lista corta/lunga), file corrotto o di struttura inattesa → valori vuoti, `get_valid_video_paths` (rimuove file inesistenti e directory da memoria e file, nessuna riscrittura se nulla cambia), errore di salvataggio (valore resta in memoria), path di default.
 
+### M1.14 — `core/logger` + modalità debug
+
+- [ ] `syncview:logger` → **OK**.
+- [ ] Copre: **zero byte su stderr a debug disattivato** dopo 20 giri di tutte le funzioni di log (stderr catturato via `dup2`), file con intestazione di avvio e tutte le categorie dell'originale nel formato atteso (`[AZIONE UTENTE]`, `[VIDEO n]`, seek `mm:ss (Nms)`, export ✓/✗, `[EXPORT]`, errore + `GError` su seconda riga), dettagli DEBUG (`log_sync/marker/gst/ui`) assenti senza debug; con debug (flag e `SYNCVIEW_DEBUG=1`) stessi messaggi anche su stderr con timestamp/livello/categoria e righe identiche al file; `SYNCVIEW_DEBUG` = `0`/`false`/vuoto non attiva il debug; nessun output prima di `logger_init` e dopo `logger_shutdown`; file troncato ad ogni apertura; propagazione di `GST_DEBUG=3` solo in debug e senza sovrascrivere un valore esistente; file non scrivibile → errore ma logger ancora attivo.
+- [ ] `syncview:no_adhoc_logging` → **OK**: controllo statico (`tests/check_no_adhoc_logging.py`) che fuori da `core/logger.c` non ci siano `printf`/`fprintf`/`stderr`/`g_print*` né `SYNCVIEW_DEBUG`/`debug_enabled`. Se un modulo aggiunge logging ad-hoc, questo test fallisce indicando file e riga.
+
 ### Riepilogo atteso
 
 ```
 meson test -C build
 ```
-deve riportare **7/7 OK** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`).
+deve riportare **9/9 OK** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`).
 
 ---
 
