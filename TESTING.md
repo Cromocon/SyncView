@@ -1,6 +1,6 @@
 # TESTING — SyncView-C
 
-Questo documento spiega come avviare il progetto e cosa testare manualmente allo stato attuale. Viene aggiornato ad ogni milestone con i nuovi elementi testabili — per ora copre solo **M0 (Scaffolding)**, l'unica fase completata.
+Questo documento spiega come avviare il progetto e cosa testare manualmente allo stato attuale. Viene aggiornato ad ogni milestone con i nuovi elementi testabili — copre **M0 (Scaffolding)** completo e **M1 (Core logic)** fino a M1.6 incluso.
 
 Per il contesto completo (architettura, milestone, rischi) vedi [PLAN.md](PLAN.md). Per le istruzioni di build sintetiche vedi anche [README.md](README.md#build).
 
@@ -98,6 +98,47 @@ Ogni voce corrisponde a una sotto-milestone già implementata e pushata su `Sync
 
 ---
 
+## Checklist di test manuale — M1 (Core logic, in corso)
+
+Nessuna dipendenza da GTK: tutto è verificabile via `meson test -C build` (test automatici) — non c'è ancora un'interfaccia grafica da usare per questi moduli. Per vedere singolarmente l'output di ogni test:
+
+```bash
+meson test -C build -v              # verboso, mostra output di ogni test
+meson test -C build --suite syncview  # (equivalente, tutti i test sono nel progetto "syncview")
+./build/tests/test_sync_manager     # esegue un singolo eseguibile di test direttamente
+```
+
+Un test C usa `assert()`: se passa non stampa nulla ed esce con codice 0; se una asserzione fallisce, il processo va in crash (`Aborted`) e `meson test` lo segna come `FAIL`, con lo stack nel log (`build/meson-logs/testlog.txt`).
+
+### M1.1 — `util/time_format`
+
+- [ ] `meson test -C build` include `syncview:time_format` → **OK**.
+- [ ] Copre: 0ms → `00:00:00.000`, millisecondi singoli, minuti/ore, oltre 1h, valori negativi clampati a 0.
+
+### M1.2 — `core/settings`
+
+- [ ] `syncview:settings` → **OK**.
+- [ ] Copre: `MAX_VIDEOS=4`, 6 formati video supportati, 7 preset FPS, 3 opzioni di frame-step (40/100/200ms), costanti zoom/export.
+
+### M1.3 + M1.4 + M1.5 — `core/sync_manager`
+
+- [ ] `syncview:sync_manager` → **OK**.
+- [ ] Copre: stato iniziale (sync abilitato, offset a 0, master=0), getter/setter con bound-check, `calculate_sync_position` (offset uguali/diversi/clamp a 0/source==target), `sync_all_to_master` con player mock (seek prima di pause, master solo in pausa, slot non caricato o `NULL` ignorato).
+
+### M1.6 — `core/markers`
+
+- [ ] `syncview:markers` → **OK**.
+- [ ] Copre: default `description=""`/`category="default"`, generazione `id`/`created_at`, unicità dell'`id` anche per marker con lo stesso timestamp, `marker_free(NULL)` sicuro.
+
+### Riepilogo atteso
+
+```
+meson test -C build
+```
+deve riportare **5/5 OK** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`).
+
+---
+
 ## Cosa NON è ancora testabile
 
-Tutto ciò che riguarda logica applicativa reale (sync engine, markers, playback video, export, UI oltre la finestra vuota, modalità debug) appartiene a M1 e successive — non ancora implementato. Questo file verrà esteso con una nuova sezione ad ogni milestone completata.
+Tutto ciò che riguarda persistenza (SQLite, JSON), playback video reale, export, UI oltre la finestra vuota di M0.2, e la modalità debug appartiene a M1.7 e successive — non ancora implementato. Questo file verrà esteso con una nuova sezione ad ogni milestone completata.
