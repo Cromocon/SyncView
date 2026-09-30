@@ -14,13 +14,22 @@ import sys
 
 LOGGER_FILES = {"core/logger.c", "core/logger.h"}
 
+# Output su stdout voluto dall'utente (non logging): solo il punto d'ingresso, per i comandi CLI come
+# --check-deps. Resta vietato tutto il resto (stderr, flag di debug).
+STDOUT_ALLOWED = {"main.c"}
+
+STDOUT_MSG = "output diretto su stdout: usare le funzioni log_*() di core/logger.h"
+
 FORBIDDEN = [
-    (re.compile(r"(?<![\w])(printf|fprintf|vprintf|vfprintf|puts|putchar|perror|g_print|g_printerr)\s*\("),
-     "output diretto su stdout/stderr: usare le funzioni log_*() di core/logger.h"),
-    (re.compile(r"\b(stderr|stdout)\b"),
-     "uso diretto di stderr/stdout: usare le funzioni log_*() di core/logger.h"),
+    # (regex, messaggio, consentito_in_STDOUT_ALLOWED)
+    (re.compile(r"(?<![\w])(printf|vprintf|puts|putchar|g_print)\s*\("), STDOUT_MSG, True),
+    (re.compile(r"\bstdout\b"), STDOUT_MSG, True),
+    (re.compile(r"(?<![\w])(fprintf|vfprintf|perror|g_printerr)\s*\("),
+     "output diretto su stderr: usare le funzioni log_*() di core/logger.h", False),
+    (re.compile(r"\bstderr\b"),
+     "uso diretto di stderr: usare le funzioni log_*() di core/logger.h", False),
     (re.compile(r"SYNCVIEW_DEBUG|debug_enabled"),
-     "controllo locale della modalità debug: deve stare solo in core/logger.c"),
+     "controllo locale della modalità debug: deve stare solo in core/logger.c", False),
 ]
 
 
@@ -48,7 +57,9 @@ def main() -> int:
 
         code = strip_comments_and_strings(path.read_text(encoding="utf-8"))
         for lineno, line in enumerate(code.splitlines(), start=1):
-            for regex, reason in FORBIDDEN:
+            for regex, reason, stdout_ok in FORBIDDEN:
+                if stdout_ok and rel in STDOUT_ALLOWED:
+                    continue
                 if regex.search(line):
                     violations.append(f"{rel}:{lineno}: {reason}")
 

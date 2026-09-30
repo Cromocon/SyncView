@@ -198,8 +198,8 @@ meson setup build-asan -Db_sanitize=address -Db_lundef=false --buildtype=debug
 ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:abort_on_error=1 meson test -C build-asan
 ```
 
-- [ ] 13/13 **OK**, zero errori ASan e **zero leak** nel codice SyncView (LeakSanitizer; per `discoverer` con le soppressioni di terze parti in `tests/lsan.supp`).
-- [ ] Stessa passata con `-Db_sanitize=address,undefined` → 13/13 OK, zero `runtime error` UBSan.
+- [ ] 14/14 **OK**, zero errori ASan e **zero leak** nel codice SyncView (LeakSanitizer; per `discoverer` con le soppressioni di terze parti in `tests/lsan.supp`).
+- [ ] Stessa passata con `-Db_sanitize=address,undefined` → 14/14 OK, zero `runtime error` UBSan.
 - Prima di fidarsi di "zero leak" verificare che LeakSanitizer sia attivo nell'ambiente (alcuni sandbox/container lo disabilitano in silenzio): un programma di prova che perde 123 byte deve produrre `SUMMARY: AddressSanitizer: 123 byte(s) leaked`.
 - ThreadSanitizer **non** è un criterio affidabile con `libglib` di sistema (non instrumentata: falsi positivi sui `GMutex`).
 
@@ -242,12 +242,28 @@ Stesso eseguibile di M2.3: `syncview:video_player` → **OK** (skip senza displa
 - **Prova di mutazione** (non parte di `meson test`): per validare i test, sono state introdotte di proposito 11 regressioni nel codice del player (watch del bus non rimosso, `ASYNC_DONE` senza guardia, pipeline non riportata a `NULL` su errore, `loaded` non azzerato su errore, path non azzerato, `loading` non impostato, stato `READY` invece di `PAUSED`, nessun controllo del file, segnali non emessi, decoder sempre `NULL`): **tutte e 11 sono state rilevate** (il test di un errore *dopo* un load riuscito e il riferimento debole sul bus sono stati aggiunti proprio perché due mutazioni inizialmente sfuggivano). Una mutazione sul solo svuotamento esplicito del bus non è rilevabile perché è ridondante: `GstPipeline` ha `auto-flush-bus` attivo.
 - **Verifica su file reale** (manuale, fatta in sviluppo): un MP4 AV1 1280×720 si carica in ~240 ms, `ASYNC_DONE` arriva dopo `NULL→READY→PAUSED`, il log `[GST]` riporta `decoder video in uso: nvav1dec (hardware)` e il paintable emette `invalidate-size` con 1280×720. La UI per vederlo arriva in M2.8; fino ad allora il frame è verificato dallo snapshot del paintable nel test.
 
+### M2.10 — `core/deps_check` (verifica dipendenze) e `--check-deps`
+
+- [ ] `syncview:deps_check` → **OK** (nessun requisito di display o plugin: usa sistemi finti; le prove con sonde reali usano script finti su POSIX).
+- [ ] **Sistema completo** su Linux/Windows/macOS: 9 componenti nell'ordine documentato, tutti OK, `can_play`/`can_export`/`is_complete` veri.
+- [ ] **Componenti obbligatori** (`playbin3`, `gtk4paintablesink`): se mancano → `MISSING` (funzione *riproduzione*), `can_play` falso ma `can_export` vero; il dettaglio nomina l'elemento.
+- [ ] **Decoder H.264 (any-of)**: basta uno tra software e hardware (solo `vah264dec`/`nvh264dec` vale); nessuno → playback non possibile. HEVC/VP9/AV1 sono **opzionali** (mancanza = avviso, playback e export restano possibili, `is_complete` falso).
+- [ ] **Demuxer**: un demuxer per formato supportato; wmv e flv accettano anche quelli di libav; se manca `qtdemux` il dettaglio dice «mp4, mov» e i formati ancora presenti.
+- [ ] **Decoder hardware per piattaforma**: ogni piattaforma riconosce i propri (`vtdec_hw` su macOS, `d3d11h264dec` su Windows, `va*`/`nv*` su Linux); uno di un'altra piattaforma non conta.
+- [ ] **ffmpeg**: versione (`7.1.1`, `n7.0-12-g…`) ed encoder H.264 (`libx264` o hardware) letti dall'output; nessun encoder H.264 (o tipo diverso da `V`), non eseguibile → export non possibile; assente → `INSTRUCTIONS` su Linux e `DOWNLOADABLE` su Windows/macOS; `deps_dir` cercata per prima (e default `~/.syncview/deps`).
+- [ ] **Istruzioni di installazione**: `pacman`/`apt`/`dnf` → comando con i nomi dei pacchetti (`gst-plugin-gtk4` / `gstreamer1.0-gtk4` / `gstreamer1-plugin-gtk4`, `ffmpeg`…); `zypper` e gestore sconosciuto → indicazione generica (il nome del pacchetto gtk4 per openSUSE non è verificato); Windows/macOS → nessun comando Linux (reinstalla l'app / GStreamer ≥ 1.28).
+- [ ] **Report**: testo con `[OK]`/`[MANCANTE]`/`[OPZIONALE MANCANTE]` e riga finale «Riproduzione: … | Export: … | Completo: …»; `deps_report_log` scrive il riepilogo (azione utente) e un dettaglio `[GST]` per componente.
+- [ ] **Sonde reali** (POSIX): `run_program` legge lo stdout, gestisce esito ≠ 0 e programma inesistente, **termina dopo ~5 s** un processo che non finisce; `find_program` dà precedenza a `<dir>/bin` e ignora file non eseguibili; un falso `ffmpeg` eseguibile in `deps_dir` è trovato e letto da `deps_check_run` con le sonde reali.
+- [ ] **Manuale** — `./build/src/syncview --check-deps` stampa il report sul sistema reale e termina senza aprire finestre (exit 0 = riproduzione ed export possibili, 1 = manca qualcosa di richiesto); con `--debug` compaiono anche i dettagli `[GST]`. Per vedere il caso negativo: `env PATH=<dir con solo pacman> GST_PLUGIN_SYSTEM_PATH_1_0=/nonexistent GST_REGISTRY_1_0=/tmp/r.bin ./build/src/syncview --check-deps`.
+- **Prova di mutazione** (13 regressioni introdotte di proposito nella logica, es. H.264 reso opzionale, `can_play` sempre vero, `extra_dir` ignorata, risoluzione Windows/macOS uguale a Linux, encoder audio contati come video, versione non parsata): i test le rilevano **tutte**; una (tipo `V` degli encoder) sfuggiva e ha richiesto un caso in più.
+- Controllo statico `no_adhoc_logging`: ora `main.c` (e solo `main.c`) può scrivere su **stdout** per l'output voluto dei comandi CLI; restano vietati stderr e i flag di debug ovunque.
+
 ### Riepilogo atteso
 
 ```
 meson test -C build
 ```
-deve riportare **13/13** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`, `discoverer`, `video_player`); in un ambiente senza display o senza `gtk4paintablesink` `video_player` risulta `SKIP` (e `discoverer` se mancano i plugin di prova): è normale.
+deve riportare **14/14** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`, `discoverer`, `video_player`, `deps_check`); in un ambiente senza display o senza `gtk4paintablesink` `video_player` risulta `SKIP` (e `discoverer` se mancano i plugin di prova): è normale.
 
 ---
 
@@ -255,7 +271,7 @@ deve riportare **13/13** allo stato attuale (`dummy`, `time_format`, `settings`,
 
 - **Playback video reale** (caricamento, play/pausa, seek, frame-step, `playback_rate`, segnali): da M2.4. Oggi esiste solo lo scheletro del player, con pipeline ferma.
 - **Interfaccia oltre la finestra vuota di M0.2**: griglia 2x2, timeline, marker a schermo, dialoghi, scorciatoie, tema, zoom/pan, titlebar custom (M3–M7). Le finestre di debug "Log" e "Moduli" sono previste in M2.9 (oggi esistono solo il filtro e il sink del logger, testati da `logger_filter`).
-- **Verifica e download delle dipendenze al primo avvio**: M2.10–M2.12.
+- **Download/installazione delle dipendenze e dialog del primo avvio**: M2.11–M2.12. La sola *verifica* (M2.10) c'è: `syncview --check-deps`.
 - **Export**: M6.
 - **Sync e marker con video reali**: la logica è testata (`sync_manager`, `MarkerStore`, `marker_db`) ma non è ancora collegata a nessun player o widget (M3/M4).
 - **`video_player` in CI**: il test viene saltato (nessun display sul runner Linux, nessun `gtk4paintablesink` installato in nessuna delle tre CI). Per verificarlo anche in CI servirebbero i pacchetti del plugin (gst-plugins-rs) su ogni piattaforma e, su Linux, un display virtuale (`xvfb`): da decidere.

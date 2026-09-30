@@ -1,3 +1,4 @@
+#include "core/deps_check.h"
 #include "core/logger.h"
 
 #include <gtk/gtk.h>
@@ -17,19 +18,42 @@ on_activate(GtkApplication *app, gpointer user_data)
 }
 
 /*
- * Estrae --debug/-v da argv (GApplication rifiuterebbe opzioni che non
- * conosce) e ritorna TRUE se presenti. La modalità debug vera e propria è
+ * `syncview --check-deps`: verifica le dipendenze runtime, stampa il report su stdout e termina
+ * (exit 0 = riproduzione ed export possibili, 1 = manca qualcosa di richiesto). Non apre finestre.
+ */
+static int
+run_check_deps(void)
+{
+    DepsReport *report = deps_check_run(NULL, NULL);
+    char *text = deps_report_to_text(report);
+
+    deps_report_log(report);
+    g_print("%s", text);
+
+    int status = (deps_report_can_play(report) && deps_report_can_export(report)) ? 0 : 1;
+
+    g_free(text);
+    deps_report_free(report);
+    return status;
+}
+
+/*
+ * Estrae --debug/-v e --check-deps da argv (GApplication rifiuterebbe opzioni che non
+ * conosce); ritorna TRUE se c'è il flag di debug, *check_deps se c'è --check-deps. La modalità debug vera e propria è
  * decisa da core/logger.c (flag CLI oppure SYNCVIEW_DEBUG).
  */
 static gboolean
-extract_debug_flag(int *argc, char **argv)
+extract_debug_flag(int *argc, char **argv, gboolean *check_deps)
 {
     gboolean debug = FALSE;
     int out = 1;
 
+    *check_deps = FALSE;
     for (int i = 1; i < *argc; i++) {
         if (strcmp(argv[i], "--debug") == 0 || strcmp(argv[i], "-v") == 0) {
             debug = TRUE;
+        } else if (strcmp(argv[i], "--check-deps") == 0) {
+            *check_deps = TRUE;
         } else {
             argv[out++] = argv[i];
         }
@@ -43,7 +67,8 @@ extract_debug_flag(int *argc, char **argv)
 int
 main(int argc, char *argv[])
 {
-    gboolean cli_debug = extract_debug_flag(&argc, argv);
+    gboolean check_deps = FALSE;
+    gboolean cli_debug = extract_debug_flag(&argc, argv, &check_deps);
 
     /* Prima di qualunque altra inizializzazione (GTK, futuro gst_init): in debug imposta GST_DEBUG. */
     char *log_file = logger_default_file();
@@ -55,6 +80,13 @@ main(int argc, char *argv[])
         g_clear_error(&log_error_details);
     }
     g_free(log_file);
+
+    if (check_deps) {
+        int deps_status = run_check_deps();
+
+        logger_shutdown();
+        return deps_status;
+    }
 
     g_autoptr(GtkApplication) app =
         gtk_application_new("com.syncview.SyncView", G_APPLICATION_DEFAULT_FLAGS);

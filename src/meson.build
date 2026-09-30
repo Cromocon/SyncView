@@ -18,6 +18,7 @@ syncview_core_sources = [
   'core/user_paths.c',
   'core/logger.c',
   'core/discoverer.c',
+  'core/deps_check.c',
 ]
 
 syncview_core_lib = static_library(

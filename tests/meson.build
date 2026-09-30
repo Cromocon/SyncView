@@ -120,3 +120,12 @@ test(
   timeout: 60,
   env: {'LSAN_OPTIONS': 'suppressions=' + meson.current_source_dir() / 'lsan.supp'},
 )
+
+test_deps_check = executable(
+  'test_deps_check',
+  'test_deps_check.c',
+  include_directories: syncview_core_inc,
+  link_with: syncview_core_lib,
+  dependencies: [glib_dep, gio_dep, gstreamer_dep],
+)
+test('deps_check', test_deps_check, timeout: 60)

@@ -6,7 +6,7 @@ Riscrittura in **C puro (C11)** di SyncView — applicazione desktop per l'anali
 
 ## Stato del progetto
 
-🚧 **In sviluppo — M0 (scaffolding) completa, M1 (core logic) completa (M1.1-M1.16), M2 in corso (M2.1-M2.4 fatte).** Dettaglio moduli implementati in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), checklist di test in [TESTING.md](TESTING.md).
+🚧 **In sviluppo — M0 (scaffolding) completa, M1 (core logic) completa (M1.1-M1.16), M2 in corso (M2.1-M2.4 e M2.10 fatte).** Dettaglio moduli implementati in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), checklist di test in [TESTING.md](TESTING.md).
 
 Il piano completo (contesto, analisi del codice originale, architettura, decisioni tecniche, milestone granulari e rischi noti) è in [PLAN.md](PLAN.md). Consultalo prima di contribuire: definisce la struttura del progetto, le librerie da usare e l'ordine di implementazione.
 
@@ -64,6 +64,12 @@ Modalità debug (log verboso anche su terminale, vedi [PLAN.md](PLAN.md#modalit�
 
 ```bash
 SYNCVIEW_DEBUG=1 ./build/src/syncview
+```
+
+Verifica delle dipendenze runtime (plugin GStreamer per la riproduzione, ffmpeg per l'export): stampa un report con cosa manca e come installarlo, poi termina (exit 0 = tutto il necessario è presente, 1 = manca qualcosa di richiesto):
+
+```bash
+./build/src/syncview --check-deps
 ```
 
 ## Struttura
