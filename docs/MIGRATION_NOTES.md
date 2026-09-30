@@ -67,3 +67,23 @@ Il ramo `_load_video_sync`/`detect_video_fps` (legacy, `async_load=False`, timeo
 ### Messaggi di log da mantenere (testo originale, `Feed-N` = `video_index + 1`)
 
 `Caricamento asincrono avviato` · `Percorso video salvato` · `Info video ricevute` (`FPS: {:.2f}, Size: WxH`) · `Video caricato (async)` · errori `Errore ffprobe per <nome>` → nel porting `Errore probing <nome>` (il tool non è più ffprobe) · `Errore caricamento asincrono Feed-N`.
+
+---
+
+## Ottimizzazioni approvate rispetto all'originale
+
+La riscrittura mira a replicare **e ottimizzare**. Le ottimizzazioni O1–O9 sono elencate in [PLAN.md](../PLAN.md#ottimizzazioni-approvate-rispetto-alloriginale) con la milestone che le implementa. Questa sezione raccoglierà, man mano che vengono implementate, il comportamento dell'originale, quello nuovo e le **misure** (non assunzioni) dove l'esito dipende da dati/piattaforma:
+
+| ID | Originale | SyncView-C | Misure / stato |
+|---|---|---|---|
+| O1 | Step fisso in ms (40/33/100/200), nessun vero avanzamento di un frame | Preset ms invariati + "Frame esatto" (`GST_EVENT_STEP` / seek accurato) | da fare (M2.7) |
+| O2 | Probing fallito → carica comunque, nessun messaggio | Errori specifici (plugin mancante col nome del codec, timeout, file corrotto) | da fare (M2.2) |
+| O3 | Path salvato in `user_paths` prima del probing | Salvato solo a caricamento riuscito | da fare (M2.8) |
+| O4 | Seek+play in sequenza sui player (avvio sfalsato) | Clock/base-time condivisi, avvio simultaneo; drift-correction facoltativa | da misurare (M3.10) |
+| O5 | Timer di polling della posizione | Tick callback del frame clock, attivo solo in `PLAYING` | da fare (M2.6) |
+| O6 | Decodifica delegata a QtMultimedia, non osservabile | Decoder in uso loggato, plugin hw rilevati dalla verifica dipendenze | da misurare (M2.4, M2.10) |
+| O7 | `save_incremental` (id modificati) + journal SQLite di default | Id sporchi + `PRAGMA journal_mode=WAL` | da fare (M4.12) |
+| O8 | Export sempre con ricodifica | Opzione "Rapido" (copia stream, taglio a keyframe); "Preciso" resta default | da misurare (M6.12) |
+| O9 | `max_workers = cpu − 1` per qualunque encoder | Limite più basso per encoder hardware | da fare (M6.6) |
+
+Aggiunta non legata a una singola ottimizzazione: **verifica e download delle dipendenze al primo avvio** (M2.10–M2.12), assente nell'originale (che richiedeva `pip install` e `ffmpeg` nel PATH).
