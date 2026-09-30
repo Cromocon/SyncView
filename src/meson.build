@@ -1,21 +1,5 @@
 syncview_core_inc = include_directories('.')
 
-syncview_core_sources = [
-  'util/time_format.c',
-  'core/settings.c',
-  'core/sync_manager.c',
-]
-
-syncview_core_lib = static_library(
-  'syncview_core',
-  syncview_core_sources,
-  include_directories: syncview_core_inc,
-)
-
-syncview_sources = [
-  'main.c',
-]
-
 gtk_dep = dependency('gtk4', version: '>=4.10')
 gstreamer_dep = dependency('gstreamer-1.0')
 gstreamer_pbutils_dep = dependency('gstreamer-pbutils-1.0')
@@ -24,6 +8,24 @@ sqlite_dep = dependency('sqlite3')
 glib_dep = dependency('glib-2.0')
 gio_dep = dependency('gio-2.0')
 json_glib_dep = dependency('json-glib-1.0')
+
+syncview_core_sources = [
+  'util/time_format.c',
+  'core/settings.c',
+  'core/sync_manager.c',
+  'core/markers.c',
+]
+
+syncview_core_lib = static_library(
+  'syncview_core',
+  syncview_core_sources,
+  include_directories: syncview_core_inc,
+  dependencies: [glib_dep],
+)
+
+syncview_sources = [
+  'main.c',
+]
 
 syncview_deps = [
   gtk_dep,

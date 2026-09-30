@@ -27,3 +27,11 @@ test_sync_manager = executable(
   link_with: syncview_core_lib,
 )
 test('sync_manager', test_sync_manager)
+
+test_markers = executable(
+  'test_markers',
+  'test_markers.c',
+  include_directories: syncview_core_inc,
+  link_with: syncview_core_lib,
+)
+test('markers', test_markers)
