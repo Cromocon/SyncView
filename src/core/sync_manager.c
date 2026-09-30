@@ -75,3 +75,33 @@ sync_manager_calculate_sync_position(const SyncManager *sm,
 
     return sync_position < 0 ? 0 : sync_position;
 }
+
+void
+sync_manager_sync_all_to_master(SyncManager *sm,
+                                 int64_t master_position_ms,
+                                 SyncPlayerOps players[],
+                                 int n_players)
+{
+    for (int i = 0; i < n_players; i++) {
+        SyncPlayerOps *ops = &players[i];
+
+        if (ops->is_loaded == NULL || !ops->is_loaded(ops->user_data)) {
+            continue;
+        }
+
+        if (i != sm->master_video_index) {
+            int64_t sync_pos = sync_manager_calculate_sync_position(
+                sm, master_position_ms, sm->master_video_index, i);
+            if (ops->seek) {
+                ops->seek(ops->user_data, sync_pos);
+            }
+            if (ops->pause) {
+                ops->pause(ops->user_data);
+            }
+        } else {
+            if (ops->pause) {
+                ops->pause(ops->user_data);
+            }
+        }
+    }
+}

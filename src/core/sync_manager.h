@@ -64,4 +64,32 @@ int64_t sync_manager_calculate_sync_position(const SyncManager *sm,
                                               int source_index,
                                               int target_index);
 
+/*
+ * Callback opachi verso un video player reale, per tenere
+ * sync_manager_sync_all_to_master testabile senza dipendere dal vero
+ * SyncviewVideoPlayer (M2+). is_loaded == NULL indica uno slot vuoto
+ * (nessun player caricato), equivalente a `player is None`
+ * nell'originale Python — in quel caso lo slot viene ignorato del
+ * tutto, senza chiamare seek/pause.
+ */
+typedef struct {
+    void *user_data;
+    bool (*is_loaded)(void *user_data);
+    void (*seek)(void *user_data, int64_t position_ms);
+    void (*pause)(void *user_data);
+} SyncPlayerOps;
+
+/*
+ * Porting 1:1 di SyncManager.sync_all_to_master: per ogni player
+ * caricato diverso dal master, calcola la posizione sincronizzata
+ * rispetto al master e chiama seek() poi pause(); il player master
+ * viene solo messo in pausa (nessun seek). Funziona indipendentemente
+ * da sm->sync_enabled, esattamente come l'originale (chiamata anche
+ * dal resync manuale a sync disattivata).
+ */
+void sync_manager_sync_all_to_master(SyncManager *sm,
+                                      int64_t master_position_ms,
+                                      SyncPlayerOps players[],
+                                      int n_players);
+
 #endif /* SYNCVIEW_CORE_SYNC_MANAGER_H */
