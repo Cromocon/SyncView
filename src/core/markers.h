@@ -42,6 +42,16 @@ typedef struct {
 Marker *marker_new(int64_t timestamp_ms, const char *color, const char *description,
                     const char *category, int video_index);
 
+/*
+ * Come marker_new(), ma con id e created_at forniti (es. caricati dal DB o
+ * da JSON legacy). id o created_at NULL vengono generati, come i campi
+ * None della dataclass originale (from_dict -> __post_init__). Stessi
+ * default di marker_new() per description/category NULL.
+ */
+Marker *marker_new_full(const char *id, int64_t timestamp_ms, const char *color,
+                        const char *description, const char *category, int video_index,
+                        const char *created_at);
+
 void marker_free(Marker *marker);
 
 /*

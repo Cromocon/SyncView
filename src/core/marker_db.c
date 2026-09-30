@@ -2,6 +2,11 @@
 
 #include "core/markers.h"
 
+#include <glib/gstdio.h>
+#include <json-glib/json-glib.h>
+#include <limits.h>
+#include <stdarg.h>
+#include <string.h>
 #include <sqlite3.h>
 #include <stdlib.h>
 
@@ -327,17 +332,23 @@ marker_db_load_all(MarkerDb *db, gboolean include_deleted, GError **error)
     int rc;
 
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-        Marker *m = g_new0(Marker, 1);
+        char *id = column_text_or(stmt, 0, "");
+        char *color = column_text_or(stmt, 2, "");
+        char *description = column_text_or(stmt, 3, "");
+        char *category = column_text_or(stmt, 4, "default");
+        char *created_at = column_text_or(stmt, 6, "");
+        int video_index = sqlite3_column_type(stmt, 5) == SQLITE_NULL
+                              ? SYNCVIEW_MARKER_VIDEO_INDEX_ALL
+                              : sqlite3_column_int(stmt, 5);
 
-        m->id = column_text_or(stmt, 0, "");
-        m->timestamp_ms = sqlite3_column_int64(stmt, 1);
-        m->color = column_text_or(stmt, 2, "");
-        m->description = column_text_or(stmt, 3, "");
-        m->category = column_text_or(stmt, 4, "default");
-        m->video_index = sqlite3_column_type(stmt, 5) == SQLITE_NULL
-                             ? SYNCVIEW_MARKER_VIDEO_INDEX_ALL
-                             : sqlite3_column_int(stmt, 5);
-        m->created_at = column_text_or(stmt, 6, "");
+        Marker *m = marker_new_full(id, sqlite3_column_int64(stmt, 1), color, description, category,
+                                    video_index, created_at);
+
+        g_free(id);
+        g_free(color);
+        g_free(description);
+        g_free(category);
+        g_free(created_at);
 
         marker_store_add_marker(store, m);
     }
@@ -382,4 +393,254 @@ marker_db_delete(MarkerDb *db, const char *id, GError **error)
     sqlite3_finalize(stmt);
     sqlite3_close(conn);
     return ok;
+}
+
+/* --- Migrazione JSON legacy -> SQLite (porting di MarkerManager._migrate_from_json) --- */
+
+static void
+set_json_error(GError **error, const char *json_path, const char *fmt, ...) G_GNUC_PRINTF(3, 4);
+
+static void
+set_json_error(GError **error, const char *json_path, const char *fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    char *detail = g_strdup_vprintf(fmt, args);
+    va_end(args);
+
+    g_set_error(error, MARKER_DB_ERROR, MARKER_DB_ERROR_JSON, "JSON legacy %s: %s", json_path,
+                detail);
+    g_free(detail);
+}
+
+/*
+ * Campo stringa opzionale: assente o null -> *out = NULL; altrimenti deve essere una stringa.
+ * Ritorna FALSE (con error) se il tipo è sbagliato.
+ */
+static gboolean
+json_get_string(JsonObject *obj, const char *name, const char *json_path, const char **out,
+                GError **error)
+{
+    *out = NULL;
+    JsonNode *node = json_object_get_member(obj, name);
+    if (!node || JSON_NODE_HOLDS_NULL(node)) {
+        return TRUE;
+    }
+    if (!JSON_NODE_HOLDS_VALUE(node) || json_node_get_value_type(node) != G_TYPE_STRING) {
+        set_json_error(error, json_path, "il campo '%s' deve essere una stringa", name);
+        return FALSE;
+    }
+    *out = json_node_get_string(node);
+    return TRUE;
+}
+
+/* Campo numerico intero (accetta anche 1000.0, come un int Python). *present = FALSE se assente/null. */
+static gboolean
+json_get_int(JsonObject *obj, const char *name, const char *json_path, int64_t *out,
+             gboolean *present, GError **error)
+{
+    *present = FALSE;
+    JsonNode *node = json_object_get_member(obj, name);
+    if (!node || JSON_NODE_HOLDS_NULL(node)) {
+        return TRUE;
+    }
+
+    GType type = JSON_NODE_HOLDS_VALUE(node) ? json_node_get_value_type(node) : G_TYPE_INVALID;
+    if (type != G_TYPE_INT64 && type != G_TYPE_DOUBLE) {
+        set_json_error(error, json_path, "il campo '%s' deve essere un numero", name);
+        return FALSE;
+    }
+
+    *out = type == G_TYPE_INT64 ? json_node_get_int(node) : (int64_t)json_node_get_double(node);
+    *present = TRUE;
+    return TRUE;
+}
+
+static Marker *
+marker_from_json_object(JsonObject *obj, const char *json_path, GError **error)
+{
+    /* Chiavi ammesse: i campi della dataclass + 'label' (scartato). Come
+     * Marker(**data), qualunque altra chiave è un errore per l'intera migrazione. */
+    static const char *const known[] = { "timestamp", "color", "description", "category",
+                                         "video_index", "created_at", "id", "label" };
+    GList *members = json_object_get_members(obj);
+
+    for (GList *l = members; l; l = l->next) {
+        gboolean ok = FALSE;
+        for (size_t i = 0; i < G_N_ELEMENTS(known); i++) {
+            if (strcmp(l->data, known[i]) == 0) {
+                ok = TRUE;
+                break;
+            }
+        }
+        if (!ok) {
+            set_json_error(error, json_path, "campo marker sconosciuto '%s'", (const char *)l->data);
+            g_list_free(members);
+            return NULL;
+        }
+    }
+    g_list_free(members);
+
+    int64_t timestamp = 0;
+    int64_t video = 0;
+    gboolean has_timestamp, has_video;
+    const char *color, *description, *category, *created_at, *id;
+
+    if (!json_get_int(obj, "timestamp", json_path, &timestamp, &has_timestamp, error)
+        || !json_get_int(obj, "video_index", json_path, &video, &has_video, error)
+        || !json_get_string(obj, "color", json_path, &color, error)
+        || !json_get_string(obj, "description", json_path, &description, error)
+        || !json_get_string(obj, "category", json_path, &category, error)
+        || !json_get_string(obj, "created_at", json_path, &created_at, error)
+        || !json_get_string(obj, "id", json_path, &id, error)) {
+        return NULL;
+    }
+
+    /* timestamp e color sono obbligatori (senza default nella dataclass). */
+    if (!has_timestamp || !color) {
+        set_json_error(error, json_path, "marker senza '%s'", !has_timestamp ? "timestamp" : "color");
+        return NULL;
+    }
+    if (has_video && (video < INT_MIN || video > INT_MAX)) {
+        set_json_error(error, json_path, "video_index fuori range");
+        return NULL;
+    }
+
+    Marker *m = marker_new_full(id, timestamp, color, description, category,
+                                has_video ? (int)video : SYNCVIEW_MARKER_VIDEO_INDEX_ALL, created_at);
+    if (!m) {
+        set_json_error(error, json_path, "memoria esaurita");
+    }
+    return m;
+}
+
+/* Parsing completo in un MarkerStore; NULL + error al primo marker non valido (nulla viene salvato). */
+static MarkerStore *
+load_legacy_json(const char *json_path, GError **error)
+{
+    JsonParser *parser = json_parser_new();
+    GError *parse_error = NULL;
+
+    if (!json_parser_load_from_file(parser, json_path, &parse_error)) {
+        set_json_error(error, json_path, "%s", parse_error->message);
+        g_error_free(parse_error);
+        g_object_unref(parser);
+        return NULL;
+    }
+
+    JsonNode *root = json_parser_get_root(parser);
+    if (!root || !JSON_NODE_HOLDS_OBJECT(root)) {
+        set_json_error(error, json_path, "la radice deve essere un oggetto");
+        g_object_unref(parser);
+        return NULL;
+    }
+
+    MarkerStore *store = marker_store_new();
+    JsonNode *markers_node = json_object_get_member(json_node_get_object(root), "markers");
+
+    if (markers_node && !JSON_NODE_HOLDS_NULL(markers_node)) {
+        if (!JSON_NODE_HOLDS_ARRAY(markers_node)) {
+            set_json_error(error, json_path, "'markers' deve essere una lista");
+            goto fail;
+        }
+
+        JsonArray *array = json_node_get_array(markers_node);
+        for (guint i = 0; i < json_array_get_length(array); i++) {
+            JsonNode *element = json_array_get_element(array, i);
+            if (!JSON_NODE_HOLDS_OBJECT(element)) {
+                set_json_error(error, json_path, "marker #%u non è un oggetto", i);
+                goto fail;
+            }
+
+            Marker *m = marker_from_json_object(json_node_get_object(element), json_path, error);
+            if (!m) {
+                goto fail;
+            }
+            marker_store_add_marker(store, m);
+        }
+    }
+
+    g_object_unref(parser);
+    return store;
+
+fail:
+    marker_store_free(store);
+    g_object_unref(parser);
+    return NULL;
+}
+
+/* Come Path.with_suffix('.json.backup'): sostituisce l'ultima estensione del nome file (o la aggiunge). */
+static char *
+legacy_backup_path(const char *json_path)
+{
+    const char *base = strrchr(json_path, G_DIR_SEPARATOR);
+    const char *name = base ? base + 1 : json_path;
+    const char *dot = strrchr(name, '.');
+    /* Un punto iniziale (".hidden") non è un'estensione, come in pathlib. */
+    size_t keep = (dot && dot != name) ? (size_t)(dot - json_path) : strlen(json_path);
+
+    return g_strdup_printf("%.*s.json.backup", (int)keep, json_path);
+}
+
+gboolean
+marker_db_migrate_from_json(MarkerDb *db, const char *json_path, int *migrated_count,
+                            GError **error)
+{
+    if (migrated_count) {
+        *migrated_count = 0;
+    }
+
+    /* File assente: niente da migrare, non è un errore (come l'`exists()` iniziale). */
+    if (!g_file_test(json_path, G_FILE_TEST_IS_REGULAR)) {
+        return TRUE;
+    }
+
+    MarkerStore *store = load_legacy_json(json_path, error);
+    if (!store) {
+        return FALSE;
+    }
+
+    size_t count = marker_store_count(store);
+    gboolean ok = TRUE;
+
+    /* Lista vuota: come l'originale (`if self._db and markers`) non salva e non crea backup. */
+    if (count > 0) {
+        ok = marker_db_save_batch(db, store, error);
+
+        if (ok) {
+            char *backup = legacy_backup_path(json_path);
+
+            if (g_rename(json_path, backup) != 0) {
+                g_set_error(error, MARKER_DB_ERROR, MARKER_DB_ERROR_JSON,
+                            "Marker migrati ma impossibile creare il backup %s", backup);
+                ok = FALSE;
+            } else if (migrated_count) {
+                *migrated_count = (int)count;
+            }
+            g_free(backup);
+        }
+    }
+
+    marker_store_free(store);
+    return ok;
+}
+
+MarkerDb *
+marker_db_open_migrating(const char *db_path, const char *legacy_json_path,
+                         GError **migration_error, GError **error)
+{
+    /* Come il costruttore di MarkerManager: si migra solo se il DB non esiste ancora. */
+    gboolean db_existed = g_file_test(db_path, G_FILE_TEST_EXISTS);
+
+    MarkerDb *db = marker_db_open(db_path, error);
+    if (!db) {
+        return NULL;
+    }
+
+    if (!db_existed && legacy_json_path) {
+        /* Un fallimento della migrazione non impedisce l'apertura (l'originale lo registra e prosegue). */
+        marker_db_migrate_from_json(db, legacy_json_path, NULL, migration_error);
+    }
+
+    return db;
 }

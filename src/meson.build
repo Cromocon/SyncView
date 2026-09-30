@@ -21,7 +21,7 @@ syncview_core_lib = static_library(
   'syncview_core',
   syncview_core_sources,
   include_directories: syncview_core_inc,
-  dependencies: [glib_dep, sqlite_dep],
+  dependencies: [glib_dep, sqlite_dep, json_glib_dep],
 )
 
 syncview_sources = [

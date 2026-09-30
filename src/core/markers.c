@@ -49,8 +49,8 @@ marker_iso8601_now(void)
 }
 
 Marker *
-marker_new(int64_t timestamp_ms, const char *color, const char *description,
-           const char *category, int video_index)
+marker_new_full(const char *id, int64_t timestamp_ms, const char *color, const char *description,
+                const char *category, int video_index, const char *created_at)
 {
     Marker *m = malloc(sizeof(Marker));
     if (!m) {
@@ -66,16 +66,24 @@ marker_new(int64_t timestamp_ms, const char *color, const char *description,
     char created_at_buf[40];
     double epoch_seconds = 0.0;
     current_timestamp_iso8601(created_at_buf, sizeof(created_at_buf), &epoch_seconds);
-    m->created_at = g_strdup(created_at_buf);
+    m->created_at = g_strdup(created_at ? created_at : created_at_buf);
 
     /* Equivalente a f"marker_{timestamp}_{datetime.now().timestamp()}":
      * stessa forma (prefisso + timestamp ms + epoch secondi con
      * precisione al microsecondo), non garantito byte-identico alla
      * rappresentazione float di Python — è un id opaco, non parsato
      * altrove, l'unicità/forma sono ciò che conta. */
-    m->id = g_strdup_printf("marker_%lld_%f", (long long)timestamp_ms, epoch_seconds);
+    m->id = id ? g_strdup(id)
+               : g_strdup_printf("marker_%lld_%f", (long long)timestamp_ms, epoch_seconds);
 
     return m;
+}
+
+Marker *
+marker_new(int64_t timestamp_ms, const char *color, const char *description,
+           const char *category, int video_index)
+{
+    return marker_new_full(NULL, timestamp_ms, color, description, category, video_index, NULL);
 }
 
 void

@@ -409,6 +409,227 @@ test_soft_delete(const char *dir)
     g_free(path);
 }
 
+/* --- Migrazione JSON legacy --- */
+
+static void
+write_file(const char *path, const char *content)
+{
+    assert(g_file_set_contents(path, content, -1, NULL));
+}
+
+static char *
+read_file(const char *path)
+{
+    char *content = NULL;
+    assert(g_file_get_contents(path, &content, NULL, NULL));
+    return content;
+}
+
+static const char *LEGACY_JSON =
+    "{\n"
+    "  \"version\": \"3.0\",\n"
+    "  \"created_at\": \"2024-01-01T10:00:00\",\n"
+    "  \"markers\": [\n"
+    "    {\"timestamp\": 5000, \"color\": \"#e74c3c\", \"description\": \"gol \\u00e8 fatto\","
+    " \"category\": \"event\", \"video_index\": 2, \"created_at\": \"2024-01-01T10:00:01.000001\","
+    " \"id\": \"marker_5000_1.5\", \"label\": \"vecchia etichetta\"},\n"
+    "    {\"timestamp\": 1000, \"color\": \"#3498db\", \"description\": \"\", \"category\": \"default\","
+    " \"video_index\": null, \"created_at\": \"2024-01-01T10:00:02.000002\", \"id\": \"marker_1000_2.5\"},\n"
+    "    {\"timestamp\": 3000, \"color\": \"#2ecc71\"},\n"
+    "    {\"timestamp\": 2000.0, \"color\": \"#9b59b6\", \"id\": null, \"video_index\": 0}\n"
+    "  ]\n"
+    "}\n";
+
+static void
+test_migrate_json(const char *dir)
+{
+    char *json = g_build_filename(dir, "project.json", NULL);
+    char *backup = g_build_filename(dir, "project.json.backup", NULL);
+    char *dbpath = g_build_filename(dir, "project.markers.db", NULL);
+    write_file(json, LEGACY_JSON);
+
+    MarkerDb *db = marker_db_open(dbpath, NULL);
+    int migrated = -1;
+    GError *error = NULL;
+    assert(marker_db_migrate_from_json(db, json, &migrated, &error));
+    assert(error == NULL && migrated == 4);
+
+    /* JSON rinominato in .json.backup, contenuto identico all'originale. */
+    assert(!g_file_test(json, G_FILE_TEST_EXISTS));
+    assert(g_file_test(backup, G_FILE_TEST_IS_REGULAR));
+    char *backup_content = read_file(backup);
+    assert(strcmp(backup_content, LEGACY_JSON) == 0);
+    g_free(backup_content);
+
+    /* Contenuto migrato, ordinato per timestamp. */
+    MarkerStore *store = marker_db_load_all(db, FALSE, NULL);
+    assert(marker_store_count(store) == 4);
+    assert(marker_store_get(store, 0)->timestamp_ms == 1000);
+    assert(marker_store_get(store, 1)->timestamp_ms == 2000);
+    assert(marker_store_get(store, 2)->timestamp_ms == 3000);
+    assert(marker_store_get(store, 3)->timestamp_ms == 5000);
+
+    const Marker *m = marker_store_find_by_id(store, "marker_5000_1.5");  /* id preservato */
+    assert(m != NULL);
+    assert(m->timestamp_ms == 5000 && m->video_index == 2);
+    assert(strcmp(m->color, "#e74c3c") == 0 && strcmp(m->category, "event") == 0);
+    assert(strcmp(m->description, "gol \xc3\xa8 fatto") == 0);
+    assert(strcmp(m->created_at, "2024-01-01T10:00:01.000001") == 0);
+
+    m = marker_store_find_by_id(store, "marker_1000_2.5");
+    assert(m != NULL && m->video_index == SYNCVIEW_MARKER_VIDEO_INDEX_ALL);
+
+    /* Campi mancanti: default e id/created_at generati. */
+    m = marker_store_get(store, 2);
+    assert(strcmp(m->color, "#2ecc71") == 0 && strcmp(m->description, "") == 0);
+    assert(strcmp(m->category, "default") == 0 && m->video_index == SYNCVIEW_MARKER_VIDEO_INDEX_ALL);
+    assert(strncmp(m->id, "marker_3000_", strlen("marker_3000_")) == 0);
+    assert(m->created_at[4] == '-' && m->created_at[10] == 'T');
+
+    /* Timestamp float (2000.0) accettato, id null generato, video_index 0. */
+    m = marker_store_get(store, 1);
+    assert(strncmp(m->id, "marker_2000_", strlen("marker_2000_")) == 0 && m->video_index == 0);
+    marker_store_free(store);
+
+    /* Un secondo backup sostituisce il precedente. */
+    write_file(json, "{\"markers\": [{\"timestamp\": 7, \"color\": \"#fff\"}]}");
+    assert(marker_db_migrate_from_json(db, json, &migrated, NULL) && migrated == 1);
+    backup_content = read_file(backup);
+    assert(strstr(backup_content, "\"timestamp\": 7") != NULL);
+    g_free(backup_content);
+
+    marker_db_free(db);
+    g_free(json);
+    g_free(backup);
+    g_free(dbpath);
+}
+
+static void
+test_migrate_json_no_op_cases(const char *dir)
+{
+    char *dbpath = g_build_filename(dir, "noop.markers.db", NULL);
+    char *json = g_build_filename(dir, "noop.json", NULL);
+    char *backup = g_build_filename(dir, "noop.json.backup", NULL);
+    MarkerDb *db = marker_db_open(dbpath, NULL);
+    int migrated = -1;
+
+    /* File assente: successo, nulla da fare. */
+    assert(marker_db_migrate_from_json(db, json, &migrated, NULL) && migrated == 0);
+
+    /* Lista vuota (o chiave 'markers' assente): nessun salvataggio e nessun backup. */
+    write_file(json, "{\"version\": \"3.0\", \"markers\": []}");
+    migrated = -1;
+    assert(marker_db_migrate_from_json(db, json, &migrated, NULL) && migrated == 0);
+    assert(g_file_test(json, G_FILE_TEST_EXISTS) && !g_file_test(backup, G_FILE_TEST_EXISTS));
+    write_file(json, "{}");
+    assert(marker_db_migrate_from_json(db, json, &migrated, NULL) && migrated == 0);
+    assert(g_file_test(json, G_FILE_TEST_EXISTS) && !g_file_test(backup, G_FILE_TEST_EXISTS));
+
+    marker_db_free(db);
+    g_free(dbpath);
+    g_free(json);
+    g_free(backup);
+}
+
+static void
+test_migrate_json_errors(const char *dir)
+{
+    char *dbpath = g_build_filename(dir, "err.markers.db", NULL);
+    char *json = g_build_filename(dir, "err.json", NULL);
+    char *backup = g_build_filename(dir, "err.json.backup", NULL);
+    MarkerDb *db = marker_db_open(dbpath, NULL);
+
+    const char *bad_inputs[] = {
+        "{ non e' json",
+        "[1, 2, 3]",
+        "{\"markers\": {\"timestamp\": 1}}",
+        /* secondo marker con chiave sconosciuta: fallisce tutto, anche il primo valido */
+        "{\"markers\": [{\"timestamp\": 1, \"color\": \"#fff\"}, {\"timestamp\": 2, \"color\": \"#fff\", \"extra\": 1}]}",
+        "{\"markers\": [{\"color\": \"#fff\"}]}",                  /* timestamp mancante */
+        "{\"markers\": [{\"timestamp\": 1}]}",                      /* color mancante */
+        "{\"markers\": [{\"timestamp\": \"uno\", \"color\": \"#fff\"}]}",
+        "{\"markers\": [{\"timestamp\": 1, \"color\": 5}]}",
+        "{\"markers\": [42]}",
+    };
+
+    for (size_t i = 0; i < G_N_ELEMENTS(bad_inputs); i++) {
+        write_file(json, bad_inputs[i]);
+        GError *error = NULL;
+        int migrated = -1;
+        assert(!marker_db_migrate_from_json(db, json, &migrated, &error));
+        assert(error != NULL && error->domain == MARKER_DB_ERROR && error->code == MARKER_DB_ERROR_JSON);
+        assert(migrated == 0);
+        g_error_free(error);
+
+        /* JSON intatto, nessun backup, nulla salvato nel DB. */
+        char *content = read_file(json);
+        assert(strcmp(content, bad_inputs[i]) == 0);
+        g_free(content);
+        assert(!g_file_test(backup, G_FILE_TEST_EXISTS));
+        char *count = query_scalar(dbpath, "SELECT count(*) FROM markers");
+        assert(strcmp(count, "0") == 0);
+        g_free(count);
+    }
+
+    marker_db_free(db);
+    g_free(dbpath);
+    g_free(json);
+    g_free(backup);
+}
+
+static void
+test_open_migrating(const char *dir)
+{
+    char *dbpath = g_build_filename(dir, "om.markers.db", NULL);
+    char *json = g_build_filename(dir, "om.json", NULL);
+    char *backup = g_build_filename(dir, "om.json.backup", NULL);
+    write_file(json, "{\"markers\": [{\"timestamp\": 10, \"color\": \"#fff\"}]}");
+
+    /* DB nuovo + JSON presente: migrazione automatica. */
+    GError *migration_error = NULL;
+    MarkerDb *db = marker_db_open_migrating(dbpath, json, &migration_error, NULL);
+    assert(db != NULL && migration_error == NULL);
+    assert(!g_file_test(json, G_FILE_TEST_EXISTS) && g_file_test(backup, G_FILE_TEST_EXISTS));
+    MarkerStore *store = marker_db_load_all(db, FALSE, NULL);
+    assert(marker_store_count(store) == 1);
+    marker_store_free(store);
+    marker_db_free(db);
+
+    /* DB già esistente: un nuovo JSON NON viene migrato. */
+    write_file(json, "{\"markers\": [{\"timestamp\": 20, \"color\": \"#fff\"}]}");
+    db = marker_db_open_migrating(dbpath, json, NULL, NULL);
+    assert(db != NULL);
+    assert(g_file_test(json, G_FILE_TEST_EXISTS));
+    store = marker_db_load_all(db, FALSE, NULL);
+    assert(marker_store_count(store) == 1);
+    marker_store_free(store);
+    marker_db_free(db);
+
+    /* JSON non valido su DB nuovo: il DB si apre comunque, l'errore è riportato, JSON intatto. */
+    char *dbpath2 = g_build_filename(dir, "om2.markers.db", NULL);
+    char *json2 = g_build_filename(dir, "om2.json", NULL);
+    write_file(json2, "garbage");
+    db = marker_db_open_migrating(dbpath2, json2, &migration_error, NULL);
+    assert(db != NULL && migration_error != NULL);
+    assert(migration_error->code == MARKER_DB_ERROR_JSON);
+    g_error_free(migration_error);
+    assert(g_file_test(json2, G_FILE_TEST_EXISTS));
+    marker_db_free(db);
+
+    /* legacy_json_path NULL: nessun tentativo. */
+    char *dbpath3 = g_build_filename(dir, "om3.markers.db", NULL);
+    db = marker_db_open_migrating(dbpath3, NULL, NULL, NULL);
+    assert(db != NULL);
+    marker_db_free(db);
+
+    g_free(dbpath);
+    g_free(json);
+    g_free(backup);
+    g_free(dbpath2);
+    g_free(json2);
+    g_free(dbpath3);
+}
+
 int
 main(void)
 {
@@ -424,6 +645,10 @@ main(void)
     test_load_excludes_deleted(dir);
     test_save_batch_rolls_back_on_error(dir);
     test_soft_delete(dir);
+    test_migrate_json(dir);
+    test_migrate_json_no_op_cases(dir);
+    test_migrate_json_errors(dir);
+    test_open_migrating(dir);
 
     marker_db_free(NULL);
 

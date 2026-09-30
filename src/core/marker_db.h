@@ -21,6 +21,7 @@ GQuark marker_db_error_quark(void);
 typedef enum {
     MARKER_DB_ERROR_OPEN,  /* impossibile aprire il file/creare la directory */
     MARKER_DB_ERROR_SQL,   /* errore SQLite generico */
+    MARKER_DB_ERROR_JSON,  /* JSON legacy non valido / backup non creabile */
 } MarkerDbError;
 
 typedef struct MarkerDb MarkerDb;
@@ -56,6 +57,33 @@ gboolean marker_db_save_batch(MarkerDb *db, const MarkerStore *store, GError **e
  * errore (nessuna riga modificata, ritorna TRUE); FALSE solo per errori SQLite.
  */
 gboolean marker_db_delete(MarkerDb *db, const char *id, GError **error);
+
+/*
+ * Migra il JSON legacy (`{"markers": [...]}`, formato di MarkerManager.save)
+ * in SQLite, come _migrate_from_json:
+ *  - file assente: successo, *migrated_count = 0;
+ *  - `label` scartato; qualunque altra chiave sconosciuta, tipo errato, o
+ *    timestamp/color mancanti fanno fallire l'intera migrazione (nulla
+ *    viene salvato, il JSON resta intatto); id/created_at mancanti vengono
+ *    generati; video_index null/assente = marker globale;
+ *  - lista vuota: niente salvataggio e niente backup;
+ *  - altrimenti salva in batch e solo dopo rinomina il JSON in
+ *    `<nome>.json.backup` (sostituisce l'estensione, come with_suffix),
+ *    sovrascrivendo un eventuale backup precedente.
+ * migrated_count (opzionale) riceve il numero di marker migrati.
+ */
+gboolean marker_db_migrate_from_json(MarkerDb *db, const char *json_path, int *migrated_count,
+                                     GError **error);
+
+/*
+ * Apre il DB e, se il file DB non esisteva ancora e legacy_json_path non è
+ * NULL, tenta la migrazione del JSON (come il costruttore di MarkerManager).
+ * Un errore di migrazione non impedisce l'apertura: viene riportato in
+ * migration_error (opzionale) e il JSON resta al suo posto. `error` copre
+ * solo il fallimento dell'apertura (ritorna NULL).
+ */
+MarkerDb *marker_db_open_migrating(const char *db_path, const char *legacy_json_path,
+                                   GError **migration_error, GError **error);
 
 /*
  * Carica i marker in un nuovo MarkerStore (ordinato per timestamp; owned

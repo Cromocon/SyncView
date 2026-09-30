@@ -155,6 +155,11 @@ Un test C usa `assert()`: se passa non stampa nulla ed esce con codice 0; se una
 - [ ] `syncview:marker_db` → **OK**.
 - [ ] Copre: riga ancora presente con `is_deleted=1` e dati intatti, `updated_at` aggiornato, altri marker non toccati, assenza da `load_all` (presenza con `include_deleted`), idempotenza, id inesistente = successo senza modifiche (come l'originale).
 
+### M1.12 — Migrazione JSON legacy → SQLite
+
+- [ ] `syncview:marker_db` → **OK**.
+- [ ] Copre (fixture JSON scritte in test): migrazione di 4 marker (chiave `label` scartata, `id`/`created_at` preservati o generati se mancanti/null, `video_index` null/assente = globale, timestamp float, unicode), JSON rinominato in `.json.backup` con contenuto identico e backup precedente sovrascritto, contenuto migrato verificato via `load_all`; casi no-op (file assente, `markers` vuoto o assente → nessun backup); 9 input non validi (JSON malformato, radice non oggetto, `markers` non lista, chiave sconosciuta nel 2° marker, timestamp/color mancanti, tipi errati, elemento non oggetto) → errore, JSON intatto, nessun backup, nessun marker salvato; `marker_db_open_migrating` (migra solo se il DB non esisteva, non blocca l'apertura se il JSON è invalido).
+
 ### Riepilogo atteso
 
 ```
