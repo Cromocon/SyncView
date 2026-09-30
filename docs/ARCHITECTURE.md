@@ -7,7 +7,7 @@ Per il riferimento architetturale completo (non ancora implementato) vedi la sez
 ## Stato implementativo
 
 - **M0 (Scaffolding)**: ✅ completa (M0.1-M0.6). Build Meson funzionante, tutte le dipendenze collegate, CI multi-piattaforma (Linux/macOS/Windows) verde.
-- **M1 (Core logic, nessuna dipendenza da GTK)**: 🚧 in corso — completate M1.1-M1.9, mancano M1.10-M1.15 ( salvataggio/caricamento/soft-delete su marker_db, user_paths, ASan finale).
+- **M1 (Core logic, nessuna dipendenza da GTK)**: 🚧 in corso — completate M1.1-M1.14 (incl. logger con modalità debug e logging nei moduli M1), mancano M1.15 (filtro per modulo + sink del logger per le finestre di debug) e M1.16 (passata ASan finale).
 - **M2-M8**: non ancora iniziate.
 
 ### Moduli implementati
@@ -44,7 +44,7 @@ Tutti i moduli sopra sono compilati in `libsyncview_core` (static library, `src/
   - **Deviazione dall'originale:** il `StreamHandler` Python scriveva su stderr a livello INFO sempre; qui, come da piano, stderr resta vuoto senza debug. Il file resta troncato ad ogni avvio con la stessa intestazione; i timestamp hanno anche i millisecondi (`YYYY-MM-DD HH:MM:SS.mmm - SyncView - LIVELLO - msg`). Il file di log non è più `syncview_log.txt` nella root del progetto ma `~/.syncview/syncview_log.txt` (`logger_default_file()`, path iniettabile per i test).
   - **Non portati:** `log_dependency_check` (specifico dei pacchetti Python) e `add_developer_log` (`DEVELOPER_LOG.md`), non previsti dal piano. Aggiunte rispetto all'originale: `log_sync/log_gst` (da piano) e `log_marker/log_ui` (categorie debug elencate nel piano, stesso meccanismo).
   - **Vincolo verificato automaticamente:** `tests/check_no_adhoc_logging.py` (test Meson `no_adhoc_logging`) fallisce se un file fuori da `core/logger.c` usa output diretto su stdout/stderr o controlla la modalità debug.
-  - **Non ancora collegato:** `main.c` non chiama ancora `logger_init()` e i moduli M1 esistenti (`sync_manager`, `marker_db`, `user_paths`, `marker_*`) non emettono ancora log: il piano chiede di farlo quando le chiamate vengono integrate (es. `log_sync` su calculate/sync_all, `log_marker` per ogni query SQL, `log_user_action` dove l'originale loggava).
+  - **Collegato:** `main.c` estrae `--debug`/`-v` da argv (GApplication non li conosce), chiama `logger_init()` prima di GTK e `logger_shutdown()` all'uscita. I moduli M1 emettono i log previsti: `sync_manager` (`log_sync` su setter, `calculate_sync_position` con input/offset/output, `sync_all_to_master` con azione per player), `markers` (`log_marker` su add/remove/update dello store), `marker_db` (`log_marker` per ogni SQL eseguita e righe coinvolte; `log_user_action` come l'originale: database creato, migrazione schema, batch save, migrazione JSON→SQLite; `log_error` sui fallimenti dei metodi pubblici), `user_paths` (`log_user_action` su salvataggio/slot impostato/percorso rimosso, `log_error` se il salvataggio fallisce). Questo supera la scelta iniziale "sync_manager senza logging embedded": restano esclusi dal modulo solo i log di *azione utente* sui setter, che spettano a UI/controller (M3+), mentre i dettagli di debug richiesti dal piano sono nel modulo.
 
 ## Note per chi implementa
 

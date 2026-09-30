@@ -71,3 +71,12 @@ test(
   python,
   args: [files('check_no_adhoc_logging.py'), meson.project_source_root() / 'src'],
 )
+
+test_module_logging = executable(
+  'test_module_logging',
+  'test_module_logging.c',
+  include_directories: syncview_core_inc,
+  link_with: syncview_core_lib,
+  dependencies: [glib_dep, sqlite_dep, json_glib_dep],
+)
+test('module_logging', test_module_logging)

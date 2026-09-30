@@ -1,5 +1,7 @@
 #include "core/markers.h"
 
+#include "core/logger.h"
+
 #include <glib.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -181,7 +183,11 @@ upper_bound(const MarkerStore *store, int64_t timestamp_ms)
 void
 marker_store_add_marker(MarkerStore *store, Marker *marker)
 {
-    g_ptr_array_insert(store->markers, (gint)upper_bound(store, marker->timestamp_ms), marker);
+    guint index = upper_bound(store, marker->timestamp_ms);
+
+    g_ptr_array_insert(store->markers, (gint)index, marker);
+    log_marker("store: aggiunto id=%s ts=%lldms video=%d in posizione %u (totale %u)", marker->id,
+               (long long)marker->timestamp_ms, marker->video_index, index, store->markers->len);
 }
 
 const Marker *
@@ -206,6 +212,7 @@ marker_store_remove(MarkerStore *store, const char *id)
     }
 
     g_ptr_array_remove_index(store->markers, i);
+    log_marker("store: rimosso id=%s (totale %u)", id, store->markers->len);
     return TRUE;
 }
 
@@ -218,6 +225,8 @@ marker_store_update(MarkerStore *store, const char *id, const MarkerUpdate *upda
     }
 
     Marker *m = g_ptr_array_index(store->markers, i);
+
+    log_marker("store: update id=%s campi=0x%x", id, update->fields);
 
     if (update->fields & MARKER_FIELD_COLOR) {
         g_free(m->color);

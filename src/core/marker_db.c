@@ -1,5 +1,6 @@
 #include "core/marker_db.h"
 
+#include "core/logger.h"
 #include "core/markers.h"
 
 #include <glib/gstdio.h>
@@ -63,6 +64,8 @@ exec_sql(sqlite3 *conn, const char *sql, GError **error)
 {
     char *errmsg = NULL;
 
+    log_marker("SQL: %s", sql);
+
     if (sqlite3_exec(conn, sql, NULL, NULL, &errmsg) != SQLITE_OK) {
         g_set_error(error, MARKER_DB_ERROR, MARKER_DB_ERROR_SQL, "SQLite: %s",
                     errmsg ? errmsg : "errore sconosciuto");
@@ -86,6 +89,7 @@ insert_metadata(sqlite3 *conn, const char *key, const char *value, GError **erro
     sqlite3_bind_text(stmt, 1, key, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 2, value, -1, SQLITE_STATIC);
 
+    log_marker("SQL: INSERT INTO metadata (key, value) VALUES ('%s', '%s')", key, value);
     gboolean ok = sqlite3_step(stmt) == SQLITE_DONE;
     if (!ok) {
         g_set_error(error, MARKER_DB_ERROR, MARKER_DB_ERROR_SQL, "SQLite: %s", sqlite3_errmsg(conn));
@@ -100,6 +104,7 @@ has_metadata_table(sqlite3 *conn, gboolean *has_table, GError **error)
 {
     sqlite3_stmt *stmt = NULL;
 
+    log_marker("SQL: SELECT name FROM sqlite_master WHERE type='table' AND name='metadata'");
     if (sqlite3_prepare_v2(conn,
                            "SELECT name FROM sqlite_master WHERE type='table' AND name='metadata'",
                            -1, &stmt, NULL) != SQLITE_OK) {
@@ -119,6 +124,7 @@ read_db_version(sqlite3 *conn)
     sqlite3_stmt *stmt = NULL;
     int version = 0;
 
+    log_marker("SQL: SELECT value FROM metadata WHERE key = 'db_version'");
     if (sqlite3_prepare_v2(conn, "SELECT value FROM metadata WHERE key = 'db_version'", -1, &stmt,
                            NULL) != SQLITE_OK) {
         return 0;
@@ -133,12 +139,22 @@ read_db_version(sqlite3 *conn)
 
 /* Come _migrate_database: per ora non ci sono migrazioni specifiche, aggiorna solo la versione. */
 static gboolean
-migrate_db(sqlite3 *conn, int to_version, GError **error)
+migrate_db(sqlite3 *conn, int from_version, int to_version, GError **error)
 {
+    char *details = g_strdup_printf("Da versione %d a %d", from_version, to_version);
+    log_user_action("Migrazione database marker", details);
+    g_free(details);
+
     char *sql = g_strdup_printf("UPDATE metadata SET value = '%d' WHERE key = 'db_version'",
                                 to_version);
     gboolean ok = exec_sql(conn, sql, error);
     g_free(sql);
+
+    if (ok) {
+        details = g_strdup_printf("Database aggiornato a versione %d", to_version);
+        log_user_action("Migrazione completata", details);
+        g_free(details);
+    }
     return ok;
 }
 
@@ -152,6 +168,7 @@ ensure_schema(const MarkerDb *db, GError **error)
 
     gboolean ok = exec_sql(conn, "BEGIN", error);
     gboolean has_table = FALSE;
+    gboolean created = FALSE;
 
     ok = ok && has_metadata_table(conn, &has_table, error);
 
@@ -165,12 +182,23 @@ ensure_schema(const MarkerDb *db, GError **error)
 
         g_free(version);
         g_free(created_at);
-    } else if (ok && read_db_version(conn) < SYNCVIEW_MARKER_DB_VERSION) {
-        ok = migrate_db(conn, SYNCVIEW_MARKER_DB_VERSION, error);
+        created = ok;
+    } else if (ok) {
+        int current_version = read_db_version(conn);
+
+        if (current_version < SYNCVIEW_MARKER_DB_VERSION) {
+            ok = migrate_db(conn, current_version, SYNCVIEW_MARKER_DB_VERSION, error);
+        }
     }
 
     if (ok) {
         ok = exec_sql(conn, "COMMIT", error);
+        if (ok && created) {
+            char *details = g_strdup_printf("Versione %d, Path: %s", SYNCVIEW_MARKER_DB_VERSION,
+                                            db->path);
+            log_user_action("Database marker creato", details);
+            g_free(details);
+        }
     } else {
         sqlite3_exec(conn, "ROLLBACK", NULL, NULL, NULL);
     }
@@ -249,6 +277,8 @@ upsert_all(sqlite3 *conn, const MarkerStore *store, const char *now, GError **er
         return FALSE;
     }
 
+    log_marker("SQL: %s [batch di %zu marker]", UPSERT_SQL, marker_store_count(store));
+
     gboolean ok = TRUE;
     for (size_t i = 0; ok && i < marker_store_count(store); i++) {
         const Marker *m = marker_store_get(store, i);
@@ -270,6 +300,9 @@ upsert_all(sqlite3 *conn, const MarkerStore *store, const char *now, GError **er
         if (sqlite3_step(stmt) != SQLITE_DONE) {
             set_sql_error(error, conn);
             ok = FALSE;
+        } else {
+            log_marker("  upsert id=%s ts=%lldms video=%d -> %d riga/e", m->id,
+                       (long long)m->timestamp_ms, m->video_index, sqlite3_changes(conn));
         }
     }
 
@@ -277,8 +310,16 @@ upsert_all(sqlite3 *conn, const MarkerStore *store, const char *now, GError **er
     return ok;
 }
 
-gboolean
-marker_db_save_batch(MarkerDb *db, const MarkerStore *store, GError **error)
+/* Registra l'errore (come i logger.log_error dell'originale) e lo propaga al chiamante. */
+static void
+report_failure(const char *message, GError *local, GError **error)
+{
+    log_error(message, local);
+    g_propagate_error(error, local);
+}
+
+static gboolean
+save_batch_impl(MarkerDb *db, const MarkerStore *store, GError **error)
 {
     sqlite3 *conn = connect_db(db, error);
     if (!conn) {
@@ -300,6 +341,22 @@ marker_db_save_batch(MarkerDb *db, const MarkerStore *store, GError **error)
     return ok;
 }
 
+gboolean
+marker_db_save_batch(MarkerDb *db, const MarkerStore *store, GError **error)
+{
+    GError *local = NULL;
+
+    if (!save_batch_impl(db, store, &local)) {
+        report_failure("Errore batch save marker", local, error);
+        return FALSE;
+    }
+
+    char *details = g_strdup_printf("%zu marker salvati", marker_store_count(store));
+    log_user_action("Batch save marker", details);
+    g_free(details);
+    return TRUE;
+}
+
 static char *
 column_text_or(sqlite3_stmt *stmt, int col, const char *fallback)
 {
@@ -307,8 +364,8 @@ column_text_or(sqlite3_stmt *stmt, int col, const char *fallback)
     return g_strdup(text ? (const char *)text : fallback);
 }
 
-MarkerStore *
-marker_db_load_all(MarkerDb *db, gboolean include_deleted, GError **error)
+static MarkerStore *
+load_all_impl(MarkerDb *db, gboolean include_deleted, GError **error)
 {
     sqlite3 *conn = connect_db(db, error);
     if (!conn) {
@@ -322,6 +379,7 @@ marker_db_load_all(MarkerDb *db, gboolean include_deleted, GError **error)
           "FROM markers WHERE is_deleted = 0 ORDER BY timestamp";
     sqlite3_stmt *stmt = NULL;
 
+    log_marker("SQL: %s", sql);
     if (sqlite3_prepare_v2(conn, sql, -1, &stmt, NULL) != SQLITE_OK) {
         set_sql_error(error, conn);
         sqlite3_close(conn);
@@ -361,11 +419,27 @@ marker_db_load_all(MarkerDb *db, gboolean include_deleted, GError **error)
 
     sqlite3_finalize(stmt);
     sqlite3_close(conn);
+
+    if (store) {
+        log_marker("  %zu marker caricati", marker_store_count(store));
+    }
     return store;
 }
 
-gboolean
-marker_db_delete(MarkerDb *db, const char *id, GError **error)
+MarkerStore *
+marker_db_load_all(MarkerDb *db, gboolean include_deleted, GError **error)
+{
+    GError *local = NULL;
+    MarkerStore *store = load_all_impl(db, include_deleted, &local);
+
+    if (!store) {
+        report_failure("Errore caricamento marker", local, error);
+    }
+    return store;
+}
+
+static gboolean
+delete_impl(MarkerDb *db, const char *id, GError **error)
 {
     sqlite3 *conn = connect_db(db, error);
     if (!conn) {
@@ -381,7 +455,11 @@ marker_db_delete(MarkerDb *db, const char *id, GError **error)
 
         sqlite3_bind_text(stmt, 1, now, -1, SQLITE_STATIC);
         sqlite3_bind_text(stmt, 2, id, -1, SQLITE_STATIC);
+        log_marker("SQL: UPDATE markers SET is_deleted = 1, updated_at = '%s' WHERE id = '%s'", now, id);
         ok = sqlite3_step(stmt) == SQLITE_DONE;
+        if (ok) {
+            log_marker("  %d riga/e modificate", sqlite3_changes(conn));
+        }
 
         g_free(now);
     }
@@ -393,6 +471,18 @@ marker_db_delete(MarkerDb *db, const char *id, GError **error)
     sqlite3_finalize(stmt);
     sqlite3_close(conn);
     return ok;
+}
+
+gboolean
+marker_db_delete(MarkerDb *db, const char *id, GError **error)
+{
+    GError *local = NULL;
+
+    if (!delete_impl(db, id, &local)) {
+        report_failure("Errore eliminazione marker", local, error);
+        return FALSE;
+    }
+    return TRUE;
 }
 
 /* --- Migrazione JSON legacy -> SQLite (porting di MarkerManager._migrate_from_json) --- */
@@ -582,9 +672,8 @@ legacy_backup_path(const char *json_path)
     return g_strdup_printf("%.*s.json.backup", (int)keep, json_path);
 }
 
-gboolean
-marker_db_migrate_from_json(MarkerDb *db, const char *json_path, int *migrated_count,
-                            GError **error)
+static gboolean
+migrate_from_json_impl(MarkerDb *db, const char *json_path, int *migrated_count, GError **error)
 {
     if (migrated_count) {
         *migrated_count = 0;
@@ -614,8 +703,16 @@ marker_db_migrate_from_json(MarkerDb *db, const char *json_path, int *migrated_c
                 g_set_error(error, MARKER_DB_ERROR, MARKER_DB_ERROR_JSON,
                             "Marker migrati ma impossibile creare il backup %s", backup);
                 ok = FALSE;
-            } else if (migrated_count) {
-                *migrated_count = (int)count;
+            } else {
+                if (migrated_count) {
+                    *migrated_count = (int)count;
+                }
+
+                char *backup_name = g_path_get_basename(backup);
+                char *details = g_strdup_printf("%zu marker migrati, backup: %s", count, backup_name);
+                log_user_action("Migrazione marker JSON\xe2\x86\x92SQLite", details);
+                g_free(details);
+                g_free(backup_name);
             }
             g_free(backup);
         }
@@ -623,6 +720,19 @@ marker_db_migrate_from_json(MarkerDb *db, const char *json_path, int *migrated_c
 
     marker_store_free(store);
     return ok;
+}
+
+gboolean
+marker_db_migrate_from_json(MarkerDb *db, const char *json_path, int *migrated_count,
+                            GError **error)
+{
+    GError *local = NULL;
+
+    if (!migrate_from_json_impl(db, json_path, migrated_count, &local)) {
+        report_failure("Errore migrazione marker JSON", local, error);
+        return FALSE;
+    }
+    return TRUE;
 }
 
 MarkerDb *

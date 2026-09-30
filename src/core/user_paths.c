@@ -1,5 +1,7 @@
 #include "core/user_paths.h"
 
+#include "core/logger.h"
+
 #include <glib/gstdio.h>
 #include <json-glib/json-glib.h>
 
@@ -137,9 +139,18 @@ save_paths(const UserPaths *paths, GError **error)
 
     /* Scrittura atomica (file temporaneo + rename): un crash non lascia un JSON troncato. */
     gboolean ok = json_generator_to_file(generator, paths->file_path, NULL);
-    if (!ok) {
+    if (ok) {
+        char *details = g_strdup_printf("File: %s", paths->file_path);
+        log_user_action("user_paths.json salvato", details);
+        g_free(details);
+    } else {
         g_set_error(error, USER_PATHS_ERROR, USER_PATHS_ERROR_IO, "Impossibile salvare %s",
                     paths->file_path);
+
+        char *message = g_strdup_printf("Errore salvataggio user paths: impossibile scrivere %s",
+                                        paths->file_path);
+        log_error(message, NULL);
+        g_free(message);
     }
 
     g_object_unref(generator);
@@ -168,6 +179,11 @@ user_paths_set_video_path(UserPaths *paths, int index, const char *path, GError 
 
     g_free(paths->video_paths[index]);
     paths->video_paths[index] = g_strdup(path);
+
+    char *details = g_strdup_printf("Slot %d: %s", index, path ? path : "");
+    log_user_action("Percorso salvato in user_paths", details);
+    g_free(details);
+
     return save_paths(paths, error);
 }
 
@@ -223,6 +239,10 @@ user_paths_get_valid_video_paths(UserPaths *paths, const char *out[SYNCVIEW_MAX_
             out[i] = paths->video_paths[i];
             valid++;
         } else {
+            char *details = g_strdup_printf("Slot %d: %s (file non trovato)", i, paths->video_paths[i]);
+            log_user_action("Percorso non valido rimosso", details);
+            g_free(details);
+
             g_clear_pointer(&paths->video_paths[i], g_free);
             changed = TRUE;
         }

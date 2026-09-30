@@ -171,12 +171,17 @@ Un test C usa `assert()`: se passa non stampa nulla ed esce con codice 0; se una
 - [ ] Copre: **zero byte su stderr a debug disattivato** dopo 20 giri di tutte le funzioni di log (stderr catturato via `dup2`), file con intestazione di avvio e tutte le categorie dell'originale nel formato atteso (`[AZIONE UTENTE]`, `[VIDEO n]`, seek `mm:ss (Nms)`, export ✓/✗, `[EXPORT]`, errore + `GError` su seconda riga), dettagli DEBUG (`log_sync/marker/gst/ui`) assenti senza debug; con debug (flag e `SYNCVIEW_DEBUG=1`) stessi messaggi anche su stderr con timestamp/livello/categoria e righe identiche al file; `SYNCVIEW_DEBUG` = `0`/`false`/vuoto non attiva il debug; nessun output prima di `logger_init` e dopo `logger_shutdown`; file troncato ad ogni apertura; propagazione di `GST_DEBUG=3` solo in debug e senza sovrascrivere un valore esistente; file non scrivibile → errore ma logger ancora attivo.
 - [ ] `syncview:no_adhoc_logging` → **OK**: controllo statico (`tests/check_no_adhoc_logging.py`) che fuori da `core/logger.c` non ci siano `printf`/`fprintf`/`stderr`/`g_print*` né `SYNCVIEW_DEBUG`/`debug_enabled`. Se un modulo aggiunge logging ad-hoc, questo test fallisce indicando file e riga.
 
+### M1.14 (integrazione) — log dei moduli M1 e `main.c`
+
+- [ ] `syncview:module_logging` → **OK**: in modalità normale i log di azione utente/errore dei moduli finiscono sul file (database creato, batch save, migrazione JSON→SQLite, errore batch su violazione UNIQUE, `user_paths.json` salvato, percorso impostato/rimosso) e `stderr` resta vuoto; in debug, su file e stderr, compaiono anche gli eventi del piano (`[SYNC]` calculate/sync_all/setter, `[MARKER]` SQL con righe coinvolte, caricamento, store add/update/remove).
+- [ ] Manuale (richiede display): `./build/src/syncview --debug` stampa su stderr `Applicazione SyncView avviata` e `[UI] Finestra principale creata`; senza `--debug` stderr vuoto e il file `~/.syncview/syncview_log.txt` contiene solo le righe INFO.
+
 ### Riepilogo atteso
 
 ```
 meson test -C build
 ```
-deve riportare **9/9 OK** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`).
+deve riportare **10/10 OK** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`).
 
 ---
 
