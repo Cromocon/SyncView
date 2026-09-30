@@ -6,6 +6,14 @@
 G_DEFINE_QUARK(syncview-video-player-error-quark, syncview_video_player_error)
 
 enum {
+    SIGNAL_LOAD_STATE_CHANGED,
+    SIGNAL_ERROR,
+    N_SIGNALS
+};
+
+static guint signals[N_SIGNALS];
+
+enum {
     PROP_0,
     PROP_VIDEO_INDEX,
     PROP_PAINTABLE,
@@ -21,6 +29,11 @@ struct _SyncviewVideoPlayer {
     GstElement *pipeline;    /* playbin3, owned */
     GstElement *video_sink;  /* gtk4paintablesink, owned (ref propria oltre a quella di playbin3) */
     GdkPaintable *paintable; /* owned */
+
+    guint bus_watch_id;      /* sorgente del bus nel main context; rimossa in dispose */
+    char *path;              /* ultimo file passato a load() con successo, owned */
+    gboolean loading;        /* load() accettato, ASYNC_DONE/errore non ancora arrivati */
+    gboolean loaded;
 };
 
 G_DEFINE_FINAL_TYPE(SyncviewVideoPlayer, syncview_video_player, G_TYPE_OBJECT)
@@ -30,10 +43,18 @@ syncview_video_player_dispose(GObject *object)
 {
     SyncviewVideoPlayer *self = SYNCVIEW_VIDEO_PLAYER(object);
 
+    /* Prima di tutto si ferma il bus: nessun callback deve vedere un player a metà distruzione. */
+    if (self->bus_watch_id) {
+        g_source_remove(self->bus_watch_id);
+        self->bus_watch_id = 0;
+    }
+
     if (self->pipeline) {
         /* Sempre riportata a NULL prima del rilascio: libera risorse di decoder/sink. */
         gst_element_set_state(self->pipeline, GST_STATE_NULL);
     }
+
+    g_clear_pointer(&self->path, g_free);
 
     g_clear_object(&self->paintable);
     g_clear_pointer(&self->video_sink, gst_object_unref);
@@ -90,6 +111,13 @@ syncview_video_player_class_init(SyncviewVideoPlayerClass *klass)
         G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
 
     g_object_class_install_properties(object_class, N_PROPS, properties);
+
+    signals[SIGNAL_LOAD_STATE_CHANGED] = g_signal_new(
+        "load-state-changed", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+        G_TYPE_NONE, 1, G_TYPE_BOOLEAN);
+    signals[SIGNAL_ERROR] = g_signal_new(
+        "error", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+        G_TYPE_NONE, 1, G_TYPE_STRING);
 }
 
 static void
@@ -110,6 +138,8 @@ make_element(const char *factory, const char *name, GError **error)
     }
     return element;
 }
+
+static gboolean on_bus_message(GstBus *bus, GstMessage *message, gpointer user_data);
 
 static gboolean
 setup_pipeline(SyncviewVideoPlayer *self, GError **error)
@@ -145,7 +175,314 @@ setup_pipeline(SyncviewVideoPlayer *self, GError **error)
         return FALSE;
     }
 
+    /* Messaggi del bus nel main context corrente (quello GTK); rimosso in dispose. */
+    GstBus *bus = gst_element_get_bus(self->pipeline);
+    self->bus_watch_id = gst_bus_add_watch(bus, on_bus_message, self);
+    gst_object_unref(bus);
+
     return TRUE;
+}
+
+/* --- Decoder in uso (ottimizzazione O6) --- */
+
+#define DECODER_FACTORY_TYPE (GST_ELEMENT_FACTORY_TYPE_DECODER | GST_ELEMENT_FACTORY_TYPE_MEDIA_VIDEO)
+
+/* Primo elemento decoder video nella pipeline (ricorsivo: playbin3 annida decodebin3); ref al chiamante. */
+static GstElement *
+find_video_decoder(GstElement *pipeline)
+{
+    GstIterator *it = gst_bin_iterate_recurse(GST_BIN(pipeline));
+    GValue value = G_VALUE_INIT;
+    GstElement *found = NULL;
+    gboolean done = FALSE;
+
+    while (!done) {
+        switch (gst_iterator_next(it, &value)) {
+        case GST_ITERATOR_OK: {
+            GstElement *element = g_value_get_object(&value);
+            GstElementFactory *factory = gst_element_get_factory(element);
+
+            if (factory && gst_element_factory_list_is_type(factory, DECODER_FACTORY_TYPE)) {
+                found = gst_object_ref(element);
+                done = TRUE;
+            }
+            g_value_reset(&value);
+            break;
+        }
+        case GST_ITERATOR_RESYNC:
+            gst_iterator_resync(it);
+            break;
+        default:
+            done = TRUE;
+        }
+    }
+
+    g_value_unset(&value);
+    gst_iterator_free(it);
+    return found;
+}
+
+static gboolean
+decoder_is_hardware(GstElement *decoder)
+{
+    GstElementFactory *factory = gst_element_get_factory(decoder);
+    return factory && gst_element_factory_list_is_type(factory, GST_ELEMENT_FACTORY_TYPE_HARDWARE);
+}
+
+char *
+syncview_video_player_get_decoder_description(SyncviewVideoPlayer *self)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), NULL);
+
+    if (!self->loaded) {
+        return NULL;
+    }
+
+    GstElement *decoder = find_video_decoder(self->pipeline);
+    if (!decoder) {
+        return NULL;
+    }
+
+    char *description = g_strdup_printf("%s (%s)", GST_OBJECT_NAME(gst_element_get_factory(decoder)),
+                                        decoder_is_hardware(decoder) ? "hardware" : "software");
+    gst_object_unref(decoder);
+    return description;
+}
+
+/* Elenco (separato da virgole) dei decoder hardware installati che accetterebbero questi caps; NULL se nessuno. */
+static char *
+hardware_alternatives_for(GstCaps *caps)
+{
+    GList *factories = gst_element_factory_list_get_elements(
+        DECODER_FACTORY_TYPE | GST_ELEMENT_FACTORY_TYPE_HARDWARE, GST_RANK_MARGINAL);
+    GPtrArray *names = g_ptr_array_new_with_free_func(g_free);
+
+    for (GList *l = factories; l; l = l->next) {
+        GstElementFactory *factory = l->data;
+
+        if (caps && gst_element_factory_can_sink_any_caps(factory, caps)) {
+            g_ptr_array_add(names, g_strdup(GST_OBJECT_NAME(factory)));
+        }
+    }
+    gst_plugin_feature_list_free(factories);
+
+    char *joined = NULL;
+    if (names->len > 0) {
+        g_ptr_array_add(names, NULL);
+        joined = g_strjoinv(", ", (char **)names->pdata);
+    }
+    g_ptr_array_free(names, TRUE);
+    return joined;
+}
+
+/* Logga (debug) il decoder in uso e, se è software pur essendo disponibile l'hardware, lo segnala. */
+static void
+log_decoder_in_use(SyncviewVideoPlayer *self)
+{
+    GstElement *decoder = find_video_decoder(self->pipeline);
+
+    if (!decoder) {
+        log_gst("player %d: nessun decoder video (file senza flusso video?)", self->video_index + 1);
+        return;
+    }
+
+    const char *name = GST_OBJECT_NAME(gst_element_get_factory(decoder));
+
+    if (decoder_is_hardware(decoder)) {
+        log_gst("player %d: decoder video in uso: %s (hardware)", self->video_index + 1, name);
+    } else {
+        GstPad *sink_pad = gst_element_get_static_pad(decoder, "sink");
+        GstCaps *caps = sink_pad ? gst_pad_get_current_caps(sink_pad) : NULL;
+        char *alternatives = hardware_alternatives_for(caps);
+
+        if (alternatives) {
+            log_gst("player %d: decoder video in uso: %s (software) — ATTENZIONE: disponibili decoder "
+                    "hardware per questo formato: %s", self->video_index + 1, name, alternatives);
+        } else {
+            log_gst("player %d: decoder video in uso: %s (software), nessun decoder hardware disponibile "
+                    "per questo formato", self->video_index + 1, name);
+        }
+
+        g_free(alternatives);
+        if (caps) {
+            gst_caps_unref(caps);
+        }
+        if (sink_pad) {
+            gst_object_unref(sink_pad);
+        }
+    }
+
+    gst_object_unref(decoder);
+}
+
+/* --- Bus --- */
+
+static const char *
+state_name(GstState state)
+{
+    return gst_element_state_get_name(state);
+}
+
+static void
+handle_error_message(SyncviewVideoPlayer *self, GstMessage *message)
+{
+    GError *gst_error = NULL;
+    char *debug = NULL;
+    gst_message_parse_error(message, &gst_error, &debug);
+
+    char *text = g_strdup_printf("%s", gst_error ? gst_error->message : "errore sconosciuto");
+    log_gst("player %d: ERROR dal bus: %s (debug: %s)", self->video_index + 1, text, debug ? debug : "-");
+
+    char *log_text = g_strdup_printf("Errore caricamento video Feed-%d: %s", self->video_index + 1, text);
+    log_error(log_text, NULL);
+    g_free(log_text);
+
+    gboolean was_loaded = self->loaded;
+
+    /* Pipeline riportata a NULL e stato azzerato prima di avvisare chi ascolta. */
+    gst_element_set_state(self->pipeline, GST_STATE_NULL);
+    self->loading = FALSE;
+    self->loaded = FALSE;
+
+    g_object_ref(self);  /* un handler potrebbe rilasciare l'ultimo riferimento */
+    g_signal_emit(self, signals[SIGNAL_ERROR], 0, text);
+    if (was_loaded) {
+        g_signal_emit(self, signals[SIGNAL_LOAD_STATE_CHANGED], 0, FALSE);
+    }
+    g_object_unref(self);
+
+    g_free(text);
+    g_free(debug);
+    g_clear_error(&gst_error);
+}
+
+static gboolean
+on_bus_message(GstBus *bus, GstMessage *message, gpointer user_data)
+{
+    (void)bus;
+    SyncviewVideoPlayer *self = user_data;
+    gboolean from_pipeline = GST_MESSAGE_SRC(message) == GST_OBJECT(self->pipeline);
+
+    switch (GST_MESSAGE_TYPE(message)) {
+    case GST_MESSAGE_STATE_CHANGED:
+        if (from_pipeline) {
+            GstState old_state, new_state, pending;
+            gst_message_parse_state_changed(message, &old_state, &new_state, &pending);
+            log_gst("player %d: GST_STATE_CHANGED %s -> %s (pending %s)", self->video_index + 1,
+                    state_name(old_state), state_name(new_state), state_name(pending));
+        }
+        break;
+
+    case GST_MESSAGE_ASYNC_DONE:
+        log_gst("player %d: ASYNC_DONE%s", self->video_index + 1, from_pipeline ? "" : " (non dalla pipeline)");
+        /* Solo il primo dopo un load(): i successivi (seek, M2.7) non sono un nuovo caricamento. */
+        if (from_pipeline && self->loading) {
+            self->loading = FALSE;
+            self->loaded = TRUE;
+
+            char *name = g_path_get_basename(self->path ? self->path : "");
+            log_video_action(self->video_index, "Video caricato (async)", name);
+            g_free(name);
+            log_decoder_in_use(self);
+
+            g_object_ref(self);
+            g_signal_emit(self, signals[SIGNAL_LOAD_STATE_CHANGED], 0, TRUE);
+            g_object_unref(self);
+        }
+        break;
+
+    case GST_MESSAGE_ERROR:
+        handle_error_message(self, message);
+        break;
+
+    case GST_MESSAGE_WARNING: {
+        GError *warning = NULL;
+        char *debug = NULL;
+        gst_message_parse_warning(message, &warning, &debug);
+        log_gst("player %d: WARNING dal bus: %s (debug: %s)", self->video_index + 1,
+                warning ? warning->message : "?", debug ? debug : "-");
+        g_clear_error(&warning);
+        g_free(debug);
+        break;
+    }
+
+    default:
+        break;
+    }
+
+    return G_SOURCE_CONTINUE;
+}
+
+gboolean
+syncview_video_player_load(SyncviewVideoPlayer *self, const char *path, GError **error)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), FALSE);
+
+    if (!path || !g_file_test(path, G_FILE_TEST_IS_REGULAR)) {
+        g_set_error_literal(error, SYNCVIEW_VIDEO_PLAYER_ERROR,
+                            SYNCVIEW_VIDEO_PLAYER_ERROR_FILE_NOT_FOUND, "File non trovato");
+        return FALSE;
+    }
+
+    GFile *file = g_file_new_for_path(path);
+    char *uri = g_file_get_uri(file);
+    g_object_unref(file);
+
+    /*
+     * Sostituzione di un eventuale video precedente o in caricamento: pipeline a NULL.
+     * GstPipeline ha `auto-flush-bus` attivo (default) e svuota il bus scendendo a NULL, quindi
+     * un ASYNC_DONE/ERROR del caricamento vecchio già pubblicato ma non ancora consegnato viene
+     * scartato e non è scambiato per quello nuovo (verificato dai test).
+     */
+    gst_pipeline_set_auto_flush_bus(GST_PIPELINE(self->pipeline), TRUE);
+    gst_element_set_state(self->pipeline, GST_STATE_NULL);
+
+    self->loaded = FALSE;
+    self->loading = FALSE;
+    g_free(self->path);
+    self->path = NULL;
+
+    g_object_set(self->pipeline, "uri", uri, NULL);
+
+    char *name = g_path_get_basename(path);
+    log_video_action(self->video_index, "Caricamento avviato", name);
+    log_gst("player %d: uri=%s -> PAUSED", self->video_index + 1, uri);
+    g_free(name);
+
+    GstStateChangeReturn ret = gst_element_set_state(self->pipeline, GST_STATE_PAUSED);
+    if (ret == GST_STATE_CHANGE_FAILURE) {
+        g_set_error(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_PIPELINE,
+                    "La pipeline non è riuscita a passare in PAUSED per %s", uri);
+        gst_element_set_state(self->pipeline, GST_STATE_NULL);
+        g_free(uri);
+        return FALSE;
+    }
+
+    self->path = g_strdup(path);
+    self->loading = TRUE;
+    g_free(uri);
+    return TRUE;
+}
+
+gboolean
+syncview_video_player_is_loaded(SyncviewVideoPlayer *self)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), FALSE);
+    return self->loaded;
+}
+
+gboolean
+syncview_video_player_is_loading(SyncviewVideoPlayer *self)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), FALSE);
+    return self->loading;
+}
+
+const char *
+syncview_video_player_get_path(SyncviewVideoPlayer *self)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), NULL);
+    return self->path;
 }
 
 SyncviewVideoPlayer *

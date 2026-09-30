@@ -10,6 +10,7 @@
 #include <glib.h>
 #include <gtk/gtk.h>
 #include <gst/gst.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define SKIP_EXIT 77
@@ -173,7 +174,15 @@ typedef struct {
     gboolean pipeline_finalized;
     gboolean sink_finalized;
     gboolean paintable_finalized;
+    gboolean bus_finalized;
 } Finalized;
+
+static void
+on_bus_gone(gpointer data, GObject *obj)
+{
+    (void)obj;
+    ((Finalized *)data)->bus_finalized = TRUE;
+}
 
 static void
 on_pipeline_gone(gpointer data, GObject *obj)
@@ -209,7 +218,7 @@ test_owned_objects_are_released(void)
         SyncviewVideoPlayer *player = syncview_video_player_new(round % SYNCVIEW_MAX_VIDEOS, NULL);
         assert(player != NULL);
 
-        Finalized fin = { FALSE, FALSE, FALSE };
+        Finalized fin = { FALSE, FALSE, FALSE, FALSE };
         GstElement *pipeline = syncview_video_player_get_pipeline(player);
         GstElement *sink = NULL;
         g_object_get(pipeline, "video-sink", &sink, NULL);  /* riferimento forte, lo rilasciamo subito */
@@ -218,17 +227,443 @@ test_owned_objects_are_released(void)
         g_object_weak_ref(G_OBJECT(syncview_video_player_get_paintable(player)), on_paintable_gone, &fin);
         gst_object_unref(sink);
 
+        /* Il bus resta vivo finché la sua sorgente (bus watch) è nel main context: deve sparire col player. */
+        GstBus *bus = gst_element_get_bus(pipeline);
+        g_object_weak_ref(G_OBJECT(bus), on_bus_gone, &fin);
+        gst_object_unref(bus);
+
         g_object_unref(player);
 
         /* Il paintable può essere rilasciato dal sink anche un attimo dopo: si lascia girare il main context. */
-        for (int i = 0; i < 20 && !(fin.paintable_finalized && fin.sink_finalized); i++) {
+        for (int i = 0; i < 20 && !(fin.paintable_finalized && fin.sink_finalized && fin.bus_finalized); i++) {
             g_main_context_iteration(NULL, FALSE);
         }
 
         assert(fin.pipeline_finalized);
         assert(fin.sink_finalized);
         assert(fin.paintable_finalized);
+        assert(fin.bus_finalized);
     }
+}
+
+/* ===================== M2.4: load() ===================== */
+
+static gboolean have_test_encoder;
+
+/* Genera un webm/VP8 di prova. Il percorso si imposta come proprietà, mai nel testo della pipeline
+ * (gst_parse_launch interpreta il backslash dei percorsi Windows come escape). */
+static char *
+make_video(const char *dir, const char *name, int width, int height, int frames)
+{
+    char *path = g_build_filename(dir, name, NULL);
+    char *desc = g_strdup_printf(
+        "videotestsrc num-buffers=%d ! video/x-raw,width=%d,height=%d,framerate=25/1 ! videoconvert ! "
+        "vp8enc ! webmmux ! filesink name=out", frames, width, height);
+    GError *error = NULL;
+    GstElement *pipeline = gst_parse_launch(desc, &error);
+    assert(pipeline != NULL && error == NULL);
+
+    GstElement *out = gst_bin_get_by_name(GST_BIN(pipeline), "out");
+    g_object_set(out, "location", path, NULL);
+    gst_object_unref(out);
+
+    gst_element_set_state(pipeline, GST_STATE_PLAYING);
+    GstBus *bus = gst_element_get_bus(pipeline);
+    GstMessage *msg = gst_bus_timed_pop_filtered(bus, 30 * GST_SECOND, GST_MESSAGE_EOS | GST_MESSAGE_ERROR);
+    assert(msg != NULL && GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS);
+    gst_message_unref(msg);
+    gst_object_unref(bus);
+    gst_element_set_state(pipeline, GST_STATE_NULL);
+    gst_object_unref(pipeline);
+    g_free(desc);
+    return path;
+}
+
+/* Fa girare il main context GTK finché *flag o timeout. */
+static gboolean
+spin_until(const gboolean *flag, int timeout_ms)
+{
+    gint64 deadline = g_get_monotonic_time() + (gint64)timeout_ms * 1000;
+
+    while (!*flag && g_get_monotonic_time() < deadline) {
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
+    return *flag;
+}
+
+/* Lascia girare il main context per `ms` (per intercettare eventuali eventi spuri). */
+static void
+spin_for(int ms)
+{
+    gboolean never = FALSE;
+    spin_until(&never, ms);
+}
+
+typedef struct {
+    int loaded_true;
+    int loaded_false;
+    int errors;
+    gboolean got_loaded;
+    gboolean got_error;
+    char *last_error;
+} Events;
+
+static void
+on_load_state(SyncviewVideoPlayer *player, gboolean loaded, gpointer data)
+{
+    (void)player;
+    Events *ev = data;
+
+    if (loaded) {
+        ev->loaded_true++;
+        ev->got_loaded = TRUE;
+    } else {
+        ev->loaded_false++;
+    }
+}
+
+static void
+on_error(SyncviewVideoPlayer *player, const char *message, gpointer data)
+{
+    (void)player;
+    Events *ev = data;
+
+    ev->errors++;
+    ev->got_error = TRUE;
+    g_free(ev->last_error);
+    ev->last_error = g_strdup(message);
+}
+
+static void
+events_connect(SyncviewVideoPlayer *player, Events *ev)
+{
+    memset(ev, 0, sizeof(*ev));
+    g_signal_connect(player, "load-state-changed", G_CALLBACK(on_load_state), ev);
+    g_signal_connect(player, "error", G_CALLBACK(on_error), ev);
+}
+
+/* Disegna il paintable in uno snapshot (nodo NULL se non disegna nulla). */
+static GskRenderNode *
+snapshot_paintable(GdkPaintable *paintable, double w, double h)
+{
+    GtkSnapshot *snapshot = gtk_snapshot_new();
+
+    gdk_paintable_snapshot(paintable, snapshot, w, h);
+    return gtk_snapshot_free_to_node(snapshot);
+}
+
+/* TRUE se il nodo (o un suo discendente) è una texture: cioè c'è un frame vero, non solo un riempimento. */
+static gboolean
+node_contains_texture(GskRenderNode *node)
+{
+    if (!node) {
+        return FALSE;
+    }
+
+    switch (gsk_render_node_get_node_type(node)) {
+    case GSK_TEXTURE_NODE:
+    case GSK_TEXTURE_SCALE_NODE:
+        return TRUE;
+    case GSK_CONTAINER_NODE:
+        for (guint i = 0; i < gsk_container_node_get_n_children(node); i++) {
+            if (node_contains_texture(gsk_container_node_get_child(node, i))) {
+                return TRUE;
+            }
+        }
+        return FALSE;
+    case GSK_CLIP_NODE:
+        return node_contains_texture(gsk_clip_node_get_child(node));
+    case GSK_TRANSFORM_NODE:
+        return node_contains_texture(gsk_transform_node_get_child(node));
+    case GSK_OPACITY_NODE:
+        return node_contains_texture(gsk_opacity_node_get_child(node));
+    case GSK_DEBUG_NODE:
+        return node_contains_texture(gsk_debug_node_get_child(node));
+    default:
+        return FALSE;
+    }
+}
+
+static gboolean
+paintable_has_size(GdkPaintable *paintable, int width, int height)
+{
+    return gdk_paintable_get_intrinsic_width(paintable) == width
+           && gdk_paintable_get_intrinsic_height(paintable) == height;
+}
+
+/* Attende che il paintable mostri un frame della dimensione attesa (il sink lo pubblica nel main thread, un istante dopo ASYNC_DONE). */
+static gboolean
+wait_for_frame(SyncviewVideoPlayer *player, int width, int height)
+{
+    GdkPaintable *paintable = syncview_video_player_get_paintable(player);
+    gint64 deadline = g_get_monotonic_time() + 5 * G_USEC_PER_SEC;
+
+    while (!paintable_has_size(paintable, width, height) && g_get_monotonic_time() < deadline) {
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
+    return paintable_has_size(paintable, width, height);
+}
+
+static void
+test_load_first_frame(const char *dir)
+{
+    char *path = make_video(dir, "a.webm", 320, 240, 50);
+    SyncviewVideoPlayer *player = syncview_video_player_new(0, NULL);
+    Events ev;
+    events_connect(player, &ev);
+    GdkPaintable *paintable = syncview_video_player_get_paintable(player);
+
+    /* Prima del load: nessun frame, nulla da disegnare, nessun decoder. */
+    assert(!syncview_video_player_is_loaded(player) && !syncview_video_player_is_loading(player));
+    assert(syncview_video_player_get_path(player) == NULL);
+    assert(syncview_video_player_get_decoder_description(player) == NULL);
+    GskRenderNode *empty = snapshot_paintable(paintable, 320, 240);
+    assert(!node_contains_texture(empty));  /* al più un riempimento nero, nessuna texture */
+    if (empty) {
+        gsk_render_node_unref(empty);
+    }
+
+    /* load() è asincrono: ritorna subito, in stato "loading", senza segnali. */
+    GError *error = NULL;
+    assert(syncview_video_player_load(player, path, &error) && error == NULL);
+    assert(syncview_video_player_is_loading(player) && !syncview_video_player_is_loaded(player));
+    assert(strcmp(syncview_video_player_get_path(player), path) == 0);
+    assert(ev.loaded_true == 0 && ev.errors == 0);
+
+    /* ASYNC_DONE dal bus -> load-state-changed(TRUE), una sola volta. */
+    assert(spin_until(&ev.got_loaded, 10000));
+    assert(ev.loaded_true == 1 && ev.loaded_false == 0 && ev.errors == 0);
+    assert(syncview_video_player_is_loaded(player) && !syncview_video_player_is_loading(player));
+
+    /* Pipeline in PAUSED (non in play): il primo frame è mostrato, il video non avanza. */
+    assert(pipeline_state(syncview_video_player_get_pipeline(player)) == GST_STATE_PAUSED);
+
+    /* Il primo frame è nel paintable: dimensioni intrinseche del video e qualcosa da disegnare. */
+    assert(wait_for_frame(player, 320, 240));
+    GskRenderNode *node = snapshot_paintable(paintable, 320, 240);
+    assert(node != NULL && node_contains_texture(node));  /* ora c'è la texture del frame */
+    graphene_rect_t bounds;
+    gsk_render_node_get_bounds(node, &bounds);
+    assert(bounds.size.width > 0 && bounds.size.height > 0);
+    gsk_render_node_unref(node);
+
+    /* Un GtkPicture collegato riceve le dimensioni del video. */
+    GtkWidget *picture = g_object_ref_sink(gtk_picture_new());
+    gtk_picture_set_paintable(GTK_PICTURE(picture), paintable);
+    int min_w, nat_w;
+    gtk_widget_measure(picture, GTK_ORIENTATION_HORIZONTAL, -1, &min_w, &nat_w, NULL, NULL);
+    assert(nat_w == 320);
+    g_object_unref(picture);
+
+    /* Decoder in uso (O6): VP8, software o hardware. */
+    char *decoder = syncview_video_player_get_decoder_description(player);
+    assert(decoder != NULL && strstr(decoder, "vp8") != NULL);
+    assert(strstr(decoder, "(software)") != NULL || strstr(decoder, "(hardware)") != NULL);
+    g_free(decoder);
+
+    /* Nessun evento spurio nel frattempo. */
+    spin_for(200);
+    assert(ev.loaded_true == 1 && ev.errors == 0);
+
+    /* Un seek con flush produce un nuovo ASYNC_DONE: non è un nuovo caricamento, nessun segnale. */
+    assert(gst_element_seek_simple(syncview_video_player_get_pipeline(player), GST_FORMAT_TIME,
+                                   GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT, 0));
+    GstState st;
+    gst_element_get_state(syncview_video_player_get_pipeline(player), &st, NULL, 5 * GST_SECOND);
+    spin_for(300);
+    assert(ev.loaded_true == 1 && ev.errors == 0 && syncview_video_player_is_loaded(player));
+
+    g_free(ev.last_error);
+    g_object_unref(player);
+    g_free(path);
+}
+
+static void
+test_load_errors(const char *dir)
+{
+    SyncviewVideoPlayer *player = syncview_video_player_new(1, NULL);
+    Events ev;
+    events_connect(player, &ev);
+    GError *error = NULL;
+
+    /* File assente / NULL / directory: errore immediato, nessun segnale, stato invariato. */
+    char *missing = g_build_filename(dir, "manca.webm", NULL);
+    assert(!syncview_video_player_load(player, missing, &error));
+    assert(error->domain == SYNCVIEW_VIDEO_PLAYER_ERROR && error->code == SYNCVIEW_VIDEO_PLAYER_ERROR_FILE_NOT_FOUND);
+    assert(strcmp(error->message, "File non trovato") == 0);
+    g_clear_error(&error);
+    assert(!syncview_video_player_load(player, NULL, &error) && error->code == SYNCVIEW_VIDEO_PLAYER_ERROR_FILE_NOT_FOUND);
+    g_clear_error(&error);
+    assert(!syncview_video_player_load(player, dir, NULL));
+    assert(!syncview_video_player_is_loading(player) && !syncview_video_player_is_loaded(player));
+    assert(pipeline_state(syncview_video_player_get_pipeline(player)) == GST_STATE_NULL);
+    spin_for(100);
+    assert(ev.errors == 0 && ev.loaded_true == 0);
+
+    /* File che GStreamer non sa leggere: il bus segnala un ERROR -> segnale "error", pipeline a NULL. */
+    char *garbage = g_build_filename(dir, "garbage.mp4", NULL);
+    char data[4096];
+    for (size_t i = 0; i < sizeof(data); i++) {
+        data[i] = (char)((i * 131 + 17) % 251);
+    }
+    assert(g_file_set_contents(garbage, data, sizeof(data), NULL));
+    assert(syncview_video_player_load(player, garbage, NULL));  /* l'errore arriva dal bus, non subito */
+    assert(spin_until(&ev.got_error, 10000));
+    assert(ev.errors == 1 && ev.loaded_true == 0 && ev.last_error != NULL && *ev.last_error != '\0');
+    assert(!syncview_video_player_is_loaded(player) && !syncview_video_player_is_loading(player));
+    assert(pipeline_state(syncview_video_player_get_pipeline(player)) == GST_STATE_NULL);
+    assert(syncview_video_player_get_decoder_description(player) == NULL);
+
+    /* Dopo un errore il player si riprende con un file valido. */
+    char *good = make_video(dir, "dopo_errore.webm", 320, 240, 25);
+    ev.got_loaded = FALSE;
+    assert(syncview_video_player_load(player, good, NULL));
+    assert(spin_until(&ev.got_loaded, 10000));
+    assert(ev.loaded_true == 1 && ev.errors == 1 && syncview_video_player_is_loaded(player));
+
+    g_free(ev.last_error);
+    g_object_unref(player);
+    g_free(missing);
+    g_free(garbage);
+    g_free(good);
+}
+
+/* Errore sul bus DOPO un caricamento riuscito: il video viene perso (loaded -> FALSE, pipeline a NULL). */
+static void
+test_error_after_loaded(const char *dir)
+{
+    char *path = make_video(dir, "e.webm", 320, 240, 25);
+    SyncviewVideoPlayer *player = syncview_video_player_new(0, NULL);
+    Events ev;
+    events_connect(player, &ev);
+
+    assert(syncview_video_player_load(player, path, NULL));
+    assert(spin_until(&ev.got_loaded, 10000));
+    assert(syncview_video_player_is_loaded(player));
+
+    /* Errore iniettato sul bus come se arrivasse da un elemento della pipeline. */
+    GstElement *pipeline = syncview_video_player_get_pipeline(player);
+    GError *injected = g_error_new_literal(GST_STREAM_ERROR, GST_STREAM_ERROR_FAILED, "errore iniettato dal test");
+    gst_element_post_message(pipeline, gst_message_new_error(GST_OBJECT(pipeline), injected, "debug di prova"));
+    g_error_free(injected);
+
+    assert(spin_until(&ev.got_error, 10000));
+    assert(ev.errors == 1 && strcmp(ev.last_error, "errore iniettato dal test") == 0);
+    assert(ev.loaded_true == 1 && ev.loaded_false == 1);          /* "load-state-changed(FALSE)" emesso una volta */
+    assert(!syncview_video_player_is_loaded(player) && !syncview_video_player_is_loading(player));
+    assert(pipeline_state(pipeline) == GST_STATE_NULL);
+    assert(syncview_video_player_get_decoder_description(player) == NULL);
+
+    /* Il player si riprende con un nuovo load. */
+    ev.got_loaded = FALSE;
+    assert(syncview_video_player_load(player, path, NULL));
+    assert(spin_until(&ev.got_loaded, 10000) && syncview_video_player_is_loaded(player));
+    assert(ev.loaded_true == 2 && ev.errors == 1);
+
+    g_free(ev.last_error);
+    g_object_unref(player);
+    g_free(path);
+}
+
+static void
+test_reload_replaces_video(const char *dir)
+{
+    char *small = make_video(dir, "small.webm", 320, 240, 25);
+    char *big = make_video(dir, "big.webm", 640, 360, 25);
+    SyncviewVideoPlayer *player = syncview_video_player_new(2, NULL);
+    Events ev;
+    events_connect(player, &ev);
+
+    assert(syncview_video_player_load(player, small, NULL));
+    assert(spin_until(&ev.got_loaded, 10000) && wait_for_frame(player, 320, 240));
+
+    /* Secondo load nello stesso player: sostituisce il primo, nuovo ASYNC_DONE, nuove dimensioni. */
+    ev.got_loaded = FALSE;
+    assert(syncview_video_player_load(player, big, NULL));
+    assert(syncview_video_player_is_loading(player) && !syncview_video_player_is_loaded(player));
+    assert(strcmp(syncview_video_player_get_path(player), big) == 0);
+    assert(spin_until(&ev.got_loaded, 10000) && wait_for_frame(player, 640, 360));
+    assert(ev.loaded_true == 2 && ev.errors == 0);
+
+    /*
+     * ASYNC_DONE del caricamento precedente già pubblicato sul bus ma non ancora consegnato (il main
+     * context non gira): un nuovo load() deve scartarlo, altrimenti lo scambierebbe per il proprio.
+     */
+    ev.got_loaded = FALSE;
+    ev.loaded_true = 0;
+    assert(syncview_video_player_load(player, small, NULL));
+    GstState state_now;
+    assert(gst_element_get_state(syncview_video_player_get_pipeline(player), &state_now, NULL, 10 * GST_SECOND)
+           == GST_STATE_CHANGE_SUCCESS);  /* preroll finito: ASYNC_DONE è sul bus, non ancora dispatchato */
+    assert(ev.loaded_true == 0);
+    assert(syncview_video_player_load(player, big, NULL));
+    assert(spin_until(&ev.got_loaded, 10000));
+    spin_for(300);
+    assert(ev.loaded_true == 1);                      /* un solo esito, non due */
+    assert(wait_for_frame(player, 640, 360));         /* ed è quello del file nuovo */
+
+    /* Load ravvicinati: il primo viene scartato, arriva UN SOLO esito (per l'ultimo file). */
+    ev.got_loaded = FALSE;
+    ev.loaded_true = 0;
+    assert(syncview_video_player_load(player, small, NULL));
+    assert(syncview_video_player_load(player, big, NULL));
+    assert(spin_until(&ev.got_loaded, 10000));
+    spin_for(500);  /* un ASYNC_DONE del caricamento scartato arriverebbe qui */
+    assert(ev.loaded_true == 1 && ev.errors == 0);
+    assert(strcmp(syncview_video_player_get_path(player), big) == 0);
+    assert(wait_for_frame(player, 640, 360));
+
+    g_free(ev.last_error);
+    g_object_unref(player);
+    g_free(small);
+    g_free(big);
+}
+
+static void
+test_players_load_independently(const char *dir)
+{
+    char *p1 = make_video(dir, "p1.webm", 320, 240, 25);
+    char *p2 = make_video(dir, "p2.webm", 640, 360, 25);
+    SyncviewVideoPlayer *a = syncview_video_player_new(0, NULL);
+    SyncviewVideoPlayer *b = syncview_video_player_new(3, NULL);
+    Events ea, eb;
+    events_connect(a, &ea);
+    events_connect(b, &eb);
+
+    assert(syncview_video_player_load(a, p1, NULL));
+    assert(syncview_video_player_load(b, p2, NULL));
+    assert(spin_until(&ea.got_loaded, 10000) && spin_until(&eb.got_loaded, 10000));
+    assert(wait_for_frame(a, 320, 240) && wait_for_frame(b, 640, 360));
+    assert(ea.loaded_true == 1 && eb.loaded_true == 1 && ea.errors == 0 && eb.errors == 0);
+
+    g_object_unref(a);
+    g_object_unref(b);
+    g_free(p1);
+    g_free(p2);
+}
+
+static void
+test_dispose_while_loading(const char *dir)
+{
+    char *path = make_video(dir, "d.webm", 320, 240, 25);
+
+    /* Distruggere il player con un caricamento in corso: nessun callback su oggetto distrutto,
+     * nessun CRITICAL (fatali), neanche lasciando girare il main context dopo. */
+    for (int i = 0; i < 10; i++) {
+        SyncviewVideoPlayer *player = syncview_video_player_new(i % SYNCVIEW_MAX_VIDEOS, NULL);
+        Events ev;
+        events_connect(player, &ev);
+        assert(syncview_video_player_load(player, path, NULL));
+        if (i % 2) {
+            spin_for(20);  /* a volte a caricamento già avviato */
+        }
+        g_object_unref(player);
+        spin_for(30);
+    }
+
+    g_free(path);
 }
 
 static void
@@ -283,6 +718,36 @@ main(void)
     test_independent_players();
     test_lifecycle();
     test_owned_objects_are_released();
+
+    /* Test di load(): servono i plugin per generare i file di prova (vp8enc/webmmux, base+good). */
+    const char *encoder_elements[] = { "videotestsrc", "videoconvert", "vp8enc", "webmmux", "filesink", NULL };
+    have_test_encoder = TRUE;
+    for (int i = 0; encoder_elements[i]; i++) {
+        GstElementFactory *factory = gst_element_factory_find(encoder_elements[i]);
+        if (!factory) {
+            have_test_encoder = FALSE;
+        } else {
+            gst_object_unref(factory);
+        }
+    }
+
+    if (have_test_encoder) {
+        char *dir = g_dir_make_tmp("syncview-player-XXXXXX", NULL);
+        assert(dir != NULL);
+
+        test_load_first_frame(dir);
+        test_load_errors(dir);
+        test_error_after_loaded(dir);
+        test_reload_replaces_video(dir);
+        test_players_load_independently(dir);
+        test_dispose_while_loading(dir);
+
+        char *cmd = g_strdup_printf("rm -rf '%s'", dir);
+        assert(system(cmd) == 0);
+        g_free(cmd);
+        g_free(dir);
+    }
+
     test_missing_element_error();
     return 0;
 }
