@@ -285,6 +285,28 @@ main(void)
     marker_free(a);
     marker_free(b);
 
+    /* Molti marker con lo stesso timestamp creati in rapida successione (l'orologio di
+     * sistema può avere granularità di ~15 ms, come su Windows): id e created_at devono
+     * comunque essere tutti distinti. */
+    enum { N_BURST = 500 };
+    Marker *burst[N_BURST];
+    for (int i = 0; i < N_BURST; i++) {
+        burst[i] = marker_new(7000, "#000000", NULL, NULL, 0);
+    }
+    for (int i = 0; i < N_BURST; i++) {
+        for (int j = i + 1; j < N_BURST; j++) {
+            assert(strcmp(burst[i]->id, burst[j]->id) != 0);
+            assert(strcmp(burst[i]->created_at, burst[j]->created_at) != 0);
+        }
+    }
+    /* created_at crescente nell'ordine di creazione. */
+    for (int i = 1; i < N_BURST; i++) {
+        assert(strcmp(burst[i - 1]->created_at, burst[i]->created_at) < 0);
+    }
+    for (int i = 0; i < N_BURST; i++) {
+        marker_free(burst[i]);
+    }
+
     /* marker_free su NULL non deve crashare */
     marker_free(NULL);
 

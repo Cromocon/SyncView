@@ -116,7 +116,8 @@ logger_init(const char *file_path, gboolean cli_debug, GError **error)
         g_mkdir_with_parents(dir, 0755);
         g_free(dir);
 
-        log_file = fopen(file_path, "w");  /* "w": troncato ad ogni avvio */
+        /* "wb": troncato ad ogni avvio; binario per avere sempre "\n" (su Windows "w" scriverebbe "\r\n"). */
+        log_file = fopen(file_path, "wb");
         if (!log_file) {
             g_set_error(error, G_FILE_ERROR, g_file_error_from_errno(errno),
                         "Impossibile aprire il file di log %s: %s", file_path, g_strerror(errno));

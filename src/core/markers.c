@@ -14,15 +14,43 @@ dup_or_default(const char *s, const char *fallback)
 }
 
 /*
+ * Istante corrente in microsecondi dall'epoch, STRETTAMENTE crescente tra
+ * chiamate successive (anche da thread diversi). L'orologio di sistema può
+ * avere una granularità grossolana (su Windows fino a ~15 ms): senza questa
+ * garanzia due marker creati in rapida successione avrebbero lo stesso id e
+ * lo stesso created_at, violando l'unicità dell'id e il vincolo
+ * UNIQUE(timestamp, video_index, created_at) del database.
+ */
+static gint64
+unique_now_usec(void)
+{
+    static GMutex lock;
+    static gint64 last_usec = 0;
+
+    g_mutex_lock(&lock);
+    gint64 now = g_get_real_time();
+    if (now <= last_usec) {
+        now = last_usec + 1;
+    }
+    last_usec = now;
+    g_mutex_unlock(&lock);
+
+    return now;
+}
+
+/*
  * Riempie buf con l'istante corrente in formato "YYYY-MM-DDTHH:MM:SS.mmmmmm"
  * (locale, naive, senza offset — equivalente a datetime.now().isoformat()
  * in Python) e restituisce anche l'istante come secondi epoch (double, con
- * precisione al microsecondo) per la generazione dell'id.
+ * precisione al microsecondo) per la generazione dell'id. Ogni chiamata
+ * produce un istante diverso (vedi unique_now_usec).
  */
 static void
 current_timestamp_iso8601(char *buf, size_t buf_size, double *epoch_seconds_out)
 {
-    GDateTime *now = g_date_time_new_now_local();
+    gint64 usec = unique_now_usec();
+    GDateTime *base = g_date_time_new_from_unix_local(usec / G_USEC_PER_SEC);
+    GDateTime *now = g_date_time_add(base, usec % G_USEC_PER_SEC);
 
     gint year = g_date_time_get_year(now);
     gint month = g_date_time_get_month(now);
@@ -36,10 +64,11 @@ current_timestamp_iso8601(char *buf, size_t buf_size, double *epoch_seconds_out)
              year, month, day, hour, minute, second, microsecond);
 
     if (epoch_seconds_out) {
-        *epoch_seconds_out = (double)g_date_time_to_unix(now) + (double)microsecond / 1e6;
+        *epoch_seconds_out = (double)(usec / G_USEC_PER_SEC) + (double)(usec % G_USEC_PER_SEC) / 1e6;
     }
 
     g_date_time_unref(now);
+    g_date_time_unref(base);
 }
 
 char *

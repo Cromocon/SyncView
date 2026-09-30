@@ -36,6 +36,15 @@ read_file(const char *path)
 {
     char *content = NULL;
     assert(g_file_get_contents(path, &content, NULL, NULL));
+
+    /* stderr catturato via open() è in modalità testo su Windows ("\r\n"): normalizza. */
+    char *dst = content;
+    for (const char *src = content; *src; src++) {
+        if (*src != '\r') {
+            *dst++ = *src;
+        }
+    }
+    *dst = '\0';
     return content;
 }
 
