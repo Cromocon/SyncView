@@ -8,7 +8,8 @@ Per il riferimento architetturale completo (non ancora implementato) vedi la sez
 
 - **M0 (Scaffolding)**: ✅ completa (M0.1-M0.6). Build Meson funzionante, tutte le dipendenze collegate, CI multi-piattaforma (Linux/macOS/Windows) verde.
 - **M1 (Core logic, nessuna dipendenza da GTK)**: ✅ completa (M1.1-M1.16). 11 test Meson verdi su Linux/macOS/Windows in CI; passata ASan (leak detection attiva) e ASan+UBSan pulite.
-- **M2-M8**: non ancora iniziate.
+- **M2 (Finestra minima con 1 video)**: 🚧 in corso — M2.1 completata (analisi di `core/video_loader.py`, vedi [MIGRATION_NOTES.md](MIGRATION_NOTES.md)); da M2.2 implementazione.
+- **M3-M8**: non ancora iniziate.
 
 ### Moduli implementati
 
@@ -51,4 +52,4 @@ Tutti i moduli sopra sono compilati in `libsyncview_core` (static library, `src/
 
 ## Note per chi implementa
 
-Man mano che ogni modulo (`core/`, `video/`, `ui/`, `util/`) viene scritto, aggiungere qui una riga nella tabella sopra e, se rilevante, una voce nella sezione "Decisioni prese durante l'implementazione". Le deviazioni note rispetto al comportamento dell'app Python originale vanno invece in `MIGRATION_NOTES.md` (non ancora creato — richiesto per la prima volta in M2.1).
+Man mano che ogni modulo (`core/`, `video/`, `ui/`, `util/`) viene scritto, aggiungere qui una riga nella tabella sopra e, se rilevante, una voce nella sezione "Decisioni prese durante l'implementazione". Le deviazioni note rispetto al comportamento dell'app Python originale vanno invece in `MIGRATION_NOTES.md` (creato in M2.1: [MIGRATION_NOTES.md](MIGRATION_NOTES.md)).
