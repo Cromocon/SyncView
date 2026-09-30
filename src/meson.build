@@ -15,6 +15,7 @@ syncview_core_sources = [
   'core/sync_manager.c',
   'core/markers.c',
   'core/marker_db.c',
+  'core/user_paths.c',
 ]
 
 syncview_core_lib = static_library(

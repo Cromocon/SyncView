@@ -45,3 +45,12 @@ test_marker_db = executable(
   dependencies: [glib_dep, sqlite_dep, json_glib_dep],
 )
 test('marker_db', test_marker_db)
+
+test_user_paths = executable(
+  'test_user_paths',
+  'test_user_paths.c',
+  include_directories: syncview_core_inc,
+  link_with: syncview_core_lib,
+  dependencies: [glib_dep, json_glib_dep],
+)
+test('user_paths', test_user_paths)

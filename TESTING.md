@@ -160,12 +160,17 @@ Un test C usa `assert()`: se passa non stampa nulla ed esce con codice 0; se una
 - [ ] `syncview:marker_db` → **OK**.
 - [ ] Copre (fixture JSON scritte in test): migrazione di 4 marker (chiave `label` scartata, `id`/`created_at` preservati o generati se mancanti/null, `video_index` null/assente = globale, timestamp float, unicode), JSON rinominato in `.json.backup` con contenuto identico e backup precedente sovrascritto, contenuto migrato verificato via `load_all`; casi no-op (file assente, `markers` vuoto o assente → nessun backup); 9 input non validi (JSON malformato, radice non oggetto, `markers` non lista, chiave sconosciuta nel 2° marker, timestamp/color mancanti, tipi errati, elemento non oggetto) → errore, JSON intatto, nessun backup, nessun marker salvato; `marker_db_open_migrating` (migra solo se il DB non esisteva, non blocca l'apertura se il JSON è invalido).
 
+### M1.13 — `core/user_paths`
+
+- [ ] `syncview:user_paths` → **OK**.
+- [ ] Copre: valori vuoti su file assente e creazione della directory padre, indici non validi (get → `NULL`, set/clear → errore senza scrivere), salvataggio immediato ad ogni set e round-trip su file temporaneo (4 slot + `last_export_dir`, unicode, clear, export dir `NULL`), lettura di un file nel formato Python (stringhe vuote/null → slot vuoto, lista corta/lunga), file corrotto o di struttura inattesa → valori vuoti, `get_valid_video_paths` (rimuove file inesistenti e directory da memoria e file, nessuna riscrittura se nulla cambia), errore di salvataggio (valore resta in memoria), path di default.
+
 ### Riepilogo atteso
 
 ```
 meson test -C build
 ```
-deve riportare **6/6 OK** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`).
+deve riportare **7/7 OK** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`).
 
 ---
 
