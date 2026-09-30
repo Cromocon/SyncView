@@ -7,7 +7,7 @@ Per il riferimento architetturale completo (non ancora implementato) vedi la sez
 ## Stato implementativo
 
 - **M0 (Scaffolding)**: ✅ completa (M0.1-M0.6). Build Meson funzionante, tutte le dipendenze collegate, CI multi-piattaforma (Linux/macOS/Windows) verde.
-- **M1 (Core logic, nessuna dipendenza da GTK)**: 🚧 in corso — completate M1.1-M1.6, mancano M1.7-M1.15 (MarkerStore, marker_db/SQLite, migrazione JSON, user_paths, logger+debug mode, ASan finale).
+- **M1 (Core logic, nessuna dipendenza da GTK)**: 🚧 in corso — completate M1.1-M1.7, mancano M1.8-M1.15 (binary search query, marker_db/SQLite, migrazione JSON, user_paths, logger+debug mode, ASan finale).
 - **M2-M8**: non ancora iniziate.
 
 ### Moduli implementati
@@ -17,7 +17,7 @@ Per il riferimento architetturale completo (non ancora implementato) vedi la sez
 | `util/time_format` | `src/util/time_format.{c,h}` | Formattazione durate ms → `HH:MM:SS.mmm` | `syncview_format_time_ms()` |
 | `core/settings` | `src/core/settings.{c,h}` | Costanti di dominio (porting parziale di `config/settings.py`) | `SYNCVIEW_MAX_VIDEOS`, `syncview_supported_video_extensions[]`, `syncview_fps_presets[]`, `syncview_frame_step_options_ms[]`, costanti zoom/export |
 | `core/sync_manager` | `src/core/sync_manager.{c,h}` | Motore di sincronizzazione offset-based (porting 1:1 di `core/sync_manager.py`) | `sync_manager_init/set_enabled/is_enabled/set_offset/get_offset/reset_offsets/set_master/get_master`, `sync_manager_calculate_sync_position`, `sync_manager_sync_all_to_master` (con `SyncPlayerOps` opachi) |
-| `core/markers` | `src/core/markers.{c,h}` | Struct `Marker` (porting 1:1 della dataclass Python) | `marker_new()`, `marker_free()` |
+| `core/markers` | `src/core/markers.{c,h}` | Struct `Marker` (porting 1:1 della dataclass Python) + `MarkerStore` ordinato per timestamp | `marker_new()`, `marker_free()`, `marker_store_new/free/count/get/find_by_id/add/add_marker/remove/update` |
 
 Tutti i moduli sopra sono compilati in `libsyncview_core` (static library, `src/meson.build`), linkata sia dall'eseguibile `syncview` che da ogni test in `tests/` — nessuna dipendenza da GTK, quindi testabili senza display (vedi [TESTING.md](../TESTING.md)).
 
@@ -28,6 +28,8 @@ Tutti i moduli sopra sono compilati in `libsyncview_core` (static library, `src/
 - **`core/markers` usa GLib (`GDateTime`)** per generare `created_at`/l'epoch usato nell'`id`, invece di API POSIX pure (`clock_gettime`) — scelta per coerenza cross-platform (comportamento identico su Linux/macOS/Windows) e perché GLib è comunque una dipendenza già presente. Prima introduzione di GLib in un modulo `core/`; `src/meson.build` è stato riorganizzato per dichiarare le `dependency()` prima della libreria statica, cui viene passato `glib_dep` — la propagazione ai target che fanno `link_with` funziona senza bisogno di ridichiarare la dipendenza nei test.
 - **L'`id` dei marker non è byte-identico all'originale**: stessa forma (`marker_<timestamp_ms>_<epoch_seconds>`), ma la rappresentazione del numero in virgola mobile non è garantita identica a quella di Python — è un id opaco (mai parsato), l'unicità/forma sono ciò che conta.
 - **Nessun campo `updated_at` nella struct `Marker`**: confermato leggendo `core/markers.py` per intero che la dataclass originale non ce l'ha — viene aggiunto solo a livello di schema SQLite al salvataggio (`core/marker_db.c`, M1.9+).
+- **`MarkerStore` usa inserimento ordinato (upper bound) invece di append + sort**: stesso risultato dell'originale (sort stabile: a parità di timestamp vince l'ordine di inserimento). `marker_store_update` prende una struct `MarkerUpdate` con bitmask `fields` al posto dei `**kwargs` Python; le query binary search (`get_at`/`get_next`/range) arrivano in M1.8.
+- **`marker_store_add` ritorna `const Marker*` non owned** (vale fino a remove/free); `marker_store_add_marker` accetta un `Marker*` già costruito (ownership trasferita) per il caricamento dal DB (M1.10).
 
 ## Note per chi implementa
 

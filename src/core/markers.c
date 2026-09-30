@@ -3,6 +3,7 @@
 #include <glib.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static char *
 dup_or_default(const char *s, const char *fallback)
@@ -82,4 +83,147 @@ marker_free(Marker *marker)
     g_free(marker->category);
     g_free(marker->created_at);
     free(marker);
+}
+
+struct MarkerStore {
+    GPtrArray *markers;  /* Marker*, ordinati per timestamp_ms, owned (marker_free) */
+};
+
+MarkerStore *
+marker_store_new(void)
+{
+    MarkerStore *store = g_new0(MarkerStore, 1);
+    store->markers = g_ptr_array_new_with_free_func((GDestroyNotify)marker_free);
+    return store;
+}
+
+void
+marker_store_free(MarkerStore *store)
+{
+    if (!store) {
+        return;
+    }
+
+    g_ptr_array_free(store->markers, TRUE);
+    g_free(store);
+}
+
+size_t
+marker_store_count(const MarkerStore *store)
+{
+    return store->markers->len;
+}
+
+const Marker *
+marker_store_get(const MarkerStore *store, size_t index)
+{
+    if (index >= store->markers->len) {
+        return NULL;
+    }
+    return g_ptr_array_index(store->markers, index);
+}
+
+static guint
+find_index_by_id(const MarkerStore *store, const char *id)
+{
+    for (guint i = 0; i < store->markers->len; i++) {
+        const Marker *m = g_ptr_array_index(store->markers, i);
+        if (strcmp(m->id, id) == 0) {
+            return i;
+        }
+    }
+    return G_MAXUINT;
+}
+
+const Marker *
+marker_store_find_by_id(const MarkerStore *store, const char *id)
+{
+    guint i = find_index_by_id(store, id);
+    return i == G_MAXUINT ? NULL : g_ptr_array_index(store->markers, i);
+}
+
+/* Primo indice con timestamp > timestamp_ms (upper bound): inserendo lì,
+ * i marker con timestamp uguale mantengono l'ordine di inserimento. */
+static guint
+upper_bound(const MarkerStore *store, int64_t timestamp_ms)
+{
+    guint lo = 0;
+    guint hi = store->markers->len;
+
+    while (lo < hi) {
+        guint mid = lo + (hi - lo) / 2;
+        const Marker *m = g_ptr_array_index(store->markers, mid);
+        if (m->timestamp_ms <= timestamp_ms) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo;
+}
+
+void
+marker_store_add_marker(MarkerStore *store, Marker *marker)
+{
+    g_ptr_array_insert(store->markers, (gint)upper_bound(store, marker->timestamp_ms), marker);
+}
+
+const Marker *
+marker_store_add(MarkerStore *store, int64_t timestamp_ms, const char *color,
+                 const char *description, const char *category, int video_index)
+{
+    Marker *m = marker_new(timestamp_ms, color, description, category, video_index);
+    if (!m) {
+        return NULL;
+    }
+
+    marker_store_add_marker(store, m);
+    return m;
+}
+
+gboolean
+marker_store_remove(MarkerStore *store, const char *id)
+{
+    guint i = find_index_by_id(store, id);
+    if (i == G_MAXUINT) {
+        return FALSE;
+    }
+
+    g_ptr_array_remove_index(store->markers, i);
+    return TRUE;
+}
+
+const Marker *
+marker_store_update(MarkerStore *store, const char *id, const MarkerUpdate *update)
+{
+    guint i = find_index_by_id(store, id);
+    if (i == G_MAXUINT) {
+        return NULL;
+    }
+
+    Marker *m = g_ptr_array_index(store->markers, i);
+
+    if (update->fields & MARKER_FIELD_COLOR) {
+        g_free(m->color);
+        m->color = g_strdup(update->color);
+    }
+    if (update->fields & MARKER_FIELD_DESCRIPTION) {
+        g_free(m->description);
+        m->description = dup_or_default(update->description, "");
+    }
+    if (update->fields & MARKER_FIELD_CATEGORY) {
+        g_free(m->category);
+        m->category = dup_or_default(update->category, "default");
+    }
+    if (update->fields & MARKER_FIELD_VIDEO_INDEX) {
+        m->video_index = update->video_index;
+    }
+
+    if ((update->fields & MARKER_FIELD_TIMESTAMP) && update->timestamp_ms != m->timestamp_ms) {
+        m->timestamp_ms = update->timestamp_ms;
+        g_ptr_array_steal_index(store->markers, i);
+        marker_store_add_marker(store, m);
+    }
+
+    return m;
 }

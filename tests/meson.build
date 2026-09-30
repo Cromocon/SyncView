@@ -33,5 +33,6 @@ test_markers = executable(
   'test_markers.c',
   include_directories: syncview_core_inc,
   link_with: syncview_core_lib,
+  dependencies: [glib_dep],
 )
 test('markers', test_markers)

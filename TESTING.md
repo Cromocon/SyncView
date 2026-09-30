@@ -130,6 +130,11 @@ Un test C usa `assert()`: se passa non stampa nulla ed esce con codice 0; se una
 - [ ] `syncview:markers` → **OK**.
 - [ ] Copre: default `description=""`/`category="default"`, generazione `id`/`created_at`, unicità dell'`id` anche per marker con lo stesso timestamp, `marker_free(NULL)` sicuro.
 
+### M1.7 — `MarkerStore` (in `core/markers`)
+
+- [ ] `syncview:markers` → **OK** (stesso test di M1.6, esteso).
+- [ ] Copre: store vuoto, `add`/`get`/`find_by_id`, `update` parziale per bitmask (`description` NULL → `""`), `update`/`remove` su id inesistente, ordinamento per timestamp con inserimenti sparsi, stabilità a parità di timestamp, riposizionamento dopo update del timestamp, `remove` dal mezzo.
+
 ### Riepilogo atteso
 
 ```
