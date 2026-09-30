@@ -1,6 +1,6 @@
 # TESTING — SyncView-C
 
-Questo documento spiega come avviare il progetto e cosa testare manualmente allo stato attuale. Viene aggiornato ad ogni milestone con i nuovi elementi testabili — copre **M0 (Scaffolding)** completo e **M1 (Core logic)** fino a M1.6 incluso.
+Questo documento spiega come avviare il progetto e cosa testare manualmente allo stato attuale. Viene aggiornato ad ogni milestone con i nuovi elementi testabili — copre **M0 (Scaffolding)** completo, **M1 (Core logic)** completo (M1.1–M1.16) e **M2 (Finestra minima con 1 video)** fino a M2.2 incluso.
 
 Per il contesto completo (architettura, milestone, rischi) vedi [PLAN.md](PLAN.md). Per le istruzioni di build sintetiche vedi anche [README.md](README.md#build).
 
@@ -35,8 +35,14 @@ Build pulita attesa: nessun errore, nessun warning (il progetto usa `warning_lev
 ### 4. Test automatici
 
 ```bash
-meson test -C build
+meson test -C build                 # tutti i test
+meson test -C build -v discoverer   # un singolo test, con output
 ```
+
+- I test sono in `tests/` e linkano `libsyncview_core` (nessuna dipendenza da GTK, nessun display richiesto).
+- Un test può terminare con exit code **77** = *skip* (es. `discoverer` se mancano i plugin GStreamer per generare i file di prova): Meson lo riporta come `SKIP`, non come errore.
+- Passata con sanitizer (consigliata prima di chiudere una milestone): vedi **M1.16** più sotto.
+- In CI `meson test` gira con `--print-errorlogs`: se un test fallisce, nel log del job compare il suo output (asserzioni comprese). Senza, su Windows un `assert` fallito appare solo come `exit status 3221226505 or 0xc0000409`. In locale l'equivalente è `meson test -C build -v <nome>` oppure `./build/tests/<eseguibile>`.
 
 ### 5. Reconfigure (dopo modifiche a `meson.build`)
 
@@ -76,13 +82,13 @@ Ogni voce corrisponde a una sotto-milestone già implementata e pushata su `Sync
 
 ### M0.4 — Test scaffolding
 
-- [ ] `meson test -C build` esegue e riporta **1/1 OK** (`syncview:dummy`).
+- [ ] `meson test -C build` include `syncview:dummy` → **OK** (all'epoca era l'unico test; il totale attuale è nel **Riepilogo atteso** in fondo).
 - [ ] Il log completo è consultabile in `build/meson-logs/testlog.txt`.
 
 ### M0.5 — Documentazione
 
 - [ ] [README.md](README.md) è presente e descrive correttamente lo stack attuale (pipeline GStreamer manuale, `GstDiscoverer`, plugin base+good+bad+libav).
-- [ ] [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) è presente (stub).
+- [ ] [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) è presente (inizialmente uno stub, ora con stato implementativo, moduli e decisioni) e [docs/MIGRATION_NOTES.md](docs/MIGRATION_NOTES.md) documenta il comportamento dell'originale Python e le deviazioni.
 - [ ] Dopo una build (`meson setup build && meson compile -C build`), `git status` non mostra la directory `build/` tra i file non tracciati (deve essere ignorata da `.gitignore`).
 
 ### M0.6 — CI multi-piattaforma
@@ -98,9 +104,9 @@ Ogni voce corrisponde a una sotto-milestone già implementata e pushata su `Sync
 
 ---
 
-## Checklist di test manuale — M1 (Core logic, in corso)
+## Checklist di test manuale — M1 (Core logic, completa)
 
-Nessuna dipendenza da GTK: tutto è verificabile via `meson test -C build` (test automatici) — non c'è ancora un'interfaccia grafica da usare per questi moduli. Per vedere singolarmente l'output di ogni test:
+Nessuna dipendenza da GTK: tutto è verificabile via `meson test -C build` (test automatici). Le uniche verifiche manuali di M1 riguardano l'avvio dell'app con la modalità debug (vedi M1.14, integrazione). Per vedere singolarmente l'output di ogni test:
 
 ```bash
 meson test -C build -v              # verboso, mostra output di ogni test
@@ -119,6 +125,7 @@ Un test C usa `assert()`: se passa non stampa nulla ed esce con codice 0; se una
 
 - [ ] `syncview:settings` → **OK**.
 - [ ] Copre: `MAX_VIDEOS=4`, 6 formati video supportati, 7 preset FPS, 3 opzioni di frame-step (40/100/200ms), costanti zoom/export.
+- ⚠️ Da riconciliare prima di M2.7/M5: queste 3 opzioni riproducono `config/settings.py`, ma la UI dell'originale (`ui/main_window.py`) offre 4 voci (`40ms (25fps)`, `33ms (30fps)`, `100ms`, `200ms`) e il piano parla di 40/33/100/200. Il test attuale verifica le 3 di `settings.py`.
 
 ### M1.3 + M1.4 + M1.5 — `core/sync_manager`
 
@@ -128,7 +135,7 @@ Un test C usa `assert()`: se passa non stampa nulla ed esce con codice 0; se una
 ### M1.6 — `core/markers`
 
 - [ ] `syncview:markers` → **OK**.
-- [ ] Copre: default `description=""`/`category="default"`, generazione `id`/`created_at`, unicità dell'`id` anche per marker con lo stesso timestamp, `marker_free(NULL)` sicuro.
+- [ ] Copre: default `description=""`/`category="default"`, generazione `id`/`created_at`, unicità dell'`id` anche per marker con lo stesso timestamp, **500 marker creati in rapida successione con `id` e `created_at` tutti distinti e `created_at` crescente** (regressione per l'orologio a bassa risoluzione di Windows, ~15 ms: prima `id`/`created_at` potevano coincidere), `marker_free(NULL)` sicuro.
 
 ### M1.7 — `MarkerStore` (in `core/markers`)
 
@@ -168,7 +175,7 @@ Un test C usa `assert()`: se passa non stampa nulla ed esce con codice 0; se una
 ### M1.14 — `core/logger` + modalità debug
 
 - [ ] `syncview:logger` → **OK**.
-- [ ] Copre: **zero byte su stderr a debug disattivato** dopo 20 giri di tutte le funzioni di log (stderr catturato via `dup2`), file con intestazione di avvio e tutte le categorie dell'originale nel formato atteso (`[AZIONE UTENTE]`, `[VIDEO n]`, seek `mm:ss (Nms)`, export ✓/✗, `[EXPORT]`, errore + `GError` su seconda riga), dettagli DEBUG (`log_sync/marker/gst/ui`) assenti senza debug; con debug (flag e `SYNCVIEW_DEBUG=1`) stessi messaggi anche su stderr con timestamp/livello/categoria e righe identiche al file; `SYNCVIEW_DEBUG` = `0`/`false`/vuoto non attiva il debug; nessun output prima di `logger_init` e dopo `logger_shutdown`; file troncato ad ogni apertura; propagazione di `GST_DEBUG=3` solo in debug e senza sovrascrivere un valore esistente; file non scrivibile → errore ma logger ancora attivo.
+- [ ] Copre: **zero byte su stderr a debug disattivato** dopo 20 giri di tutte le funzioni di log (stderr catturato via `dup2`), file con intestazione di avvio e tutte le categorie dell'originale nel formato atteso (`[AZIONE UTENTE]`, `[VIDEO n]`, seek `mm:ss (Nms)`, export ✓/✗, `[EXPORT]`, errore + `GError` su seconda riga), dettagli DEBUG (`log_sync/marker/gst/ui`) assenti senza debug; con debug (flag e `SYNCVIEW_DEBUG=1`) stessi messaggi anche su stderr con timestamp/livello/categoria e righe identiche al file; `SYNCVIEW_DEBUG` = `0`/`false`/vuoto non attiva il debug; nessun output prima di `logger_init` e dopo `logger_shutdown`; file troncato ad ogni apertura e con fine riga `\n` su tutte le piattaforme (aperto in modalità binaria; su Windows `"w"` avrebbe scritto `\r\n`); propagazione di `GST_DEBUG=3` solo in debug e senza sovrascrivere un valore esistente; file non scrivibile → errore ma logger ancora attivo.
 - [ ] `syncview:no_adhoc_logging` → **OK**: controllo statico (`tests/check_no_adhoc_logging.py`) che fuori da `core/logger.c` non ci siano `printf`/`fprintf`/`stderr`/`g_print*` né `SYNCVIEW_DEBUG`/`debug_enabled`. Se un modulo aggiunge logging ad-hoc, questo test fallisce indicando file e riga.
 
 ### M1.14 (integrazione) — log dei moduli M1 e `main.c`
@@ -196,11 +203,20 @@ ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:abort_on_error=1 meson test -C build
 - Prima di fidarsi di "zero leak" verificare che LeakSanitizer sia attivo nell'ambiente (alcuni sandbox/container lo disabilitano in silenzio): un programma di prova che perde 123 byte deve produrre `SUMMARY: AddressSanitizer: 123 byte(s) leaked`.
 - ThreadSanitizer **non** è un criterio affidabile con `libglib` di sistema (non instrumentata: falsi positivi sui `GMutex`).
 
+---
+
+## Checklist di test manuale — M2 (Finestra minima con 1 video, in corso)
+
+### M2.1 — Analisi di `core/video_loader.py`
+
+- [ ] [docs/MIGRATION_NOTES.md](docs/MIGRATION_NOTES.md), sezione "Caricamento video e probing metadati", descrive: campi estratti e loro consumatori, fallback/gestione errori, sequenza di caricamento, uso di `fps` nel resto dell'app, deviazioni previste e messaggi di log da mantenere. Nessun codice né test: verifica documentale.
+
 ### M2.2 — `core/discoverer`
 
 - [ ] `syncview:discoverer` → **OK** (termina con 77 = *skip* se mancano i plugin `videotestsrc`/`vp8enc`/`webmmux`; in CI sono nei pacchetti good).
-- [ ] Copre (file generati a runtime con pipeline GStreamer): dimensioni, fps (25 e 30000/1001), durata, codec `vp8`; solo audio → valori di default; file assente/directory/`NULL` → `FILE_NOT_FOUND` ("File non trovato"), anche con fallback; file corrotto e vuoto → errore bloccante `CORRUPT`; file troncato; classificazione errori bloccanti/non bloccanti; formattazione dei plugin mancanti (installer details → "H.265 decoder, AAC decoder"); timeout fuori range limitati senza `CRITICAL` (fatali nel test); fallback su timeout; API asincrona (successo, errore propagato dal thread, annullamento → `G_IO_ERROR_CANCELLED`, due probing concorrenti indipendenti); stima fps dai timestamp (funzione pura: standard, 30 vs 29.97, non standard, outlier, intervalli ≤0, pochi dati; e da file reali generati a 25 e 29.97).
+- [ ] Copre (file generati a runtime con pipeline GStreamer): dimensioni, fps (25 e 30000/1001), durata, codec `vp8`; solo audio → valori di default; file assente/directory/`NULL` → `FILE_NOT_FOUND` ("File non trovato"), anche con fallback; file corrotto e vuoto → errore bloccante `CORRUPT`; file troncato; classificazione errori bloccanti/non bloccanti; formattazione dei plugin mancanti (installer details → "H.265 decoder, AAC decoder"); timeout fuori range limitati senza `CRITICAL` (fatali nel test); fallback su timeout; API asincrona (successo, errore propagato dal thread, annullamento → `G_IO_ERROR_CANCELLED`, due probing concorrenti indipendenti); stima fps dai timestamp (funzione pura: standard, 30 vs 29.97, non standard, outlier, intervalli ≤0, pochi dati; e da file reali generati a 25 e 29.97); percorsi "scomodi" (spazi, accenti/€, `#`; su POSIX anche backslash e virgolette) sia per `discoverer_probe_file` sia per `discoverer_estimate_fps`.
 - [ ] Sanity check manuale contro `ffprobe`/`gst-discoverer-1.0` su file veri: vedi tabella in `docs/MIGRATION_NOTES.md` ("Esito di M2.2").
+- **Lezione Windows (CI)**: i file di prova non vanno mai generati scrivendo il percorso dentro la stringa di `gst_parse_launch` — il backslash è un carattere di escape e `D:\a\_temp\...` diventa `D:a_temp...` (il `filesink` non riesce ad aprire il file). Il test usa `filesink name=out` e imposta `location` come proprietà. Riproducibile anche su Linux con `TMPDIR='/tmp/x\a\_temp' ./build/tests/test_discoverer` (la versione precedente del test falliva su `msg != NULL && ... EOS`).
 - Sanitizer: `tests/lsan.supp` sopprime le perdite di **driver GPU di terze parti** (`libcuda`, `nvidia_drv_video`, `libEGL_nvidia`, moduli scaricati) caricati dai plugin GStreamer; nessun frame di codice SyncView è coinvolto. Vale solo per il test `discoverer` con `-Db_sanitize=address`.
 
 ### Riepilogo atteso
@@ -214,4 +230,11 @@ deve riportare **12/12 OK** allo stato attuale (`dummy`, `time_format`, `setting
 
 ## Cosa NON è ancora testabile
 
-Tutto ciò che riguarda persistenza (SQLite, JSON), playback video reale, export, UI oltre la finestra vuota di M0.2, e la modalità debug appartiene a M1.7 e successive — non ancora implementato. Questo file verrà esteso con una nuova sezione ad ogni milestone completata.
+- **Playback video reale** (`SyncviewVideoPlayer`, pipeline `playbin3` + `gtk4paintablesink`, seek, frame-step, `playback_rate`): da M2.3.
+- **Interfaccia oltre la finestra vuota di M0.2**: griglia 2x2, timeline, marker a schermo, dialoghi, scorciatoie, tema, zoom/pan, titlebar custom (M3–M7). Le finestre di debug "Log" e "Moduli" sono previste in M2.9 (oggi esistono solo il filtro e il sink del logger, testati da `logger_filter`).
+- **Verifica e download delle dipendenze al primo avvio**: M2.10–M2.12.
+- **Export**: M6.
+- **Sync e marker con video reali**: la logica è testata (`sync_manager`, `MarkerStore`, `marker_db`) ma non è ancora collegata a nessun player o widget (M3/M4).
+- **Esecuzione su macOS e Windows in locale**: solo via CI (`gh run list --branch SyncView-C`). Il primo push di M2.2 è passato su Linux e macOS ma è fallito su Windows per un difetto del *test* (percorsi con backslash in `gst_parse_launch`, vedi M2.2), non del modulo; il fix è committato e va confermato da un nuovo run.
+
+Questo file viene esteso con una nuova sezione ad ogni milestone completata.

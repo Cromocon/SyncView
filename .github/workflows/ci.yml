@@ -26,7 +26,7 @@ jobs:
       - name: meson compile
         run: meson compile -C build
       - name: meson test
-        run: meson test -C build
+        run: meson test -C build --print-errorlogs
 
   build-macos:
     name: macOS (macos-latest)
@@ -42,7 +42,7 @@ jobs:
       - name: meson compile
         run: meson compile -C build
       - name: meson test
-        run: meson test -C build
+        run: meson test -C build --print-errorlogs
 
   build-windows:
     name: Windows (windows-latest, MSYS2/MinGW-w64)
@@ -73,4 +73,4 @@ jobs:
       - name: meson compile
         run: meson compile -C build
       - name: meson test
-        run: meson test -C build
+        run: meson test -C build --print-errorlogs

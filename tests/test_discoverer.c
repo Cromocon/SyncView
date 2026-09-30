@@ -28,13 +28,24 @@ have_elements(const char *const *names)
     return TRUE;
 }
 
-/* Esegue una pipeline fino a EOS; ASSERT se fallisce. */
+/*
+ * Esegue una pipeline fino a EOS; ASSERT se fallisce. La descrizione deve
+ * contenere `filesink name=out`: il percorso di destinazione NON va inserito
+ * nel testo, perché gst_parse_launch interpreta il backslash come escape e
+ * altera i percorsi Windows (`D:\a\_temp\...` diventa `D:a_temp...`).
+ * Lo si imposta quindi come proprietà dell'elemento.
+ */
 static void
-run_pipeline(const char *description)
+run_pipeline_to_file(const char *description, const char *output_path)
 {
     GError *error = NULL;
     GstElement *pipeline = gst_parse_launch(description, &error);
     assert(pipeline != NULL && error == NULL);
+
+    GstElement *out = gst_bin_get_by_name(GST_BIN(pipeline), "out");
+    assert(out != NULL);
+    g_object_set(out, "location", output_path, NULL);
+    gst_object_unref(out);
 
     gst_element_set_state(pipeline, GST_STATE_PLAYING);
     GstBus *bus = gst_element_get_bus(pipeline);
@@ -53,9 +64,9 @@ make_video(const char *dir, const char *name, int width, int height, const char 
     char *path = g_build_filename(dir, name, NULL);
     char *desc = g_strdup_printf(
         "videotestsrc num-buffers=%d ! video/x-raw,width=%d,height=%d,framerate=%s ! videoconvert ! "
-        "vp8enc ! webmmux ! filesink location=\"%s\"",
-        frames, width, height, framerate, path);
-    run_pipeline(desc);
+        "vp8enc ! webmmux ! filesink name=out",
+        frames, width, height, framerate);
+    run_pipeline_to_file(desc, path);
     g_free(desc);
     return path;
 }
@@ -102,9 +113,8 @@ test_audio_only_gives_defaults(const char *dir)
     }
 
     char *path = g_build_filename(dir, "audio.ogg", NULL);
-    char *desc = g_strdup_printf("audiotestsrc num-buffers=20 ! audioconvert ! vorbisenc ! oggmux ! filesink location=\"%s\"", path);
-    run_pipeline(desc);
-    g_free(desc);
+    run_pipeline_to_file(
+        "audiotestsrc num-buffers=20 ! audioconvert ! vorbisenc ! oggmux ! filesink name=out", path);
 
     /* Senza stream video non è un errore: valori di default, come ffprobe senza stream. */
     VideoInfo *info = discoverer_probe_file(path, 0, NULL);
@@ -341,6 +351,36 @@ test_estimate_fps_from_file(const char *dir)
     g_free(garbage);
 }
 
+/* Percorsi "scomodi": il modulo non deve interpretarli (niente escape/parse). */
+static void
+test_special_path_characters(const char *dir)
+{
+    const char *names[] = {
+        "con spazi e #cancelletto",
+        "accenti \xc3\xa0\xc3\xa8\xc3\xac \xe2\x82\xac",
+#ifndef G_OS_WIN32
+        "back\\slash\\a_v",        /* su Windows il backslash è il separatore: solo POSIX */
+        "virgolette \"doppie\" 'singole'",
+#endif
+    };
+
+    for (size_t i = 0; i < G_N_ELEMENTS(names); i++) {
+        char *sub = g_build_filename(dir, names[i], NULL);
+        assert(g_mkdir_with_parents(sub, 0755) == 0);
+
+        char *path = make_video(sub, "v.webm", 320, 240, "25/1", 50);
+        GError *error = NULL;
+        VideoInfo *info = discoverer_probe_file(path, 0, &error);
+        assert(info != NULL && error == NULL);
+        assert(info->width == 320 && fabs(info->fps - 25.0) < 1e-9);
+        video_info_free(info);
+        assert(discoverer_estimate_fps(path) == 25.0);
+
+        g_free(path);
+        g_free(sub);
+    }
+}
+
 static void
 test_default_info(void)
 {
@@ -469,6 +509,7 @@ main(void)
     test_nominal_fps_from_intervals();
     test_video_info(dir);
     test_estimate_fps_from_file(dir);
+    test_special_path_characters(dir);
     test_audio_only_gives_defaults(dir);
     test_file_not_found(dir);
     test_corrupt_file(dir);
