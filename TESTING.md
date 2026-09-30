@@ -1,6 +1,6 @@
 # TESTING — SyncView-C
 
-Questo documento spiega come avviare il progetto e cosa testare manualmente allo stato attuale. Viene aggiornato ad ogni milestone con i nuovi elementi testabili — copre **M0 (Scaffolding)** completo, **M1 (Core logic)** completo (M1.1–M1.16) e **M2 (Finestra minima con 1 video)** fino a M2.2 incluso.
+Questo documento spiega come avviare il progetto e cosa testare manualmente allo stato attuale. Viene aggiornato ad ogni milestone con i nuovi elementi testabili — copre **M0 (Scaffolding)** completo, **M1 (Core logic)** completo (M1.1–M1.16) e **M2 (Finestra minima con 1 video)** fino a M2.3 incluso.
 
 Per il contesto completo (architettura, milestone, rischi) vedi [PLAN.md](PLAN.md). Per le istruzioni di build sintetiche vedi anche [README.md](README.md#build).
 
@@ -198,8 +198,8 @@ meson setup build-asan -Db_sanitize=address -Db_lundef=false --buildtype=debug
 ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:abort_on_error=1 meson test -C build-asan
 ```
 
-- [ ] 12/12 **OK**, zero errori ASan e **zero leak** nel codice SyncView (LeakSanitizer; per `discoverer` con le soppressioni di terze parti in `tests/lsan.supp`).
-- [ ] Stessa passata con `-Db_sanitize=address,undefined` → 12/12 OK, zero `runtime error` UBSan.
+- [ ] 13/13 **OK**, zero errori ASan e **zero leak** nel codice SyncView (LeakSanitizer; per `discoverer` con le soppressioni di terze parti in `tests/lsan.supp`).
+- [ ] Stessa passata con `-Db_sanitize=address,undefined` → 13/13 OK, zero `runtime error` UBSan.
 - Prima di fidarsi di "zero leak" verificare che LeakSanitizer sia attivo nell'ambiente (alcuni sandbox/container lo disabilitano in silenzio): un programma di prova che perde 123 byte deve produrre `SUMMARY: AddressSanitizer: 123 byte(s) leaked`.
 - ThreadSanitizer **non** è un criterio affidabile con `libglib` di sistema (non instrumentata: falsi positivi sui `GMutex`).
 
@@ -219,22 +219,32 @@ ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:abort_on_error=1 meson test -C build
 - **Lezione Windows (CI)**: i file di prova non vanno mai generati scrivendo il percorso dentro la stringa di `gst_parse_launch` — il backslash è un carattere di escape e `D:\a\_temp\...` diventa `D:a_temp...` (il `filesink` non riesce ad aprire il file). Il test usa `filesink name=out` e imposta `location` come proprietà. Riproducibile anche su Linux con `TMPDIR='/tmp/x\a\_temp' ./build/tests/test_discoverer` (la versione precedente del test falliva su `msg != NULL && ... EOS`).
 - Sanitizer: `tests/lsan.supp` sopprime le perdite di **driver GPU di terze parti** (`libcuda`, `nvidia_drv_video`, `libEGL_nvidia`, moduli scaricati) caricati dai plugin GStreamer; nessun frame di codice SyncView è coinvolto. Vale solo per il test `discoverer` con `-Db_sanitize=address`.
 
+### M2.3 — `video/video_player` (scheletro di `SyncviewVideoPlayer`)
+
+- [ ] `syncview:video_player` → **OK**. Richiede un **display GTK** e il plugin `gtk4paintablesink` (`gst-plugin-gtk4` / gst-plugins-rs): senza uno dei due esce con 77 = *skip*. Riproducibile: `env GDK_BACKEND=x11 DISPLAY=:99 ./build/tests/test_video_player` → exit 77.
+- [ ] Copre: tipo GObject `SyncviewVideoPlayer` registrato e finale; proprietà `video-index` e `paintable` coerenti con i getter; la pipeline è un `playbin3` con `gtk4paintablesink` come `video-sink`, il cui `paintable` è proprio quello esposto, **ferma in `GST_STATE_NULL`**; il paintable si assegna a un `GtkPicture` e, senza video, non ha dimensioni intrinseche (0×0: nessun frame) e il widget si misura senza crash, anche dopo aver distrutto il player; indici non validi (−1, 4, 100…) → errore `INDEX`, tutti gli indici 0..3 validi; 4 player con pipeline, paintable e nomi di elemento distinti; 25 cicli crea/distruggi; **pipeline, sink e paintable vengono finalizzati** alla distruzione del player (riferimenti deboli); elemento mancante → errore `MISSING_ELEMENT` che nomina `gtk4paintablesink` (simulato rimuovendo la factory dal registry, poi ripristinata). I `CRITICAL` di GLib/GTK sono fatali.
+- [ ] Manuale (facoltativo): nessuna finestra nuova in M2.3 — il player non è ancora collegato alla UI (M2.8). Il primo frame visibile arriva con M2.4.
+- **Perché il controllo con riferimenti deboli**: una prova di mutazione (rimuovere il rilascio di `video_sink`/`paintable` in `dispose`) **non** veniva rilevata da LeakSanitizer, perché gli oggetti restano raggiungibili dal main context di GLib; i riferimenti deboli la rilevano.
+- **Limite della CI**: il runner Linux non ha display e nessuna CI installa ancora `gtk4paintablesink`, quindi in CI questo test è *skip*: la CI verifica solo che il codice compili e linki sulle tre piattaforme. Il test vero va eseguito in locale (vedi "Cosa NON è ancora testabile").
+- `tests/lsan.supp` ora sopprime anche le perdite dei driver OpenGL/EGL (Mesa) inizializzati da GTK all'apertura del display (nessun frame di codice SyncView).
+
 ### Riepilogo atteso
 
 ```
 meson test -C build
 ```
-deve riportare **12/12 OK** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`, `discoverer`).
+deve riportare **13/13** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`, `discoverer`, `video_player`); in un ambiente senza display o senza `gtk4paintablesink` `video_player` risulta `SKIP` (e `discoverer` se mancano i plugin di prova): è normale.
 
 ---
 
 ## Cosa NON è ancora testabile
 
-- **Playback video reale** (`SyncviewVideoPlayer`, pipeline `playbin3` + `gtk4paintablesink`, seek, frame-step, `playback_rate`): da M2.3.
+- **Playback video reale** (caricamento, play/pausa, seek, frame-step, `playback_rate`, segnali): da M2.4. Oggi esiste solo lo scheletro del player, con pipeline ferma.
 - **Interfaccia oltre la finestra vuota di M0.2**: griglia 2x2, timeline, marker a schermo, dialoghi, scorciatoie, tema, zoom/pan, titlebar custom (M3–M7). Le finestre di debug "Log" e "Moduli" sono previste in M2.9 (oggi esistono solo il filtro e il sink del logger, testati da `logger_filter`).
 - **Verifica e download delle dipendenze al primo avvio**: M2.10–M2.12.
 - **Export**: M6.
 - **Sync e marker con video reali**: la logica è testata (`sync_manager`, `MarkerStore`, `marker_db`) ma non è ancora collegata a nessun player o widget (M3/M4).
+- **`video_player` in CI**: il test viene saltato (nessun display sul runner Linux, nessun `gtk4paintablesink` installato in nessuna delle tre CI). Per verificarlo anche in CI servirebbero i pacchetti del plugin (gst-plugins-rs) su ogni piattaforma e, su Linux, un display virtuale (`xvfb`): da decidere.
 - **Esecuzione su macOS e Windows in locale**: solo via CI (`gh run list --branch SyncView-C`). Il primo push di M2.2 è passato su Linux e macOS ma è fallito su Windows per un difetto del *test* (percorsi con backslash in `gst_parse_launch`, vedi M2.2), non del modulo; il fix è committato e va confermato da un nuovo run.
 
 Questo file viene esteso con una nuova sezione ad ogni milestone completata.

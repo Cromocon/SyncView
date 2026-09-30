@@ -27,6 +27,15 @@ syncview_core_lib = static_library(
   dependencies: [glib_dep, gio_dep, sqlite_dep, json_glib_dep, gstreamer_dep, gstreamer_pbutils_dep],
 )
 
+# Parte video: dipende da GTK/GDK, quindi separata da libsyncview_core (che resta senza GTK).
+syncview_video_lib = static_library(
+  'syncview_video',
+  ['video/video_player.c'],
+  include_directories: syncview_core_inc,
+  link_with: syncview_core_lib,
+  dependencies: [glib_dep, gtk_dep, gstreamer_dep, gstreamer_video_dep],
+)
+
 syncview_sources = [
   'main.c',
 ]

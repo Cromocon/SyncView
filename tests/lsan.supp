@@ -7,6 +7,12 @@ leak:libnvidia
 leak:libEGL_nvidia.so
 leak:nvidia_drv_video.so
 leak:libnvcuvid
+# Driver OpenGL/EGL (Mesa) inizializzati da GTK all'apertura del display (test con GTK).
+leak:libEGL_mesa.so
+leak:libGLX_mesa.so
+leak:libgallium
+leak:libGL.so
+leak:libEGL.so
 # Allocazioni da un modulo già scaricato (dlclose) dai plugin GStreamer/driver:
 # LSan non può più attribuirle a una libreria. Il codice di SyncView è linkato
 # staticamente nell'eseguibile di test, quindi non può mai essere "unknown module".

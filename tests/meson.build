@@ -105,3 +105,18 @@ test(
   timeout: 120,
   env: {'LSAN_OPTIONS': 'suppressions=' + meson.current_source_dir() / 'lsan.supp'},
 )
+
+# Richiede display GTK e gtk4paintablesink: senza, esce con 77 (skip).
+test_video_player = executable(
+  'test_video_player',
+  'test_video_player.c',
+  include_directories: syncview_core_inc,
+  link_with: [syncview_video_lib, syncview_core_lib],
+  dependencies: [glib_dep, gtk_dep, gstreamer_dep, gstreamer_video_dep],
+)
+test(
+  'video_player',
+  test_video_player,
+  timeout: 60,
+  env: {'LSAN_OPTIONS': 'suppressions=' + meson.current_source_dir() / 'lsan.supp'},
+)
