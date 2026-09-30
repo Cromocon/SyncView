@@ -45,6 +45,13 @@ Marker *marker_new(int64_t timestamp_ms, const char *color, const char *descript
 void marker_free(Marker *marker);
 
 /*
+ * Istante corrente in formato "YYYY-MM-DDTHH:MM:SS.mmmmmm" (locale, naive;
+ * equivalente a datetime.now().isoformat()). Usato anche per updated_at
+ * nel DB. Il chiamante libera con g_free().
+ */
+char *marker_iso8601_now(void);
+
+/*
  * MarkerStore: collezione di Marker ordinata per timestamp_ms (porting di
  * MarkerManager.markers di core/markers.py, senza persistenza: quella vive
  * in core/marker_db.c). L'ordine è mantenuto con inserimento ordinato

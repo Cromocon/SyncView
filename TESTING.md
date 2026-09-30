@@ -140,12 +140,17 @@ Un test C usa `assert()`: se passa non stampa nulla ed esce con codice 0; se una
 - [ ] `syncview:markers` → **OK**.
 - [ ] Copre: store vuoto, `get_next`/`get_previous` strettamente >/<, `get_at` con tolleranza inclusiva e pareggio di distanza (vince il successivo), `get_range` inclusivo/vuoto/invertito, e confronto contro scansioni lineari (copie di `MarkerManager`) su 4×200 marker casuali (seed fisso, con molti timestamp duplicati) × 2000 query ciascuno.
 
+### M1.9 — `core/marker_db` (apertura + schema)
+
+- [ ] `syncview:marker_db` → **OK**.
+- [ ] Copre (su file temporaneo, ispezione diretta via sqlite3): creazione delle directory mancanti, tabelle `metadata`/`markers` con colonne/tipi/default/PK attesi (`PRAGMA table_info`), i 4 indici espliciti + vincolo `UNIQUE(timestamp, video_index, created_at)`, `db_version=1` e `created_at` ISO8601, riapertura idempotente (dati e `created_at` invariati), migrazione da `db_version=0`, errore su path non apribile.
+
 ### Riepilogo atteso
 
 ```
 meson test -C build
 ```
-deve riportare **5/5 OK** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`).
+deve riportare **6/6 OK** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`).
 
 ---
 

@@ -14,13 +14,14 @@ syncview_core_sources = [
   'core/settings.c',
   'core/sync_manager.c',
   'core/markers.c',
+  'core/marker_db.c',
 ]
 
 syncview_core_lib = static_library(
   'syncview_core',
   syncview_core_sources,
   include_directories: syncview_core_inc,
-  dependencies: [glib_dep],
+  dependencies: [glib_dep, sqlite_dep],
 )
 
 syncview_sources = [

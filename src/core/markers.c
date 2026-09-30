@@ -40,6 +40,14 @@ current_timestamp_iso8601(char *buf, size_t buf_size, double *epoch_seconds_out)
     g_date_time_unref(now);
 }
 
+char *
+marker_iso8601_now(void)
+{
+    char buf[40];
+    current_timestamp_iso8601(buf, sizeof(buf), NULL);
+    return g_strdup(buf);
+}
+
 Marker *
 marker_new(int64_t timestamp_ms, const char *color, const char *description,
            const char *category, int video_index)
