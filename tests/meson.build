@@ -89,3 +89,19 @@ test_logger_filter = executable(
   dependencies: [glib_dep],
 )
 test('logger_filter', test_logger_filter)
+
+test_discoverer = executable(
+  'test_discoverer',
+  'test_discoverer.c',
+  include_directories: syncview_core_inc,
+  link_with: syncview_core_lib,
+  dependencies: [glib_dep, gio_dep, gstreamer_dep, gstreamer_pbutils_dep],
+)
+# I plugin GStreamer caricano driver GPU di terze parti che perdono memoria (vedi lsan.supp):
+# la soppressione vale solo quando i test girano con -Db_sanitize=address.
+test(
+  'discoverer',
+  test_discoverer,
+  timeout: 120,
+  env: {'LSAN_OPTIONS': 'suppressions=' + meson.current_source_dir() / 'lsan.supp'},
+)

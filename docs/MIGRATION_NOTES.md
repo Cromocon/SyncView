@@ -64,6 +64,26 @@ Il ramo `_load_video_sync`/`detect_video_fps` (legacy, `async_load=False`, timeo
 | `duration` e `codec` estratti ma inutilizzati | Si estraggono comunque (la durata del discoverer è affidabile) ma non sono prerequisiti | Nessun comportamento da replicare |
 | `width/height` codificati, niente PAR/rotazione | Stessi valori (`GstDiscovererVideoInfo`), niente correzione PAR/rotazione nel porting 1:1 | **Rischio noto**: il widget Qt poteva applicare orientazione/PAR in modo proprio; `playbin3` + `gtk4paintablesink` potrebbe comportarsi diversamente su video ruotati o con pixel non quadrati. Da verificare in M2.4 prima di dare per buono l'aspect ratio della finestra |
 
+### Esito di M2.2: confronto con `ffprobe` su file reali
+
+`core/discoverer.c` (vedi `tests/test_discoverer.c`) confrontato con `ffprobe` su file non di test:
+
+| File | ffprobe (`r_frame_rate` / `avg_frame_rate`) | SyncView (`fps`) | Dimensioni, durata, codec |
+|---|---|---|---|
+| MP4 AV1 a frame rate variabile #1 | 359/12 = 29.92 / 27.85 | **29.97** (stima) | identici (1280×720, 79909 ms, av1) |
+| MP4 AV1 a frame rate variabile #2 | 30000/1001 = 29.97 / 28.63 | **30.00** (stima) | identici (1280×720, 56127 ms, av1) |
+| MKV AV1 a frame rate costante | 30/1 | 30.00 | identici (320×240; durata 4000 ms, ffprobe `N/A`) |
+
+**Scoperta: `GstDiscoverer` non riporta un framerate per i file a frame rate variabile.** Sui due MP4 sopra le caps non contengono `framerate` e `gst_discoverer_video_info_get_framerate_*` dà `0/1` (nessun tag alternativo). Usare solo quel valore avrebbe dato `fps = 0` ("AUTO FPS") e **disabilitato `playback_rate`** per i file VFR — molto comuni (MP4 da telefono) — mentre l'originale otteneva un valore da `r_frame_rate`. Deviazione adottata (`discoverer_estimate_fps`): se il framerate dichiarato è 0/1 si stima il frame rate **nominale** dai timestamp dei primi ~150 frame (pipeline `filesrc ! parsebin` senza decodifica, al massimo 3 s; media degli intervalli entro ±25% della mediana, agganciata al valore standard più vicino entro l'1%: 23.976/24/25/29.97/30/48/50/59.94/60/120).
+
+Dettagli emersi e scelte:
+- Il flusso va letto **all'uscita del demuxer**, non dopo i parser: `av1parse` elimina timestamp/durate da gran parte dei buffer (prima versione: stima sbagliata di un fattore 4). Si usa il segnale `autoplug-continue` di `parsebin` per fermare l'autoplug sul flusso video elementare (caps video con `width`).
+- Matroska/WebM ha timestamp al millisecondo: a 29.97 fps gli intervalli alternano 33/34 ms. La sola mediana dava 30.3 fps; la media degli intervalli vicini alla mediana recupera 29.97.
+- Il valore stimato può differire di ≤0,3% da `r_frame_rate` (29.97 vs 29.92 sul primo file): è il frame rate *nominale* dei campioni, non quello "di base" di ffprobe. Effetto su `playback_rate = detected_fps/target_fps`: trascurabile.
+- La stima costa una seconda apertura del file solo per i file senza framerate dichiarato; i file a frame rate costante non la pagano.
+- `duration`: il discoverer la fornisce anche dove ffprobe dà `N/A` (MKV); come nell'originale nessun codice ne dipende.
+- Il timeout di `gst_discoverer_new` accetta solo 1–3600 s (fuori range: `CRITICAL` di GObject): `discoverer_probe_file` limita il valore e i test rendono fatali i `CRITICAL`.
+
 ### Messaggi di log da mantenere (testo originale, `Feed-N` = `video_index + 1`)
 
 `Caricamento asincrono avviato` · `Percorso video salvato` · `Info video ricevute` (`FPS: {:.2f}, Size: WxH`) · `Video caricato (async)` · errori `Errore ffprobe per <nome>` → nel porting `Errore probing <nome>` (il tool non è più ffprobe) · `Errore caricamento asincrono Feed-N`.

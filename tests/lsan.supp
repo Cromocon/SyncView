@@ -1,0 +1,13 @@
+# Perdite di terze parti emesse dai driver grafici/GPU che i plugin GStreamer
+# (nvcodec, va, gl) caricano quando il registry viene interrogato. Non sono
+# codice di SyncView: nessuno stack di quelle segnalate contiene frame nostri.
+# Usato da LeakSanitizer solo quando i test girano con -Db_sanitize=address.
+leak:libcuda.so
+leak:libnvidia
+leak:libEGL_nvidia.so
+leak:nvidia_drv_video.so
+leak:libnvcuvid
+# Allocazioni da un modulo già scaricato (dlclose) dai plugin GStreamer/driver:
+# LSan non può più attribuirle a una libreria. Il codice di SyncView è linkato
+# staticamente nell'eseguibile di test, quindi non può mai essere "unknown module".
+leak:unknown module

@@ -191,17 +191,24 @@ meson setup build-asan -Db_sanitize=address -Db_lundef=false --buildtype=debug
 ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:abort_on_error=1 meson test -C build-asan
 ```
 
-- [ ] 11/11 **OK**, zero errori ASan e **zero leak** (LeakSanitizer).
-- [ ] Stessa passata con `-Db_sanitize=address,undefined` → 11/11 OK, zero `runtime error` UBSan.
+- [ ] 12/12 **OK**, zero errori ASan e **zero leak** nel codice SyncView (LeakSanitizer; per `discoverer` con le soppressioni di terze parti in `tests/lsan.supp`).
+- [ ] Stessa passata con `-Db_sanitize=address,undefined` → 12/12 OK, zero `runtime error` UBSan.
 - Prima di fidarsi di "zero leak" verificare che LeakSanitizer sia attivo nell'ambiente (alcuni sandbox/container lo disabilitano in silenzio): un programma di prova che perde 123 byte deve produrre `SUMMARY: AddressSanitizer: 123 byte(s) leaked`.
 - ThreadSanitizer **non** è un criterio affidabile con `libglib` di sistema (non instrumentata: falsi positivi sui `GMutex`).
+
+### M2.2 — `core/discoverer`
+
+- [ ] `syncview:discoverer` → **OK** (termina con 77 = *skip* se mancano i plugin `videotestsrc`/`vp8enc`/`webmmux`; in CI sono nei pacchetti good).
+- [ ] Copre (file generati a runtime con pipeline GStreamer): dimensioni, fps (25 e 30000/1001), durata, codec `vp8`; solo audio → valori di default; file assente/directory/`NULL` → `FILE_NOT_FOUND` ("File non trovato"), anche con fallback; file corrotto e vuoto → errore bloccante `CORRUPT`; file troncato; classificazione errori bloccanti/non bloccanti; formattazione dei plugin mancanti (installer details → "H.265 decoder, AAC decoder"); timeout fuori range limitati senza `CRITICAL` (fatali nel test); fallback su timeout; API asincrona (successo, errore propagato dal thread, annullamento → `G_IO_ERROR_CANCELLED`, due probing concorrenti indipendenti); stima fps dai timestamp (funzione pura: standard, 30 vs 29.97, non standard, outlier, intervalli ≤0, pochi dati; e da file reali generati a 25 e 29.97).
+- [ ] Sanity check manuale contro `ffprobe`/`gst-discoverer-1.0` su file veri: vedi tabella in `docs/MIGRATION_NOTES.md` ("Esito di M2.2").
+- Sanitizer: `tests/lsan.supp` sopprime le perdite di **driver GPU di terze parti** (`libcuda`, `nvidia_drv_video`, `libEGL_nvidia`, moduli scaricati) caricati dai plugin GStreamer; nessun frame di codice SyncView è coinvolto. Vale solo per il test `discoverer` con `-Db_sanitize=address`.
 
 ### Riepilogo atteso
 
 ```
 meson test -C build
 ```
-deve riportare **11/11 OK** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`).
+deve riportare **12/12 OK** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`, `discoverer`).
 
 ---
 
