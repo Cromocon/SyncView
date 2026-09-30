@@ -4,6 +4,7 @@
 #include <gdk/gdk.h>
 #include <glib-object.h>
 #include <gst/gst.h>
+#include <gtk/gtk.h>
 
 G_BEGIN_DECLS
 
@@ -19,9 +20,12 @@ G_BEGIN_DECLS
  * paintable, segnali load-state-changed/error e log del decoder in uso.
  * M2.5: play()/pause()/stop()/toggle, stato di riproduzione e segnale
  * playback-state-changed, fine del video (EOS).
- * Posizione/durata/seek arrivano in M2.6+.
+ * M2.6: posizione e durata (segnali position-changed/duration-changed, getter in ms),
+ * aggiornate dal frame clock di GTK solo durante la riproduzione (O5).
+ * Seek/frame-step arrivano in M2.7.
  *
  * Segnali (emessi nel main context):
+ *   "position-changed" (gint64 ms), "duration-changed" (gint64 ms): vedi la sezione Posizione e durata.
  *   "playback-state-changed" (guint state): SyncviewPlaybackState, solo quando cambia.
  *   "load-state-changed" (gboolean loaded): TRUE quando un load() è pronto;
  *                        FALSE se un video caricato viene perso per un errore.
@@ -120,6 +124,32 @@ gboolean syncview_video_player_toggle_play_pause(SyncviewVideoPlayer *self, GErr
 
 SyncviewPlaybackState syncview_video_player_get_playback_state(SyncviewVideoPlayer *self);
 
+/*
+ * Posizione e durata (M2.6). Tutto in MILLISECONDI (GStreamer lavora in nanosecondi: la
+ * conversione è qui, una volta sola).
+ *
+ * Segnali, sul modello di QMediaPlayer::positionChanged/durationChanged dell'originale:
+ *  - "duration-changed" (ms): quando la durata diventa nota o cambia; 0 quando il video viene
+ *    scartato (nuovo load, errore). Al load arriva PRIMA di "load-state-changed(TRUE)".
+ *  - "position-changed" (ms): solo quando il valore cambia; durante la riproduzione a ogni tick
+ *    (al massimo ~50 volte al secondo), più una volta a ogni pause, stop, fine video, fine di un
+ *    seek e caricamento (posizione 0). Da fermo/in pausa NON arrivano aggiornamenti periodici.
+ *
+ * Il polling segue il frame clock di GTK (O5): con syncview_video_player_set_tick_widget() si
+ * indica il widget che mostra il video (il GtkPicture) e un tick callback è attivo SOLO in
+ * PLAYING; senza widget (o se viene distrutto) si usa un timer di ripiego, sempre solo in PLAYING.
+ */
+void syncview_video_player_set_tick_widget(SyncviewVideoPlayer *self, GtkWidget *widget);
+
+/* Posizione corrente in ms (0 se nessun video caricato). Interroga la pipeline: utilizzabile anche da fermo. */
+gint64 syncview_video_player_get_position(SyncviewVideoPlayer *self);
+
+/* Durata in ms (0 se nessun video caricato o durata sconosciuta). */
+gint64 syncview_video_player_get_duration(SyncviewVideoPlayer *self);
+
+/* TRUE se il polling della posizione è attivo: lo è solo in PLAYING. Per diagnostica e test (O5: da fermo nessun wakeup). */
+gboolean syncview_video_player_is_ticking(SyncviewVideoPlayer *self);
+
 /* TRUE dopo l'ASYNC_DONE di un load() riuscito, finché non c'è un errore o un nuovo load(). */
 gboolean syncview_video_player_is_loaded(SyncviewVideoPlayer *self);
 
@@ -135,6 +165,18 @@ const char *syncview_video_player_get_path(SyncviewVideoPlayer *self);
  * o il file non ha un flusso video. Il chiamante libera con g_free().
  */
 char *syncview_video_player_get_decoder_description(SyncviewVideoPlayer *self);
+
+/*
+ * Smontaggi di pipeline rimandati e ancora in corso, in tutto il processo. Scendere a NULL mentre la pipeline sta ancora
+ * salendo a PAUSED può bloccare il thread principale (il sink ha bisogno del main loop mentre set_state() aspetta i thread
+ * di streaming): in quel caso dispose(), la sostituzione di un video con load() e la gestione degli errori ATTENDONO,
+ * lasciando girare il main loop, che la transizione si assesti, poi scendono a NULL (sempre sul thread principale: il
+ * sink è in Rust e non tollera altri thread). Di norma la pipeline è già assestata e tutto avviene subito. Conseguenze:
+ *  - se lo smontaggio è rimandato, dopo g_object_unref() del player pipeline, sink e paintable vivono ancora per qualche
+ *    istante: i gestori collegati al paintable con dati propri vanno scollegati PRIMA di distruggere quei dati;
+ *  - prima di uscire dal programma conviene far girare il main loop finché questo contatore non torna a 0.
+ */
+guint syncview_video_player_pending_teardowns(void);
 
 /* La pipeline `playbin3` sottostante (transfer none). Per uso interno dei moduli video e dei test. */
 GstElement *syncview_video_player_get_pipeline(SyncviewVideoPlayer *self);

@@ -276,6 +276,25 @@ Stesso eseguibile di M2.3/M2.4: `syncview:video_player` → **OK** (skip senza d
 - **Nota di design verificata dai test**: `stop()` **non** scarica il video (deviazione dal piano, che diceva `GST_STATE_NULL`): vedi `docs/MIGRATION_NOTES.md`.
 - **Prova di mutazione**: 19 regressioni introdotte di proposito (play/pause/stop che non cambiano la pipeline o lo stato, `stop` che scarica il video, EOS ignorato, riavvio da 0 a fine video, segnali doppi, play ammesso durante il caricamento, log mancanti, toggle invertito, seek senza flush…): **tutte rilevate**. Due sfuggivano inizialmente e hanno richiesto casi in più: la pipeline deve scendere in `PAUSED` all'EOS e `pause()` a fine video deve lasciare lo stato `STOPPED`.
 
+### M2.6 — posizione, durata e polling col frame clock
+
+Stesso eseguibile: `syncview:video_player` → **OK** (ora ~30 s; alcuni test aprono una piccola finestra GTK per avere un frame clock reale, quindi servono un display e la possibilità di mapparla).
+
+- [ ] **Durata al caricamento**: `duration-changed` arriva **prima** di `load-state-changed(TRUE)` (ordine «DL»); `get_duration()` coincide con quella misurata indipendentemente da `core/discoverer` (±60 ms); la posizione iniziale è 0 e non genera segnali; prima del load e durante il caricamento `get_duration()`/`get_position()` valgono 0; da fermo dopo il load nessun aggiornamento periodico.
+- [ ] **Posizione in riproduzione**, sia col **timer di ripiego** (nessun widget) sia col **frame clock** (finestra mappata): almeno 8 e al massimo 60 aggiornamenti in 800 ms; valori in **millisecondi**, compresi tra 0 e la durata, **strettamente crescenti** (mai duplicati), distanziati di almeno ~15 ms (throttle a ~50 Hz); l'ultimo coincide con `get_position()` entro 120 ms; `is_ticking()` è vero solo in `PLAYING`.
+- [ ] **Da fermo nessun wakeup (O5)**: dopo `pause()` il polling è spento; un ultimo aggiornamento con la posizione finale, al massimo 3 aggiornamenti di assestamento (l'`ASYNC_DONE` ripubblica la posizione definitiva), poi **silenzio assoluto** per 500 ms; un secondo `pause()` non emette nulla.
+- [ ] **`stop()` e fine video**: `stop()` pubblica la posizione 0 a seek concluso, una volta, poi silenzio; a fine video la posizione finale ≈ durata (≥ durata − 120 ms), polling spento; `play()` a fine video riparte da ~0 e riprende a emettere; la durata non cambia mai durante play/pause/stop.
+- [ ] **Nuovo `load()` ed errore**: il video scartato azzera subito posizione e durata (ordine «PD», sincrono col `load()`), poi durata del nuovo video e «caricato» (ordine «PDDL»); un errore con video caricato a posizione > 0 azzera posizione e durata prima del segnale `error`; `is_ticking()` falso in tutti questi casi.
+- [ ] **Il polling segue il frame clock di GTK, non un timer**: staccando il widget dalla finestra (niente frame clock) gli aggiornamenti **si fermano** (≤ 2 in 500 ms) pur restando il callback registrato e lo stato `PLAYING`; riagganciandolo **riprendono**. Un timer non si comporterebbe così.
+- [ ] **Widget del tick**: impostarlo o toglierlo **durante la riproduzione** non interrompe né duplica il polling; se il widget viene **distrutto in riproduzione** il polling prosegue col timer di ripiego (≥ 5 aggiornamenti in 400 ms) e si ferma normalmente alla pausa; player distrutto in `PLAYING` con ticker attivo (con e senza finestra) senza callback residui né `CRITICAL`.
+- [ ] **Nessun cambio di stato ridondante**: `pause()` su una pipeline già in `PAUSED` (e `play()` in `PLAYING`) non invia di nuovo `set_state` — lo rendeva visibile un test, perché un secondo `pause()` spostava la posizione di 1 ms.
+- **Verifica su file reale** (manuale, in sviluppo): un MP4 1280×720 in riproduzione emette la posizione ogni ~33 ms (067, 100, 134, 167 ms…) con `ticking=1`, un ultimo valore alla pausa (401) e poi nessun aggiornamento per oltre un secondo con `ticking=0`.
+- [ ] **Distruzione durante il caricamento (teardown differito)**: `dispose` con la pipeline ancora in salita verso `PAUSED` non si blocca mai (40/40 esecuzioni del test mirato, 8 suite complete consecutive; prima ~1 volta su 12). Il `set_state(NULL)` resta sul main thread perché `gtk4paintablesink` (Rust, `ThreadGuard`) va in panic se toccato da un altro thread; se la pipeline ha un cambio di stato in corso si attende, col main loop attivo, che si assesti (tetto 10 s, poi forzato). `syncview_video_player_pending_teardowns()` deve tornare a 0 a fine test (asserito in coda al test).
+- **Mutation testing M2.6** (script ad hoc, non in repo): ogni mutazione del player (bus watch non rimosso, ASYNC_DONE senza guardia, errore senza reset, throttle assente, polling anche in pausa, ecc.) deve far fallire almeno un test. Unica equivalente: «`pause()` non pubblica la posizione finale», coperta comunque dall'`ASYNC_DONE`. Il throttle si vede solo col test a finestra.
+- **Sanitizer**: la suite completa passa con `-Db_sanitize=address` (con `tests/lsan.supp`: driver GPU/EGL/Mesa e proxy Wayland di GTK, nessuno stack nostro) e con `-Db_sanitize=undefined`.
+- **Diagnostica**: `SYNCVIEW_TEST_TRACE=1` stampa ogni test all'avvio; `SYNCVIEW_TEST_ONLY=<sottostringa>` esegue solo i test il cui nome la contiene (per escludere le finestre: evitare `frame_clock`, `ticker`, `tick_widget`, `ticking`).
+- **Nota sul test del frame clock**: una finestra *nascosta* (`set_visible(FALSE)`) NON ferma i tick in GTK4 — il frame clock continua finché il widget è in una finestra; per questo il test stacca il widget dalla finestra.
+
 ### Riepilogo atteso
 
 ```
@@ -287,7 +306,7 @@ deve riportare **14/14** allo stato attuale (`dummy`, `time_format`, `settings`,
 
 ## Cosa NON è ancora testabile
 
-- **Posizione/durata, seek, frame-step, `playback_rate`, muto**: da M2.6 in poi. Oggi il player carica, riproduce, mette in pausa e ferma (M2.4–M2.5), ma non espone posizione né durata.
+- **Seek, frame-step, `playback_rate`, muto**: da M2.7 in poi. Oggi il player carica, riproduce, mette in pausa e ferma, e riporta posizione e durata (M2.4–M2.6), ma non si può ancora spostare a un punto arbitrario.
 - **Interfaccia oltre la finestra vuota di M0.2**: griglia 2x2, timeline, marker a schermo, dialoghi, scorciatoie, tema, zoom/pan, titlebar custom (M3–M7). Le finestre di debug "Log" e "Moduli" sono previste in M2.9 (oggi esistono solo il filtro e il sink del logger, testati da `logger_filter`).
 - **Download/installazione delle dipendenze e dialog del primo avvio**: M2.11–M2.12. La sola *verifica* (M2.10) c'è: `syncview --check-deps`.
 - **Export**: M6.

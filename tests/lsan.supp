@@ -17,3 +17,6 @@ leak:libEGL.so
 # LSan non può più attribuirle a una libreria. Il codice di SyncView è linkato
 # staticamente nell'eseguibile di test, quindi non può mai essere "unknown module".
 leak:unknown module
+# Proxy Wayland creati da GTK quando realizza una finestra (gtk_widget_realize):
+# restano allocati fino alla chiusura del display, che i test non eseguono.
+leak:libwayland-client.so

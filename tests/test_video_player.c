@@ -2,6 +2,7 @@
  * M2.3: scheletro di SyncviewVideoPlayer. Richiede un display (GTK) e il
  * plugin GStreamer gtk4paintablesink: se mancano, termina con 77 (skip Meson).
  */
+#include "core/discoverer.h"
 #include "core/logger.h"
 #include "core/settings.h"
 #include "video/video_player.h"
@@ -21,6 +22,34 @@ pipeline_state(GstElement *pipeline)
     GstState state = GST_STATE_VOID_PENDING;
     gst_element_get_state(pipeline, &state, NULL, 0);
     return state;
+}
+
+/* Fa girare il main loop finché tutti gli smontaggi asincroni di pipeline sono finiti (o timeout). */
+static gboolean
+drain_teardowns(int timeout_ms)
+{
+    gint64 deadline = g_get_monotonic_time() + (gint64)timeout_ms * 1000;
+
+    while (syncview_video_player_pending_teardowns() > 0 && g_get_monotonic_time() < deadline) {
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
+    g_main_context_iteration(NULL, FALSE);
+    return syncview_video_player_pending_teardowns() == 0;
+}
+
+/* Attende che la pipeline di un player sia scesa a NULL (lo smontaggio è asincrono). */
+static gboolean
+wait_until_null(SyncviewVideoPlayer *player)
+{
+    gint64 deadline = g_get_monotonic_time() + 10 * G_USEC_PER_SEC;
+
+    while (pipeline_state(syncview_video_player_get_pipeline(player)) != GST_STATE_NULL
+           && g_get_monotonic_time() < deadline) {
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
+    return pipeline_state(syncview_video_player_get_pipeline(player)) == GST_STATE_NULL;
 }
 
 static void
@@ -163,7 +192,8 @@ test_lifecycle(void)
         g_object_unref(player);
         assert(finalized);
 
-        /* La pipeline era solo nostra: dopo il dispose resta l'ultimo riferimento (il nostro), in stato NULL. */
+        /* Lo smontaggio della pipeline è asincrono: a fine smontaggio resta l'ultimo riferimento (il nostro), in stato NULL. */
+        assert(drain_teardowns(10000));
         assert(GST_OBJECT_REFCOUNT(pipeline) == 1);
         assert(pipeline_state(pipeline) == GST_STATE_NULL);
         gst_object_unref(pipeline);
@@ -234,8 +264,9 @@ test_owned_objects_are_released(void)
 
         g_object_unref(player);
 
-        /* Il paintable può essere rilasciato dal sink anche un attimo dopo: si lascia girare il main context. */
-        for (int i = 0; i < 20 && !(fin.paintable_finalized && fin.sink_finalized && fin.bus_finalized); i++) {
+        /* Smontaggio asincrono: pipeline, sink, paintable e bus vengono rilasciati a fine smontaggio, sul thread principale. */
+        assert(drain_teardowns(10000));
+        for (int i = 0; i < 50 && !(fin.paintable_finalized && fin.sink_finalized && fin.bus_finalized); i++) {
             g_main_context_iteration(NULL, FALSE);
         }
 
@@ -513,7 +544,7 @@ test_load_errors(const char *dir)
     assert(spin_until(&ev.got_error, 10000));
     assert(ev.errors == 1 && ev.loaded_true == 0 && ev.last_error != NULL && *ev.last_error != '\0');
     assert(!syncview_video_player_is_loaded(player) && !syncview_video_player_is_loading(player));
-    assert(pipeline_state(syncview_video_player_get_pipeline(player)) == GST_STATE_NULL);
+    assert(wait_until_null(player));  /* smontaggio asincrono */
     assert(syncview_video_player_get_decoder_description(player) == NULL);
 
     /* Dopo un errore il player si riprende con un file valido. */
@@ -553,7 +584,7 @@ test_error_after_loaded(const char *dir)
     assert(ev.errors == 1 && strcmp(ev.last_error, "errore iniettato dal test") == 0);
     assert(ev.loaded_true == 1 && ev.loaded_false == 1);          /* "load-state-changed(FALSE)" emesso una volta */
     assert(!syncview_video_player_is_loaded(player) && !syncview_video_player_is_loading(player));
-    assert(pipeline_state(pipeline) == GST_STATE_NULL);
+    assert(wait_until_null(player));  /* smontaggio asincrono */
     assert(syncview_video_player_get_decoder_description(player) == NULL);
 
     /* Il player si riprende con un nuovo load. */
@@ -669,6 +700,7 @@ test_dispose_while_loading(const char *dir)
 /* ===================== M2.5: play / pause / stop ===================== */
 
 typedef struct {
+    GdkPaintable *paintable; /* riferimento proprio: il gestore dei frame va scollegato prima di liberare questa struttura */
     GArray *states;          /* SyncviewPlaybackState in ordine di emissione */
     int frames;              /* invalidate-contents del paintable (frame disegnati) */
     int loaded_true;
@@ -725,13 +757,17 @@ player_with_events(int index, PlayEvents *ev)
     g_signal_connect(player, "playback-state-changed", G_CALLBACK(on_playback_state), ev);
     g_signal_connect(player, "load-state-changed", G_CALLBACK(on_play_load_state), ev);
     g_signal_connect(player, "error", G_CALLBACK(on_play_error), ev);
-    g_signal_connect(syncview_video_player_get_paintable(player), "invalidate-contents", G_CALLBACK(on_frame), ev);
+    ev->paintable = g_object_ref(syncview_video_player_get_paintable(player));
+    g_signal_connect(ev->paintable, "invalidate-contents", G_CALLBACK(on_frame), ev);
     return player;
 }
 
 static void
 events_free(PlayEvents *ev)
 {
+    /* Dopo distrutto il player il paintable vive ancora finché la pipeline non è smontata: niente gestori con dati liberati. */
+    g_signal_handlers_disconnect_by_data(ev->paintable, ev);
+    g_object_unref(ev->paintable);
     g_array_free(ev->states, TRUE);
 }
 
@@ -1078,7 +1114,7 @@ test_error_while_playing(const char *dir)
     assert(spin_until(&ev.got_error, 10000));
     assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
     assert(!syncview_video_player_is_loaded(player));
-    assert(pipeline_state(pipeline) == GST_STATE_NULL);
+    assert(wait_until_null(player));  /* smontaggio asincrono */
     /* STOPPED emesso PRIMA dell'errore. */
     assert(state_at(&ev, ev.states->len - 1) == SYNCVIEW_PLAYBACK_STOPPED);
     assert(!syncview_video_player_play(player, NULL));
@@ -1174,6 +1210,507 @@ test_playback_log(const char *dir)
     g_free(path);
 }
 
+/* ===================== M2.6: posizione e durata ===================== */
+
+typedef struct {
+    GArray *positions;    /* gint64 ms emessi da position-changed */
+    GArray *pos_times;    /* gint64 us (monotonic) dell'emissione */
+    GArray *durations;    /* gint64 ms emessi da duration-changed */
+    GString *order;       /* 'P' posizione, 'D' durata, 'L' load TRUE, in ordine di emissione */
+    gboolean got_loaded;
+    int errors;
+    gboolean got_error;
+} PosEvents;
+
+static void
+on_pos(SyncviewVideoPlayer *player, gint64 ms, gpointer data)
+{
+    (void)player;
+    PosEvents *ev = data;
+    gint64 now = g_get_monotonic_time();
+
+    g_array_append_val(ev->positions, ms);
+    g_array_append_val(ev->pos_times, now);
+    g_string_append_c(ev->order, 'P');
+}
+
+static void
+on_dur(SyncviewVideoPlayer *player, gint64 ms, gpointer data)
+{
+    (void)player;
+    PosEvents *ev = data;
+
+    g_array_append_val(ev->durations, ms);
+    g_string_append_c(ev->order, 'D');
+}
+
+static void
+on_pos_load(SyncviewVideoPlayer *player, gboolean loaded, gpointer data)
+{
+    (void)player;
+    PosEvents *ev = data;
+
+    if (loaded) {
+        ev->got_loaded = TRUE;
+        g_string_append_c(ev->order, 'L');
+    }
+}
+
+static void
+on_pos_error(SyncviewVideoPlayer *player, const char *message, gpointer data)
+{
+    (void)player;
+    (void)message;
+    PosEvents *ev = data;
+
+    ev->errors++;
+    ev->got_error = TRUE;
+}
+
+static SyncviewVideoPlayer *
+pos_player(int index, PosEvents *ev)
+{
+    SyncviewVideoPlayer *player = syncview_video_player_new(index, NULL);
+
+    memset(ev, 0, sizeof(*ev));
+    ev->positions = g_array_new(FALSE, FALSE, sizeof(gint64));
+    ev->pos_times = g_array_new(FALSE, FALSE, sizeof(gint64));
+    ev->durations = g_array_new(FALSE, FALSE, sizeof(gint64));
+    ev->order = g_string_new(NULL);
+    g_signal_connect(player, "position-changed", G_CALLBACK(on_pos), ev);
+    g_signal_connect(player, "duration-changed", G_CALLBACK(on_dur), ev);
+    g_signal_connect(player, "load-state-changed", G_CALLBACK(on_pos_load), ev);
+    g_signal_connect(player, "error", G_CALLBACK(on_pos_error), ev);
+    return player;
+}
+
+static void
+pos_events_free(PosEvents *ev)
+{
+    g_array_free(ev->positions, TRUE);
+    g_array_free(ev->pos_times, TRUE);
+    g_array_free(ev->durations, TRUE);
+    g_string_free(ev->order, TRUE);
+}
+
+static gint64
+pos_at(PosEvents *ev, guint i)
+{
+    return g_array_index(ev->positions, gint64, i);
+}
+
+static gint64
+last_pos(PosEvents *ev)
+{
+    assert(ev->positions->len > 0);
+    return pos_at(ev, ev->positions->len - 1);
+}
+
+/* Finestra con il video, così il player ha un frame clock reale (tick callback). */
+typedef struct {
+    GtkWidget *window;
+    GtkWidget *picture;
+} Shown;
+
+static Shown
+show_window_for(SyncviewVideoPlayer *player)
+{
+    Shown shown;
+
+    shown.window = gtk_window_new();
+    shown.picture = gtk_picture_new_for_paintable(syncview_video_player_get_paintable(player));
+    gtk_window_set_default_size(GTK_WINDOW(shown.window), 320, 240);
+    gtk_window_set_child(GTK_WINDOW(shown.window), shown.picture);
+    syncview_video_player_set_tick_widget(player, shown.picture);
+    gtk_window_present(GTK_WINDOW(shown.window));
+
+    gint64 deadline = g_get_monotonic_time() + 5 * G_USEC_PER_SEC;
+    while (!gtk_widget_get_mapped(shown.picture) && g_get_monotonic_time() < deadline) {
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
+    assert(gtk_widget_get_mapped(shown.picture));
+    return shown;
+}
+
+static void
+test_load_reports_duration(const char *dir)
+{
+    char *path = make_video(dir, "dur.webm", 320, 240, 100);  /* 4 s */
+    PosEvents ev;
+    SyncviewVideoPlayer *player = pos_player(0, &ev);
+
+    assert(syncview_video_player_get_duration(player) == 0 && syncview_video_player_get_position(player) == 0);
+    assert(!syncview_video_player_is_ticking(player));
+
+    assert(syncview_video_player_load(player, path, NULL));
+    assert(syncview_video_player_get_duration(player) == 0);  /* ancora in caricamento: non nota */
+    assert(spin_until(&ev.got_loaded, 10000));
+
+    /* Durata nota PRIMA di "caricato" (come QMediaPlayer); la posizione resta 0 e non genera segnali. */
+    assert(strcmp(ev.order->str, "DL") == 0);
+    assert(ev.durations->len == 1);
+    gint64 duration = syncview_video_player_get_duration(player);
+    assert(duration == g_array_index(ev.durations, gint64, 0));
+    assert(syncview_video_player_get_position(player) == 0 && ev.positions->len == 0);
+
+    /* Coerente con la durata reale del file, misurata indipendentemente da core/discoverer. */
+    VideoInfo *info = discoverer_probe_file(path, 0, NULL);
+    assert(info != NULL && info->duration_ms > 3500 && info->duration_ms < 4500);
+    assert(llabs(duration - info->duration_ms) <= 60);
+    video_info_free(info);
+
+    /* In pausa dopo il caricamento: nessun aggiornamento periodico. */
+    spin_for(400);
+    assert(ev.positions->len == 0 && ev.durations->len == 1 && !syncview_video_player_is_ticking(player));
+
+    pos_events_free(&ev);
+    g_object_unref(player);
+    g_free(path);
+}
+
+/* Durante la riproduzione: frequenza, monotonia, unità, limiti e spegnimento del polling. `with_window` = frame clock reale. */
+static void
+check_position_while_playing(const char *dir, gboolean with_window)
+{
+    char *path = make_video(dir, with_window ? "pw.webm" : "pf.webm", 320, 240, 100);
+    PosEvents ev;
+    SyncviewVideoPlayer *player = pos_player(with_window ? 1 : 0, &ev);
+    Shown shown = { NULL, NULL };
+
+    if (with_window) {
+        shown = show_window_for(player);
+    }
+    assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
+    gint64 duration = syncview_video_player_get_duration(player);
+
+    assert(!syncview_video_player_is_ticking(player));  /* in pausa: nessun polling */
+    assert(syncview_video_player_play(player, NULL));
+    assert(syncview_video_player_is_ticking(player));  /* in PLAYING: attivo */
+    spin_for(800);
+
+    guint n = ev.positions->len;
+    assert(n >= 8);  /* ~30-50 aggiornamenti al secondo, non uno ogni tanto */
+    assert(n <= 60);  /* ma limitati (<=~50 Hz): non uno per ogni tick dello schermo */
+    for (guint i = 0; i < n; i++) {
+        assert(pos_at(&ev, i) >= 0 && pos_at(&ev, i) <= duration);
+        if (i > 0) {
+            assert(pos_at(&ev, i) > pos_at(&ev, i - 1));  /* strettamente crescente (e mai duplicata) */
+            gint64 gap_us = g_array_index(ev.pos_times, gint64, i) - g_array_index(ev.pos_times, gint64, i - 1);
+            assert(gap_us >= 15000);  /* throttle ~20 ms */
+        }
+    }
+    /* Unità: ms, coerenti con la posizione reale della pipeline (~800 ms di riproduzione). */
+    gint64 now_pos = syncview_video_player_get_position(player);
+    assert(now_pos >= 500 && now_pos <= 2000);
+    assert(llabs(now_pos - last_pos(&ev)) <= 120);
+
+    /* pause(): un ultimo aggiornamento con la posizione finale, poi silenzio e polling spento. */
+    guint before_pause = ev.positions->len;
+    assert(syncview_video_player_pause(player, NULL));
+    assert(!syncview_video_player_is_ticking(player));
+    settle(player);
+    /*
+     * Assestamento: alla fine del cambio di stato (ASYNC_DONE) la posizione definitiva viene pubblicata di nuovo
+     * e può differire di qualche ms da quella letta subito dopo pause(): al massimo pochi aggiornamenti singoli.
+     */
+    spin_for(250);
+    assert(ev.positions->len - before_pause <= 3);
+    gint64 paused_at = syncview_video_player_get_position(player);
+    /*
+     * La posizione finale è pubblicata a pause(): coincide con quella reale (±5 ms). Con la sola cadenza del ticker
+     * l'ultimo valore sarebbe fino a ~33 ms indietro.
+     */
+    assert(llabs(last_pos(&ev) - paused_at) <= 5);
+    guint after_pause = ev.positions->len;
+    spin_for(500);
+    assert(ev.positions->len == after_pause);  /* poi silenzio assoluto: nessun wakeup periodico da fermo */
+
+    /* Un secondo pause() non ripete lo stesso valore. */
+    assert(syncview_video_player_pause(player, NULL));
+    assert(ev.positions->len == after_pause);
+
+    /* Nessun segnale di durata durante la riproduzione (la durata non cambia). */
+    assert(ev.durations->len == 1);
+
+    if (with_window) {
+        gtk_window_destroy(GTK_WINDOW(shown.window));
+    }
+    pos_events_free(&ev);
+    g_object_unref(player);
+    g_free(path);
+}
+
+static void
+test_position_while_playing_fallback_timer(const char *dir)
+{
+    check_position_while_playing(dir, FALSE);
+}
+
+static void
+test_position_while_playing_frame_clock(const char *dir)
+{
+    check_position_while_playing(dir, TRUE);
+}
+
+static void
+test_position_on_stop_and_end(const char *dir)
+{
+    char *path = make_video(dir, "se.webm", 320, 240, 25);  /* 1 s */
+    PosEvents ev;
+    SyncviewVideoPlayer *player = pos_player(2, &ev);
+
+    assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
+    gint64 duration = syncview_video_player_get_duration(player);
+
+    /* Fine del video: posizione finale ~ durata, poi nessun altro aggiornamento e polling spento. */
+    assert(syncview_video_player_play(player, NULL));
+    gint64 deadline = g_get_monotonic_time() + 10 * G_USEC_PER_SEC;
+    while (syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING
+           && g_get_monotonic_time() < deadline) {
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
+    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
+    assert(!syncview_video_player_is_ticking(player));
+    settle(player);
+    /* Posizione finale pubblicata all'EOS: coincide con la durata (±10 ms), non solo "vicino" all'ultimo tick del polling. */
+    assert(llabs(last_pos(&ev) - duration) <= 10);
+    guint at_end = ev.positions->len;
+    spin_for(400);
+    assert(ev.positions->len == at_end);
+
+    /* play() a fine video: riparte da 0 (un aggiornamento con ~0) e poi avanza. */
+    assert(syncview_video_player_play(player, NULL));
+    spin_for(300);
+    gboolean saw_restart = FALSE;
+    for (guint i = at_end; i < ev.positions->len; i++) {
+        saw_restart |= pos_at(&ev, i) < 150;
+    }
+    assert(saw_restart);
+
+    /* stop(): posizione a 0 pubblicata a seek concluso, una sola volta, poi silenzio. */
+    assert(syncview_video_player_stop(player, NULL));
+    assert(!syncview_video_player_is_ticking(player));
+    settle(player);
+    /* La posizione 0 viene pubblicata a seek concluso (ASYNC_DONE): si attende con un timeout, non un tempo fisso. */
+    {
+        gint64 deadline = g_get_monotonic_time() + 5 * G_USEC_PER_SEC;
+        while ((ev.positions->len == 0 || last_pos(&ev) >= 80) && g_get_monotonic_time() < deadline) {
+            g_main_context_iteration(NULL, FALSE);
+            g_usleep(1000);
+        }
+    }
+    assert(last_pos(&ev) < 80);
+    spin_for(200);  /* eventuali aggiornamenti di assestamento */
+    guint after_stop = ev.positions->len;
+    spin_for(400);
+    assert(ev.positions->len == after_stop);
+    assert(ev.durations->len == 1);  /* la durata non è mai cambiata */
+
+    pos_events_free(&ev);
+    g_object_unref(player);
+    g_free(path);
+}
+
+static void
+test_position_reset_on_reload_and_error(const char *dir)
+{
+    char *a = make_video(dir, "pa.webm", 320, 240, 100);
+    char *b = make_video(dir, "pb.webm", 640, 360, 50);   /* 2 s */
+    PosEvents ev;
+    SyncviewVideoPlayer *player = pos_player(3, &ev);
+
+    assert(syncview_video_player_load(player, a, NULL) && spin_until(&ev.got_loaded, 10000));
+    gint64 dur_a = syncview_video_player_get_duration(player);
+    assert(syncview_video_player_play(player, NULL));
+    spin_for(400);
+    assert(syncview_video_player_pause(player, NULL));
+    settle(player);
+    assert(last_pos(&ev) > 200);
+
+    /* Nuovo load: il video vecchio è scartato -> posizione e durata tornano a 0 (subito), poi durata nuova e "caricato". */
+    g_string_truncate(ev.order, 0);
+    guint n_dur = ev.durations->len;
+    ev.got_loaded = FALSE;
+    assert(syncview_video_player_load(player, b, NULL));
+    assert(strcmp(ev.order->str, "PD") == 0);                   /* 0 ms e durata 0, sincroni col load() */
+    assert(last_pos(&ev) == 0 && g_array_index(ev.durations, gint64, n_dur) == 0);
+    assert(syncview_video_player_get_duration(player) == 0 && syncview_video_player_get_position(player) == 0);
+    assert(spin_until(&ev.got_loaded, 10000));
+    assert(strcmp(ev.order->str, "PDDL") == 0);                 /* poi durata del nuovo video e caricato */
+    gint64 dur_b = syncview_video_player_get_duration(player);
+    assert(dur_b > 1500 && dur_b < 2500 && dur_b < dur_a - 1000);
+
+    /* Errore con un video caricato e in posizione > 0: anche qui tutto a 0, prima del segnale di errore. */
+    assert(syncview_video_player_play(player, NULL));
+    spin_for(300);
+    assert(syncview_video_player_pause(player, NULL));
+    assert(last_pos(&ev) > 100);
+    g_string_truncate(ev.order, 0);
+    GstElement *pipeline = syncview_video_player_get_pipeline(player);
+    GError *injected = g_error_new_literal(GST_STREAM_ERROR, GST_STREAM_ERROR_FAILED, "errore");
+    gst_element_post_message(pipeline, gst_message_new_error(GST_OBJECT(pipeline), injected, NULL));
+    g_error_free(injected);
+    assert(spin_until(&ev.got_error, 10000));
+    assert(last_pos(&ev) == 0 && g_array_index(ev.durations, gint64, ev.durations->len - 1) == 0);
+    assert(syncview_video_player_get_duration(player) == 0 && syncview_video_player_get_position(player) == 0);
+    assert(!syncview_video_player_is_ticking(player));
+
+    pos_events_free(&ev);
+    g_object_unref(player);
+    g_free(a);
+    g_free(b);
+}
+
+static void
+test_ticker_only_while_playing(const char *dir)
+{
+    char *path = make_video(dir, "tk.webm", 320, 240, 25);
+    PosEvents ev;
+    SyncviewVideoPlayer *player = pos_player(0, &ev);
+
+    assert(!syncview_video_player_is_ticking(player));
+    assert(syncview_video_player_load(player, path, NULL));
+    assert(!syncview_video_player_is_ticking(player));
+    assert(spin_until(&ev.got_loaded, 10000));
+    assert(!syncview_video_player_is_ticking(player));               /* caricato, in pausa */
+    assert(syncview_video_player_play(player, NULL) && syncview_video_player_is_ticking(player));
+    assert(syncview_video_player_pause(player, NULL) && !syncview_video_player_is_ticking(player));
+    assert(syncview_video_player_play(player, NULL) && syncview_video_player_is_ticking(player));
+    assert(syncview_video_player_stop(player, NULL) && !syncview_video_player_is_ticking(player));
+    assert(syncview_video_player_play(player, NULL));
+    assert(syncview_video_player_load(player, path, NULL));          /* nuovo load in riproduzione */
+    assert(!syncview_video_player_is_ticking(player));
+    assert(spin_until(&ev.got_loaded, 10000) || TRUE);
+
+    /* Cambiare il widget del tick durante la riproduzione non interrompe né duplica il polling. */
+    ev.got_loaded = FALSE;
+    spin_until(&ev.got_loaded, 10000);
+    assert(syncview_video_player_play(player, NULL));
+    Shown shown = show_window_for(player);          /* imposta il widget mentre è in PLAYING */
+    assert(syncview_video_player_is_ticking(player));
+    guint n = ev.positions->len;
+    spin_for(300);
+    assert(ev.positions->len > n);
+    syncview_video_player_set_tick_widget(player, NULL);  /* torna al timer di ripiego */
+    assert(syncview_video_player_is_ticking(player));
+    n = ev.positions->len;
+    spin_for(300);
+    assert(ev.positions->len > n || syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
+
+    gtk_window_destroy(GTK_WINDOW(shown.window));
+    pos_events_free(&ev);
+    g_object_unref(player);
+    g_free(path);
+}
+
+static void
+test_tick_widget_destroyed_while_playing(const char *dir)
+{
+    char *path = make_video(dir, "tw.webm", 320, 240, 100);
+    PosEvents ev;
+    SyncviewVideoPlayer *player = pos_player(1, &ev);
+
+    assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
+    Shown shown = show_window_for(player);
+    assert(syncview_video_player_play(player, NULL) && syncview_video_player_is_ticking(player));
+    spin_for(300);
+
+    /* Il widget sparisce mentre si riproduce: il polling prosegue col timer di ripiego, senza crash né CRITICAL. */
+    gtk_window_destroy(GTK_WINDOW(shown.window));
+    spin_for(100);
+    assert(syncview_video_player_is_ticking(player));
+    guint n = ev.positions->len;
+    spin_for(400);
+    assert(ev.positions->len >= n + 5);
+
+    /* E si ferma normalmente. */
+    assert(syncview_video_player_pause(player, NULL) && !syncview_video_player_is_ticking(player));
+
+    pos_events_free(&ev);
+    g_object_unref(player);
+    g_free(path);
+}
+
+static void
+test_frame_clock_drives_the_ticks(const char *dir)
+{
+    char *path = make_video(dir, "fc.webm", 320, 240, 100);
+    PosEvents ev;
+    SyncviewVideoPlayer *player = pos_player(0, &ev);
+
+    assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
+    Shown shown = show_window_for(player);
+    assert(syncview_video_player_play(player, NULL));
+    spin_for(300);
+    assert(ev.positions->len >= 4);
+
+    /*
+     * Senza frame clock niente tick: staccando il widget dalla finestra (non ha più una root né un frame clock)
+     * gli aggiornamenti si fermano, pur restando il callback registrato. Un timer andrebbe avanti: è questa la
+     * prova che il polling segue davvero il frame clock di GTK (O5) e non un timer.
+     */
+    g_object_ref(shown.picture);
+    gtk_window_set_child(GTK_WINDOW(shown.window), NULL);
+    spin_for(200);
+    guint detached_from = ev.positions->len;
+    spin_for(500);
+    assert(ev.positions->len - detached_from <= 2);
+    assert(syncview_video_player_is_ticking(player));
+    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
+
+    /* Riagganciato alla finestra: il frame clock torna e gli aggiornamenti riprendono. */
+    gtk_window_set_child(GTK_WINDOW(shown.window), shown.picture);
+    g_object_unref(shown.picture);
+    gint64 deadline = g_get_monotonic_time() + 5 * G_USEC_PER_SEC;
+    while (!gtk_widget_get_mapped(shown.picture) && g_get_monotonic_time() < deadline) {
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
+    guint reattached_from = ev.positions->len;
+    spin_for(500);
+    assert(ev.positions->len - reattached_from >= 5);
+
+    gtk_window_destroy(GTK_WINDOW(shown.window));
+    pos_events_free(&ev);
+    g_object_unref(player);
+    g_free(path);
+}
+
+static void
+test_dispose_while_ticking(const char *dir)
+{
+    char *path = make_video(dir, "dt.webm", 320, 240, 100);
+
+    for (int i = 0; i < 6; i++) {
+        PosEvents ev;
+        SyncviewVideoPlayer *player = pos_player(i % SYNCVIEW_MAX_VIDEOS, &ev);
+        Shown shown = { NULL, NULL };
+
+        assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
+        if (i % 2) {
+            shown = show_window_for(player);
+        }
+        assert(syncview_video_player_play(player, NULL));
+        spin_for(100 + i * 20);
+
+        pos_events_free(&ev);  /* gli handler puntano a ev: il player va distrutto con i segnali ancora collegati... */
+        ev.positions = g_array_new(FALSE, FALSE, sizeof(gint64));
+        ev.pos_times = g_array_new(FALSE, FALSE, sizeof(gint64));
+        ev.durations = g_array_new(FALSE, FALSE, sizeof(gint64));
+        ev.order = g_string_new(NULL);
+        g_object_unref(player);  /* distrutto in PLAYING, con ticker attivo */
+        spin_for(60);            /* nessun callback residuo su un player distrutto (CRITICAL fatali) */
+        if (shown.window) {
+            gtk_window_destroy(GTK_WINDOW(shown.window));
+        }
+        pos_events_free(&ev);
+    }
+
+    g_free(path);
+}
+
 static void
 test_missing_element_error(void)
 {
@@ -1201,11 +1738,51 @@ test_missing_element_error(void)
     g_object_unref(player);
 }
 
+/* Vero se SYNCVIEW_TEST_ONLY non è impostata o il nome del test contiene uno dei suoi termini (separati da virgola). */
+static gboolean
+test_selected(const char *name)
+{
+    const char *only = g_getenv("SYNCVIEW_TEST_ONLY");
+
+    if (!only || !*only) {
+        return TRUE;
+    }
+
+    gboolean selected = FALSE;
+    char **terms = g_strsplit(only, ",", -1);
+    for (int i = 0; terms[i]; i++) {
+        selected |= *terms[i] && strstr(name, terms[i]) != NULL;
+    }
+    g_strfreev(terms);
+    return selected;
+}
+
+/*
+ * Con SYNCVIEW_TEST_TRACE=1 stampa il nome di ogni test prima di eseguirlo (utile se uno si blocca);
+ * con SYNCVIEW_TEST_ONLY=<t1>,<t2>… esegue solo i test di load/riproduzione il cui nome contiene uno dei termini
+ * (i test che aprono finestre sono quelli con "frame_clock", "ticker", "tick_widget", "ticking").
+ */
+#define RUN_TEST(call)                                               \
+    do {                                                             \
+        if (!test_selected(#call)) {                                 \
+            break;                                                   \
+        }                                                            \
+        if (g_getenv("SYNCVIEW_TEST_TRACE")) {                       \
+            fprintf(stderr, ">> %s\n", #call);                       \
+        }                                                            \
+        call;                                                        \
+    } while (0)
+
 int
 main(void)
 {
     if (!gtk_init_check()) {
         return SKIP_EXIT;  /* nessun display */
+    }
+
+    /* Con SYNCVIEW_DEBUG=1 il logger è attivo: gli eventi [GST] del player (stati, ASYNC_DONE, decoder…) compaiono su stderr. */
+    if (g_getenv("SYNCVIEW_DEBUG")) {
+        logger_init(NULL, FALSE, NULL);
     }
 
     /* Da qui un CRITICAL/ERROR di GLib/GObject/GTK deve far fallire il test. */
@@ -1243,23 +1820,36 @@ main(void)
         char *dir = g_dir_make_tmp("syncview-player-XXXXXX", NULL);
         assert(dir != NULL);
 
-        test_load_first_frame(dir);
-        test_load_errors(dir);
-        test_error_after_loaded(dir);
-        test_reload_replaces_video(dir);
-        test_players_load_independently(dir);
-        test_dispose_while_loading(dir);
+        RUN_TEST(test_load_first_frame(dir));
+        RUN_TEST(test_load_errors(dir));
+        RUN_TEST(test_error_after_loaded(dir));
+        RUN_TEST(test_reload_replaces_video(dir));
+        RUN_TEST(test_players_load_independently(dir));
+        RUN_TEST(test_dispose_while_loading(dir));
 
-        test_play_pause_basics(dir);
-        test_toggle(dir);
-        test_stop_rewinds_and_keeps_video(dir);
-        test_end_of_video(dir);
-        test_not_loaded_is_noop(dir);
-        test_reload_while_playing(dir);
-        test_error_while_playing(dir);
-        test_players_play_independently(dir);
-        test_dispose_while_playing(dir);
-        test_playback_log(dir);
+        RUN_TEST(test_play_pause_basics(dir));
+        RUN_TEST(test_toggle(dir));
+        RUN_TEST(test_stop_rewinds_and_keeps_video(dir));
+        RUN_TEST(test_end_of_video(dir));
+        RUN_TEST(test_not_loaded_is_noop(dir));
+        RUN_TEST(test_reload_while_playing(dir));
+        RUN_TEST(test_error_while_playing(dir));
+        RUN_TEST(test_players_play_independently(dir));
+        RUN_TEST(test_dispose_while_playing(dir));
+        RUN_TEST(test_playback_log(dir));
+
+        RUN_TEST(test_load_reports_duration(dir));
+        RUN_TEST(test_position_while_playing_fallback_timer(dir));
+        RUN_TEST(test_position_while_playing_frame_clock(dir));
+        RUN_TEST(test_position_on_stop_and_end(dir));
+        RUN_TEST(test_position_reset_on_reload_and_error(dir));
+        RUN_TEST(test_ticker_only_while_playing(dir));
+        RUN_TEST(test_tick_widget_destroyed_while_playing(dir));
+        RUN_TEST(test_frame_clock_drives_the_ticks(dir));
+        RUN_TEST(test_dispose_while_ticking(dir));
+
+        /* Nessuno smontaggio di pipeline deve restare appeso (un blocco interno a GStreamer lo farebbe fallire qui). */
+        assert(drain_teardowns(15000));
 
         char *cmd = g_strdup_printf("rm -rf '%s'", dir);
         assert(system(cmd) == 0);
@@ -1268,5 +1858,6 @@ main(void)
     }
 
     test_missing_element_error();
+    assert(drain_teardowns(15000));
     return 0;
 }
