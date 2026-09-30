@@ -1,6 +1,8 @@
 #ifndef SYNCVIEW_CORE_MARKER_DB_H
 #define SYNCVIEW_CORE_MARKER_DB_H
 
+#include "core/markers.h"
+
 #include <glib.h>
 
 /*
@@ -35,5 +37,24 @@ MarkerDb *marker_db_open(const char *path, GError **error);
 void marker_db_free(MarkerDb *db);
 
 const char *marker_db_get_path(const MarkerDb *db);
+
+/*
+ * Salva tutti i marker dello store in un'unica transazione (upsert per id:
+ * `ON CONFLICT(id) DO UPDATE`, come save_markers_batch). Aggiorna
+ * timestamp/color/description/category/video_index/updated_at; created_at
+ * e is_deleted di una riga esistente non vengono toccati. Un marker con
+ * video_index SYNCVIEW_MARKER_VIDEO_INDEX_ALL viene salvato come NULL.
+ * Se un qualunque inserimento fallisce, l'intero batch viene annullato
+ * (rollback). Uno store vuoto è un successo.
+ */
+gboolean marker_db_save_batch(MarkerDb *db, const MarkerStore *store, GError **error);
+
+/*
+ * Carica i marker in un nuovo MarkerStore (ordinato per timestamp; owned
+ * dal chiamante, da liberare con marker_store_free). I marker con
+ * is_deleted=1 sono esclusi, a meno di include_deleted. Ritorna NULL e
+ * imposta error in caso di fallimento.
+ */
+MarkerStore *marker_db_load_all(MarkerDb *db, gboolean include_deleted, GError **error);
 
 #endif /* SYNCVIEW_CORE_MARKER_DB_H */

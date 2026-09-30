@@ -182,6 +182,169 @@ test_open_failure(const char *dir)
     g_free(path);
 }
 
+static void
+assert_markers_equal(const Marker *a, const Marker *b)
+{
+    assert(strcmp(a->id, b->id) == 0);
+    assert(a->timestamp_ms == b->timestamp_ms);
+    assert(strcmp(a->color, b->color) == 0);
+    assert(strcmp(a->description, b->description) == 0);
+    assert(strcmp(a->category, b->category) == 0);
+    assert(a->video_index == b->video_index);
+    assert(strcmp(a->created_at, b->created_at) == 0);
+}
+
+static void
+test_save_load_roundtrip(const char *dir)
+{
+    char *path = g_build_filename(dir, "roundtrip.db", NULL);
+    MarkerDb *db = marker_db_open(path, NULL);
+    assert(db != NULL);
+
+    /* Store vuoto: save ok, load ritorna store vuoto. */
+    MarkerStore *empty = marker_store_new();
+    assert(marker_db_save_batch(db, empty, NULL));
+    marker_store_free(empty);
+    MarkerStore *loaded = marker_db_load_all(db, FALSE, NULL);
+    assert(loaded != NULL && marker_store_count(loaded) == 0);
+    marker_store_free(loaded);
+
+    /* 50 marker: timestamp sparsi (con duplicati), video_index misti, stringhe non banali. */
+    MarkerStore *store = marker_store_new();
+    for (int i = 0; i < 50; i++) {
+        int video = (i % 5) - 1;  /* -1 (globale), 0, 1, 2, 3 */
+        char *desc = i % 3 == 0 ? g_strdup_printf("nota '%d' \"quote\" è perché", i) : NULL;
+        marker_store_add(store, (int64_t)((i * 7919) % 20000), "#3498db", desc,
+                         i % 2 ? "action" : NULL, video);
+        g_free(desc);
+    }
+
+    assert(marker_db_save_batch(db, store, NULL));
+
+    /* video_index globale salvato come NULL. */
+    char *nulls = query_scalar(path, "SELECT count(*) FROM markers WHERE video_index IS NULL");
+    assert(strcmp(nulls, "10") == 0);
+    g_free(nulls);
+
+    loaded = marker_db_load_all(db, FALSE, NULL);
+    assert(loaded != NULL);
+    assert(marker_store_count(loaded) == marker_store_count(store));
+
+    /* Ordinati per timestamp; confronto per id (l'ordine a pari timestamp non è garantito). */
+    for (size_t i = 0; i < marker_store_count(loaded); i++) {
+        const Marker *l = marker_store_get(loaded, i);
+        if (i > 0) {
+            assert(marker_store_get(loaded, i - 1)->timestamp_ms <= l->timestamp_ms);
+        }
+        const Marker *orig = marker_store_find_by_id(store, l->id);
+        assert(orig != NULL);
+        assert_markers_equal(orig, l);
+    }
+    marker_store_free(loaded);
+
+    /* Upsert: modifico alcuni marker e risalvo -> stesso numero di righe, campi aggiornati. */
+    const Marker *first = marker_store_get(store, 0);
+    char *first_id = g_strdup(first->id);
+    char *first_created = g_strdup(first->created_at);
+    MarkerUpdate up = { .fields = MARKER_FIELD_COLOR | MARKER_FIELD_DESCRIPTION
+                                  | MARKER_FIELD_TIMESTAMP | MARKER_FIELD_VIDEO_INDEX,
+                        .color = "#e74c3c", .description = "modificato", .timestamp_ms = 99999,
+                        .video_index = 3 };
+    assert(marker_store_update(store, first_id, &up) != NULL);
+    assert(marker_db_save_batch(db, store, NULL));
+
+    char *count = query_scalar(path, "SELECT count(*) FROM markers");
+    assert(strcmp(count, "50") == 0);
+    g_free(count);
+
+    loaded = marker_db_load_all(db, FALSE, NULL);
+    const Marker *l = marker_store_find_by_id(loaded, first_id);
+    assert(l != NULL);
+    assert(l->timestamp_ms == 99999 && l->video_index == 3);
+    assert(strcmp(l->color, "#e74c3c") == 0 && strcmp(l->description, "modificato") == 0);
+    assert(strcmp(l->created_at, first_created) == 0);  /* created_at non viene riscritto */
+    marker_store_free(loaded);
+
+    /* updated_at valorizzato ISO8601 su tutte le righe. */
+    char *bad_updated = query_scalar(path,
+        "SELECT count(*) FROM markers WHERE substr(updated_at, 11, 1) != 'T'");
+    assert(strcmp(bad_updated, "0") == 0);
+    g_free(bad_updated);
+
+    g_free(first_id);
+    g_free(first_created);
+    marker_store_free(store);
+    marker_db_free(db);
+    g_free(path);
+}
+
+static void
+test_load_excludes_deleted(const char *dir)
+{
+    char *path = g_build_filename(dir, "deleted.db", NULL);
+    MarkerDb *db = marker_db_open(path, NULL);
+
+    MarkerStore *store = marker_store_new();
+    const Marker *keep = marker_store_add(store, 1000, "#000000", NULL, NULL, 0);
+    const Marker *gone = marker_store_add(store, 2000, "#000000", NULL, NULL, 0);
+    char *keep_id = g_strdup(keep->id);
+    char *gone_id = g_strdup(gone->id);
+    assert(marker_db_save_batch(db, store, NULL));
+    marker_store_free(store);
+
+    char *sql = g_strdup_printf("UPDATE markers SET is_deleted = 1 WHERE id = '%s'", gone_id);
+    exec_direct(path, sql);
+    g_free(sql);
+
+    MarkerStore *loaded = marker_db_load_all(db, FALSE, NULL);
+    assert(marker_store_count(loaded) == 1);
+    assert(marker_store_find_by_id(loaded, keep_id) != NULL);
+    assert(marker_store_find_by_id(loaded, gone_id) == NULL);
+    marker_store_free(loaded);
+
+    loaded = marker_db_load_all(db, TRUE, NULL);
+    assert(marker_store_count(loaded) == 2);
+    marker_store_free(loaded);
+
+    g_free(keep_id);
+    g_free(gone_id);
+    marker_db_free(db);
+    g_free(path);
+}
+
+static void
+test_save_batch_rolls_back_on_error(const char *dir)
+{
+    char *path = g_build_filename(dir, "rollback.db", NULL);
+    MarkerDb *db = marker_db_open(path, NULL);
+
+    /* Due marker con id diversi ma stessa terna (timestamp, video_index, created_at):
+     * violano UNIQUE, quindi il batch deve fallire per intero. */
+    MarkerStore *store = marker_store_new();
+    marker_store_add(store, 100, "#000000", NULL, NULL, 0);
+    Marker *a = marker_new(500, "#000000", NULL, NULL, 1);
+    Marker *b = marker_new(500, "#000000", NULL, NULL, 1);
+    g_free(b->id);
+    b->id = g_strdup("altro-id");
+    g_free(b->created_at);
+    b->created_at = g_strdup(a->created_at);
+    marker_store_add_marker(store, a);
+    marker_store_add_marker(store, b);
+
+    GError *error = NULL;
+    assert(!marker_db_save_batch(db, store, &error));
+    assert(error != NULL && error->domain == MARKER_DB_ERROR && error->code == MARKER_DB_ERROR_SQL);
+    g_error_free(error);
+
+    char *count = query_scalar(path, "SELECT count(*) FROM markers");
+    assert(strcmp(count, "0") == 0);  /* anche il marker valido (ts=100) è stato annullato */
+    g_free(count);
+
+    marker_store_free(store);
+    marker_db_free(db);
+    g_free(path);
+}
+
 int
 main(void)
 {
@@ -193,6 +356,9 @@ main(void)
     test_reopen_is_idempotent(dir);
     test_migrates_older_version(dir);
     test_open_failure(dir);
+    test_save_load_roundtrip(dir);
+    test_load_excludes_deleted(dir);
+    test_save_batch_rolls_back_on_error(dir);
 
     marker_db_free(NULL);
 

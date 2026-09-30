@@ -214,3 +214,141 @@ marker_db_get_path(const MarkerDb *db)
 {
     return db->path;
 }
+
+static void
+set_sql_error(GError **error, sqlite3 *conn)
+{
+    g_set_error(error, MARKER_DB_ERROR, MARKER_DB_ERROR_SQL, "SQLite: %s", sqlite3_errmsg(conn));
+}
+
+/* Upsert verbatim da save_markers_batch. */
+static const char *const UPSERT_SQL =
+    "INSERT INTO markers "
+    "(id, timestamp, color, description, category, video_index, created_at, updated_at, is_deleted) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0) "
+    "ON CONFLICT(id) DO UPDATE SET "
+    "    timestamp = excluded.timestamp, "
+    "    color = excluded.color, "
+    "    description = excluded.description, "
+    "    category = excluded.category, "
+    "    video_index = excluded.video_index, "
+    "    updated_at = excluded.updated_at";
+
+static gboolean
+upsert_all(sqlite3 *conn, const MarkerStore *store, const char *now, GError **error)
+{
+    sqlite3_stmt *stmt = NULL;
+
+    if (sqlite3_prepare_v2(conn, UPSERT_SQL, -1, &stmt, NULL) != SQLITE_OK) {
+        set_sql_error(error, conn);
+        return FALSE;
+    }
+
+    gboolean ok = TRUE;
+    for (size_t i = 0; ok && i < marker_store_count(store); i++) {
+        const Marker *m = marker_store_get(store, i);
+
+        sqlite3_reset(stmt);
+        sqlite3_bind_text(stmt, 1, m->id, -1, SQLITE_STATIC);
+        sqlite3_bind_int64(stmt, 2, m->timestamp_ms);
+        sqlite3_bind_text(stmt, 3, m->color, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 4, m->description, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 5, m->category, -1, SQLITE_STATIC);
+        if (m->video_index == SYNCVIEW_MARKER_VIDEO_INDEX_ALL) {
+            sqlite3_bind_null(stmt, 6);
+        } else {
+            sqlite3_bind_int(stmt, 6, m->video_index);
+        }
+        sqlite3_bind_text(stmt, 7, m->created_at, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 8, now, -1, SQLITE_STATIC);
+
+        if (sqlite3_step(stmt) != SQLITE_DONE) {
+            set_sql_error(error, conn);
+            ok = FALSE;
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    return ok;
+}
+
+gboolean
+marker_db_save_batch(MarkerDb *db, const MarkerStore *store, GError **error)
+{
+    sqlite3 *conn = connect_db(db, error);
+    if (!conn) {
+        return FALSE;
+    }
+
+    char *now = marker_iso8601_now();
+    gboolean ok = exec_sql(conn, "BEGIN", error) && upsert_all(conn, store, now, error);
+
+    if (ok) {
+        ok = exec_sql(conn, "COMMIT", error);
+    }
+    if (!ok) {
+        sqlite3_exec(conn, "ROLLBACK", NULL, NULL, NULL);
+    }
+
+    g_free(now);
+    sqlite3_close(conn);
+    return ok;
+}
+
+static char *
+column_text_or(sqlite3_stmt *stmt, int col, const char *fallback)
+{
+    const unsigned char *text = sqlite3_column_text(stmt, col);
+    return g_strdup(text ? (const char *)text : fallback);
+}
+
+MarkerStore *
+marker_db_load_all(MarkerDb *db, gboolean include_deleted, GError **error)
+{
+    sqlite3 *conn = connect_db(db, error);
+    if (!conn) {
+        return NULL;
+    }
+
+    const char *sql = include_deleted
+        ? "SELECT id, timestamp, color, description, category, video_index, created_at "
+          "FROM markers ORDER BY timestamp"
+        : "SELECT id, timestamp, color, description, category, video_index, created_at "
+          "FROM markers WHERE is_deleted = 0 ORDER BY timestamp";
+    sqlite3_stmt *stmt = NULL;
+
+    if (sqlite3_prepare_v2(conn, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        set_sql_error(error, conn);
+        sqlite3_close(conn);
+        return NULL;
+    }
+
+    MarkerStore *store = marker_store_new();
+    int rc;
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        Marker *m = g_new0(Marker, 1);
+
+        m->id = column_text_or(stmt, 0, "");
+        m->timestamp_ms = sqlite3_column_int64(stmt, 1);
+        m->color = column_text_or(stmt, 2, "");
+        m->description = column_text_or(stmt, 3, "");
+        m->category = column_text_or(stmt, 4, "default");
+        m->video_index = sqlite3_column_type(stmt, 5) == SQLITE_NULL
+                             ? SYNCVIEW_MARKER_VIDEO_INDEX_ALL
+                             : sqlite3_column_int(stmt, 5);
+        m->created_at = column_text_or(stmt, 6, "");
+
+        marker_store_add_marker(store, m);
+    }
+
+    if (rc != SQLITE_DONE) {
+        set_sql_error(error, conn);
+        marker_store_free(store);
+        store = NULL;
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(conn);
+    return store;
+}
