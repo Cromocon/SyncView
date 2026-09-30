@@ -117,7 +117,7 @@ test_video_player = executable(
 test(
   'video_player',
   test_video_player,
-  timeout: 60,
+  timeout: 240,
   env: {'LSAN_OPTIONS': 'suppressions=' + meson.current_source_dir() / 'lsan.supp'},
 )
 

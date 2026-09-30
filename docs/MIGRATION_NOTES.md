@@ -90,6 +90,27 @@ Dettagli emersi e scelte:
 
 ---
 
+## Riproduzione: play / pausa / stop (M2.5)
+
+Sorgente letta: `ui/video_player.py` (`play`, `pause`, `stop`, `toggle_play_pause`, `on_media_status_changed`).
+
+Comportamento dell'originale (`QMediaPlayer`):
+- `play()`, `pause()`, `stop()` **agiscono solo se `is_loaded`**; altrimenti non fanno nulla (nessun errore). Ognuno registra `logger.log_playback(index, "PLAY" | "PAUSA" | "STOP")` **ad ogni chiamata**, anche se lo stato non cambia.
+- `toggle_play_pause()`: se `playbackState() == Playing` → `pause()`, altrimenti `play()`.
+- `stop()` ferma e **riporta la posizione all'inizio mantenendo il media caricato** (`StoppedState`); non scarica il video.
+- Dopo il caricamento l'originale mette in pausa sul primo frame (`load_preview_frame` → `pause()`), quindi il player è in `Paused`.
+- A fine video Qt passa a `StoppedState` (`EndOfMedia`) e un `play()` successivo riparte dall'inizio. Non c'è codice dedicato nell'originale.
+- La cache dei frame (`frame_cache.set_playing`) è vestigiale e non si porta.
+
+Porting (`SyncviewVideoPlayer`):
+- `SyncviewPlaybackState` = `STOPPED`/`PLAYING`/`PAUSED`, come `QMediaPlayer.PlaybackState`; segnale `playback-state-changed` solo quando lo stato cambia (nell'originale i pulsanti leggono `playbackState()`).
+- **Deviazione dal piano: `stop()` non porta la pipeline a `GST_STATE_NULL`.** NULL scaricherebbe il video (perdendo primo frame e decoder), mentre `QMediaPlayer.stop()` lo mantiene caricato. `stop()` fa quindi pausa + seek con flush a 0: stato `STOPPED`, video ancora caricato e primo frame visibile. Lo scaricamento vero è `unload` (M3.8).
+- Fine video: alla ricezione dell'`EOS` (solo se si stava riproducendo) la pipeline va in `PAUSED` (ultimo frame visibile), lo stato diventa `STOPPED` e si memorizza `at_end`; `play()` a fine video fa prima un seek a 0 e poi parte. Un `pause()` a fine video non lo trasforma in «in pausa» (resta `STOPPED`).
+- `load()` porta lo stato a `STOPPED` (il video precedente è scartato) e, a caricamento pronto, a `PAUSED`. Un errore (prima o durante la riproduzione) porta a `STOPPED` **prima** di emettere `error`.
+- Differenza nei ritorni: le azioni su un player non caricato ritornano `FALSE` con errore `NOT_LOADED` (chi non è interessato passa `NULL`), dove l'originale ignorava in silenzio. Il log `Stato riproduzione: PLAY/PAUSA/STOP` usa `log_playback` e il numero di slot 1-based come l'originale.
+
+---
+
 ## Ottimizzazioni approvate rispetto all'originale
 
 La riscrittura mira a replicare **e ottimizzare**. Le ottimizzazioni O1–O9 sono elencate in [PLAN.md](../PLAN.md#ottimizzazioni-approvate-rispetto-alloriginale) con la milestone che le implementa. Questa sezione raccoglierà, man mano che vengono implementate, il comportamento dell'originale, quello nuovo e le **misure** (non assunzioni) dove l'esito dipende da dati/piattaforma:

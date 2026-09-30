@@ -259,6 +259,23 @@ Stesso eseguibile di M2.3: `syncview:video_player` → **OK** (skip senza displa
 - **Prova di mutazione** (13 regressioni introdotte di proposito nella logica, es. H.264 reso opzionale, `can_play` sempre vero, `extra_dir` ignorata, risoluzione Windows/macOS uguale a Linux, encoder audio contati come video, versione non parsata): i test le rilevano **tutte**; una (tipo `V` degli encoder) sfuggiva e ha richiesto un caso in più. Una seconda tornata sul piano di installazione (12 regressioni: Fedora/openSUSE considerati installabili, `apt` al posto di `apt-get`, pacchetti duplicati o opzionali inclusi per errore, pacchetti su Windows/macOS, ripiego a mano assente, ffmpeg non scaricabile su Windows/macOS…) è rilevata per intero; due mutazioni erano *equivalenti* (codice ridondante, poi rimosso).
 - Controllo statico `no_adhoc_logging`: ora `main.c` (e solo `main.c`) può scrivere su **stdout** per l'output voluto dei comandi CLI; restano vietati stderr e i flag di debug ovunque.
 
+### M2.5 — play / pausa / stop
+
+Stesso eseguibile di M2.3/M2.4: `syncview:video_player` → **OK** (skip senza display/`gtk4paintablesink`; richiede anche i plugin di prova vp8enc/webmmux). Dura circa 20 s perché riproduce davvero video di 1–4 s in tempo reale.
+
+- [ ] **Play/pausa in tempo reale**: dopo il load il player è in `PAUSED` sul primo frame, **fermo** (posizione invariata); `play()` → `PLAYING`, pipeline in `PLAYING`, dopo ~600 ms la posizione è avanzata di ~600 ms e il paintable ha ricevuto ≥5 frame; `pause()` → la posizione e i frame si fermano; `play()` **riprende da dove si era fermato**, non da capo.
+- [ ] **Segnale `playback-state-changed`**: sequenza `PAUSED` (load), `PLAYING`, `PAUSED`, `PLAYING`; chiamate ripetute (`play()` in play, `pause()` due volte) **non** emettono segnali doppi.
+- [ ] **`toggle_play_pause`**: PAUSED→PLAYING→PAUSED→PLAYING; da `STOPPED` avvia.
+- [ ] **`stop()`**: `STOPPED`, posizione a ~0, **video ancora caricato**, pipeline in `PAUSED` (non `NULL`), decoder ancora montato, primo frame visibile nel paintable (snapshot con texture); da fermo non avanza; `play()` dopo `stop()` riparte da 0; due `stop()` di fila senza segnali doppi.
+- [ ] **Fine del video** (clip di 1 s): da solo `STOPPED` con un solo segnale, video caricato e fermo in fondo (posizione ≥ 800 ms, invariata); `play()` riparte dall'inizio e arriva di nuovo in fondo; `stop()` a fine video torna a 0 senza segnali in più.
+- [ ] **Player non caricato**: `play`/`pause`/`stop`/`toggle` → `FALSE` con errore `NOT_LOADED` (e con `error == NULL`), nessun segnale, stato `STOPPED`, pipeline in `NULL`; lo stesso **durante il caricamento** («in caricamento» nel messaggio) e dopo un errore di caricamento; a caricamento finito funzionano.
+- [ ] **Nuovo `load()` in riproduzione**: il vecchio video viene scartato (`STOPPED`), il nuovo arriva in `PAUSED` e **non parte da solo**; `play()` poi funziona.
+- [ ] **Errore in riproduzione** (iniettato sul bus): `STOPPED` (emesso prima di `error`), video non più caricato, pipeline a `NULL`, `play()` non ha effetto.
+- [ ] **Due player** riproducono indipendentemente; mettere in pausa uno non tocca l'altro. Player distrutto in `PLAYING` (8 volte, a tempi diversi) senza crash né `CRITICAL`.
+- [ ] **Log**: `[VIDEO 3] Stato riproduzione: PLAY/PAUSA/STOP` (slot 1-based), una riga per ogni chiamata anche quando lo stato non cambia.
+- **Nota di design verificata dai test**: `stop()` **non** scarica il video (deviazione dal piano, che diceva `GST_STATE_NULL`): vedi `docs/MIGRATION_NOTES.md`.
+- **Prova di mutazione**: 19 regressioni introdotte di proposito (play/pause/stop che non cambiano la pipeline o lo stato, `stop` che scarica il video, EOS ignorato, riavvio da 0 a fine video, segnali doppi, play ammesso durante il caricamento, log mancanti, toggle invertito, seek senza flush…): **tutte rilevate**. Due sfuggivano inizialmente e hanno richiesto casi in più: la pipeline deve scendere in `PAUSED` all'EOS e `pause()` a fine video deve lasciare lo stato `STOPPED`.
+
 ### Riepilogo atteso
 
 ```
@@ -270,7 +287,7 @@ deve riportare **14/14** allo stato attuale (`dummy`, `time_format`, `settings`,
 
 ## Cosa NON è ancora testabile
 
-- **Playback video reale** (caricamento, play/pausa, seek, frame-step, `playback_rate`, segnali): da M2.4. Oggi esiste solo lo scheletro del player, con pipeline ferma.
+- **Posizione/durata, seek, frame-step, `playback_rate`, muto**: da M2.6 in poi. Oggi il player carica, riproduce, mette in pausa e ferma (M2.4–M2.5), ma non espone posizione né durata.
 - **Interfaccia oltre la finestra vuota di M0.2**: griglia 2x2, timeline, marker a schermo, dialoghi, scorciatoie, tema, zoom/pan, titlebar custom (M3–M7). Le finestre di debug "Log" e "Moduli" sono previste in M2.9 (oggi esistono solo il filtro e il sink del logger, testati da `logger_filter`).
 - **Download/installazione delle dipendenze e dialog del primo avvio**: M2.11–M2.12. La sola *verifica* (M2.10) c'è: `syncview --check-deps`.
 - **Export**: M6.

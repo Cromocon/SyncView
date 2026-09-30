@@ -17,9 +17,12 @@ G_BEGIN_DECLS
  * M2.3: scheletro (pipeline creata e ferma in GST_STATE_NULL).
  * M2.4: load() asincrono (PAUSED + ASYNC_DONE dal bus) con primo frame nel
  * paintable, segnali load-state-changed/error e log del decoder in uso.
- * Play/seek/posizione arrivano in M2.5+.
+ * M2.5: play()/pause()/stop()/toggle, stato di riproduzione e segnale
+ * playback-state-changed, fine del video (EOS).
+ * Posizione/durata/seek arrivano in M2.6+.
  *
- * Segnali (emessi nel main context, dal bus GStreamer):
+ * Segnali (emessi nel main context):
+ *   "playback-state-changed" (guint state): SyncviewPlaybackState, solo quando cambia.
  *   "load-state-changed" (gboolean loaded): TRUE quando un load() è pronto;
  *                        FALSE se un video caricato viene perso per un errore.
  *   "error" (const char *message): errore GStreamer durante/dopo il load();
@@ -40,7 +43,20 @@ typedef enum {
     SYNCVIEW_VIDEO_PLAYER_ERROR_PIPELINE,         /* pipeline non costruibile / cambio di stato fallito */
     SYNCVIEW_VIDEO_PLAYER_ERROR_FILE_NOT_FOUND,   /* il file da caricare non esiste ("File non trovato") */
     SYNCVIEW_VIDEO_PLAYER_ERROR_PLAYBACK,         /* errore GStreamer durante il caricamento (segnale "error") */
+    SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED,       /* play/pause/stop senza un video caricato */
 } SyncviewVideoPlayerError;
+
+/*
+ * Stato di riproduzione, sul modello di QMediaPlayer.PlaybackState dell'originale:
+ *  STOPPED  nessun video, oppure video fermo all'inizio (dopo stop()) o arrivato in fondo (fine del video);
+ *  PLAYING  in riproduzione;
+ *  PAUSED   in pausa (anche subito dopo il caricamento: il primo frame è mostrato).
+ */
+typedef enum {
+    SYNCVIEW_PLAYBACK_STOPPED,
+    SYNCVIEW_PLAYBACK_PLAYING,
+    SYNCVIEW_PLAYBACK_PAUSED,
+} SyncviewPlaybackState;
 
 /*
  * Crea un player per lo slot video_index (0-based). Inizializza GStreamer se
@@ -80,6 +96,29 @@ GdkPaintable *syncview_video_player_get_paintable(SyncviewVideoPlayer *self);
  * nell'originale dove il media veniva caricato *dopo* il probing.
  */
 gboolean syncview_video_player_load(SyncviewVideoPlayer *self, const char *path, GError **error);
+
+/*
+ * Riproduzione (M2.5). Come nell'originale agiscono solo a video caricato: altrimenti ritornano
+ * FALSE con error NOT_LOADED (chi non è interessato passa NULL) senza cambiare stato né emettere segnali.
+ * Se la pipeline non riesce a cambiare stato: FALSE con error PIPELINE. Ogni chiamata registra
+ * log_playback ("PLAY"/"PAUSA"/"STOP"), anche se lo stato non cambia.
+ *
+ *  play():  avvia (PLAYING). Da un video arrivato in fondo riparte dall'inizio.
+ *  pause(): mette in pausa (PAUSED), mantenendo la posizione.
+ *  stop():  ferma e riporta all'inizio (STOPPED) mantenendo il video CARICATO e il primo frame
+ *           visibile, come QMediaPlayer.stop() — NON riporta la pipeline a NULL (che scaricherebbe il
+ *           video: per quello c'è unload, M3.8). Deviazione dal piano, che diceva NULL.
+ *  toggle_play_pause(): pause() se è in PLAYING, altrimenti play().
+ *
+ * Il segnale "playback-state-changed" parte solo se lo stato cambia. A fine video il player passa da
+ * solo a STOPPED (il video resta caricato e fermo sull'ultimo frame) e un play() successivo riparte da 0.
+ */
+gboolean syncview_video_player_play(SyncviewVideoPlayer *self, GError **error);
+gboolean syncview_video_player_pause(SyncviewVideoPlayer *self, GError **error);
+gboolean syncview_video_player_stop(SyncviewVideoPlayer *self, GError **error);
+gboolean syncview_video_player_toggle_play_pause(SyncviewVideoPlayer *self, GError **error);
+
+SyncviewPlaybackState syncview_video_player_get_playback_state(SyncviewVideoPlayer *self);
 
 /* TRUE dopo l'ASYNC_DONE di un load() riuscito, finché non c'è un errore o un nuovo load(). */
 gboolean syncview_video_player_is_loaded(SyncviewVideoPlayer *self);

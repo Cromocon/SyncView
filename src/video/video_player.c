@@ -8,6 +8,7 @@ G_DEFINE_QUARK(syncview-video-player-error-quark, syncview_video_player_error)
 enum {
     SIGNAL_LOAD_STATE_CHANGED,
     SIGNAL_ERROR,
+    SIGNAL_PLAYBACK_STATE_CHANGED,
     N_SIGNALS
 };
 
@@ -34,6 +35,9 @@ struct _SyncviewVideoPlayer {
     char *path;              /* ultimo file passato a load() con successo, owned */
     gboolean loading;        /* load() accettato, ASYNC_DONE/errore non ancora arrivati */
     gboolean loaded;
+
+    SyncviewPlaybackState playback_state;
+    gboolean at_end;         /* il video è arrivato in fondo: il prossimo play() riparte dall'inizio */
 };
 
 G_DEFINE_FINAL_TYPE(SyncviewVideoPlayer, syncview_video_player, G_TYPE_OBJECT)
@@ -118,6 +122,9 @@ syncview_video_player_class_init(SyncviewVideoPlayerClass *klass)
     signals[SIGNAL_ERROR] = g_signal_new(
         "error", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
         G_TYPE_NONE, 1, G_TYPE_STRING);
+    signals[SIGNAL_PLAYBACK_STATE_CHANGED] = g_signal_new(
+        "playback-state-changed", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+        G_TYPE_NONE, 1, G_TYPE_UINT);
 }
 
 static void
@@ -315,6 +322,22 @@ log_decoder_in_use(SyncviewVideoPlayer *self)
     gst_object_unref(decoder);
 }
 
+/* --- Stato di riproduzione --- */
+
+/* Aggiorna lo stato ed emette il segnale solo se cambia. */
+static void
+set_playback_state(SyncviewVideoPlayer *self, SyncviewPlaybackState state)
+{
+    if (self->playback_state == state) {
+        return;
+    }
+
+    self->playback_state = state;
+    g_object_ref(self);  /* un handler potrebbe rilasciare l'ultimo riferimento */
+    g_signal_emit(self, signals[SIGNAL_PLAYBACK_STATE_CHANGED], 0, (guint)state);
+    g_object_unref(self);
+}
+
 /* --- Bus --- */
 
 static const char *
@@ -343,6 +366,9 @@ handle_error_message(SyncviewVideoPlayer *self, GstMessage *message)
     gst_element_set_state(self->pipeline, GST_STATE_NULL);
     self->loading = FALSE;
     self->loaded = FALSE;
+
+    self->at_end = FALSE;
+    set_playback_state(self, SYNCVIEW_PLAYBACK_STOPPED);
 
     g_object_ref(self);  /* un handler potrebbe rilasciare l'ultimo riferimento */
     g_signal_emit(self, signals[SIGNAL_ERROR], 0, text);
@@ -379,6 +405,7 @@ on_bus_message(GstBus *bus, GstMessage *message, gpointer user_data)
         if (from_pipeline && self->loading) {
             self->loading = FALSE;
             self->loaded = TRUE;
+            set_playback_state(self, SYNCVIEW_PLAYBACK_PAUSED);  /* come l'originale: dopo il load, in pausa sul primo frame */
 
             char *name = g_path_get_basename(self->path ? self->path : "");
             log_video_action(self->video_index, "Video caricato (async)", name);
@@ -388,6 +415,16 @@ on_bus_message(GstBus *bus, GstMessage *message, gpointer user_data)
             g_object_ref(self);
             g_signal_emit(self, signals[SIGNAL_LOAD_STATE_CHANGED], 0, TRUE);
             g_object_unref(self);
+        }
+        break;
+
+    case GST_MESSAGE_EOS:
+        /* Fine del video (come QMediaPlayer::EndOfMedia -> Stopped): resta caricato e fermo sull'ultimo frame. */
+        log_gst("player %d: EOS", self->video_index + 1);
+        if (from_pipeline && self->loaded && self->playback_state == SYNCVIEW_PLAYBACK_PLAYING) {
+            gst_element_set_state(self->pipeline, GST_STATE_PAUSED);
+            self->at_end = TRUE;
+            set_playback_state(self, SYNCVIEW_PLAYBACK_STOPPED);
         }
         break;
 
@@ -439,8 +476,10 @@ syncview_video_player_load(SyncviewVideoPlayer *self, const char *path, GError *
 
     self->loaded = FALSE;
     self->loading = FALSE;
+    self->at_end = FALSE;
     g_free(self->path);
     self->path = NULL;
+    set_playback_state(self, SYNCVIEW_PLAYBACK_STOPPED);  /* il video precedente è stato scartato */
 
     g_object_set(self->pipeline, "uri", uri, NULL);
 
@@ -462,6 +501,126 @@ syncview_video_player_load(SyncviewVideoPlayer *self, const char *path, GError *
     self->loading = TRUE;
     g_free(uri);
     return TRUE;
+}
+
+/* --- Riproduzione (M2.5) --- */
+
+static gboolean
+require_loaded(SyncviewVideoPlayer *self, GError **error)
+{
+    if (self->loaded) {
+        return TRUE;
+    }
+
+    g_set_error_literal(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED,
+                        self->loading ? "Video ancora in caricamento" : "Nessun video caricato");
+    return FALSE;
+}
+
+static gboolean
+change_pipeline_state(SyncviewVideoPlayer *self, GstState state, GError **error)
+{
+    if (gst_element_set_state(self->pipeline, state) == GST_STATE_CHANGE_FAILURE) {
+        g_set_error(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_PIPELINE,
+                    "La pipeline non è riuscita a passare in %s", gst_element_state_get_name(state));
+        return FALSE;
+    }
+    return TRUE;
+}
+
+/* Riporta il video all'inizio (seek con flush): primo frame visibile, nessun cambio di stato della pipeline. */
+static gboolean
+rewind_to_start(SyncviewVideoPlayer *self, GError **error)
+{
+    if (!gst_element_seek_simple(self->pipeline, GST_FORMAT_TIME,
+                                 GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE, 0)) {
+        g_set_error_literal(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_PIPELINE,
+                            "Impossibile tornare all'inizio del video");
+        return FALSE;
+    }
+    self->at_end = FALSE;
+    return TRUE;
+}
+
+gboolean
+syncview_video_player_play(SyncviewVideoPlayer *self, GError **error)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), FALSE);
+
+    if (!require_loaded(self, error)) {
+        return FALSE;
+    }
+
+    log_playback(self->video_index, "PLAY");
+
+    /* Dopo la fine del video si riparte dall'inizio (come QMediaPlayer::play a EndOfMedia). */
+    if (self->at_end && !rewind_to_start(self, error)) {
+        return FALSE;
+    }
+    if (!change_pipeline_state(self, GST_STATE_PLAYING, error)) {
+        return FALSE;
+    }
+
+    set_playback_state(self, SYNCVIEW_PLAYBACK_PLAYING);
+    return TRUE;
+}
+
+gboolean
+syncview_video_player_pause(SyncviewVideoPlayer *self, GError **error)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), FALSE);
+
+    if (!require_loaded(self, error)) {
+        return FALSE;
+    }
+
+    log_playback(self->video_index, "PAUSA");
+
+    if (!change_pipeline_state(self, GST_STATE_PAUSED, error)) {
+        return FALSE;
+    }
+
+    /* Fermo in fondo al video: resta STOPPED (un pause() non lo trasforma in "in pausa a metà"). */
+    if (!self->at_end) {
+        set_playback_state(self, SYNCVIEW_PLAYBACK_PAUSED);
+    }
+    return TRUE;
+}
+
+gboolean
+syncview_video_player_stop(SyncviewVideoPlayer *self, GError **error)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), FALSE);
+
+    if (!require_loaded(self, error)) {
+        return FALSE;
+    }
+
+    log_playback(self->video_index, "STOP");
+
+    /* Pausa + ritorno all'inizio: il video resta caricato e il primo frame visibile (non si scende a NULL). */
+    if (!change_pipeline_state(self, GST_STATE_PAUSED, error) || !rewind_to_start(self, error)) {
+        return FALSE;
+    }
+
+    set_playback_state(self, SYNCVIEW_PLAYBACK_STOPPED);
+    return TRUE;
+}
+
+gboolean
+syncview_video_player_toggle_play_pause(SyncviewVideoPlayer *self, GError **error)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), FALSE);
+
+    return self->playback_state == SYNCVIEW_PLAYBACK_PLAYING ? syncview_video_player_pause(self, error)
+                                                             : syncview_video_player_play(self, error);
+}
+
+SyncviewPlaybackState
+syncview_video_player_get_playback_state(SyncviewVideoPlayer *self)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), SYNCVIEW_PLAYBACK_STOPPED);
+    return self->playback_state;
 }
 
 gboolean
