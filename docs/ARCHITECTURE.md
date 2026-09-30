@@ -8,7 +8,7 @@ Per il riferimento architetturale completo (non ancora implementato) vedi la sez
 
 - **M0 (Scaffolding)**: ✅ completa (M0.1-M0.6). Build Meson funzionante, tutte le dipendenze collegate, CI multi-piattaforma (Linux/macOS/Windows) verde.
 - **M1 (Core logic, nessuna dipendenza da GTK)**: ✅ completa (M1.1-M1.16). 11 test Meson verdi su Linux/macOS/Windows in CI; passata ASan (leak detection attiva) e ASan+UBSan pulite.
-- **M2 (Finestra minima con 1 video)**: 🚧 in corso — M2.1 (analisi di `core/video_loader.py`, vedi [MIGRATION_NOTES.md](MIGRATION_NOTES.md)) M2.2 (`core/discoverer`) e M2.3 (scheletro `SyncviewVideoPlayer`) completate; prossima M2.4 (`load()` e primo frame). Ordine consigliato dal piano: M2.10 (verifica dipendenze) subito dopo M2.2.
+- **M2 (Finestra minima con 1 video)**: 🚧 in corso — M2.1 (analisi di `core/video_loader.py`, vedi [MIGRATION_NOTES.md](MIGRATION_NOTES.md)), M2.2 (`core/discoverer`) e M2.3 (scheletro `SyncviewVideoPlayer`) completate; prossima M2.4 (`load()` e primo frame). Ordine consigliato dal piano: M2.10 (verifica dipendenze) subito dopo M2.2.
 - **M3-M8**: non ancora iniziate.
 
 ### Moduli implementati
