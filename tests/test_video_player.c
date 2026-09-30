@@ -284,12 +284,14 @@ static gboolean have_test_encoder;
 /* Genera un webm/VP8 di prova. Il percorso si imposta come proprietà, mai nel testo della pipeline
  * (gst_parse_launch interpreta il backslash dei percorsi Windows come escape). */
 static char *
-make_video(const char *dir, const char *name, int width, int height, int frames)
+make_video_fps(const char *dir, const char *name, int width, int height, int frames, int fps, gboolean variable_rate)
 {
     char *path = g_build_filename(dir, name, NULL);
+    /* Framerate variabile (0/1 nei caps): si sovrascrive il framerate dei caps VP8 prima del muxer. */
     char *desc = g_strdup_printf(
-        "videotestsrc num-buffers=%d ! video/x-raw,width=%d,height=%d,framerate=25/1 ! videoconvert ! "
-        "vp8enc ! webmmux ! filesink name=out", frames, width, height);
+        "videotestsrc num-buffers=%d ! video/x-raw,width=%d,height=%d,framerate=%d/1 ! videoconvert ! "
+        "vp8enc ! %s webmmux ! filesink name=out", frames, width, height, fps,
+        variable_rate ? "capssetter caps=\"video/x-vp8,framerate=0/1\" replace=false join=true !" : "");
     GError *error = NULL;
     GstElement *pipeline = gst_parse_launch(desc, &error);
     assert(pipeline != NULL && error == NULL);
@@ -308,6 +310,12 @@ make_video(const char *dir, const char *name, int width, int height, int frames)
     gst_object_unref(pipeline);
     g_free(desc);
     return path;
+}
+
+static char *
+make_video(const char *dir, const char *name, int width, int height, int frames)
+{
+    return make_video_fps(dir, name, width, height, frames, 25, FALSE);
 }
 
 /* Fa girare il main context GTK finché *flag o timeout. */
@@ -1327,14 +1335,23 @@ frame_clock_usable(void)
     if (verdict < 0) {
         guint ticks = 0;
         GtkWidget *window = gtk_window_new();
-        GtkWidget *label = gtk_label_new("tick");
+        GdkPaintable *empty = gdk_paintable_new_empty(64, 64);
+        GtkWidget *picture = gtk_picture_new_for_paintable(empty);  /* niente testo: un GtkLabel inizializzerebbe fontconfig (leak di terze parti) */
 
-        gtk_window_set_child(GTK_WINDOW(window), label);
-        gtk_widget_add_tick_callback(label, tick_counter, &ticks, NULL);
+        gtk_window_set_default_size(GTK_WINDOW(window), 64, 64);
+        gtk_window_set_child(GTK_WINDOW(window), picture);
+        gtk_widget_add_tick_callback(picture, tick_counter, &ticks, NULL);
         gtk_window_present(GTK_WINDOW(window));
+        /* La finestra può metterci un po' ad apparire (runner lenti, sanitizer): si conta dal primo tick. */
+        for (gint64 deadline = g_get_monotonic_time() + 5 * G_USEC_PER_SEC; ticks == 0 && g_get_monotonic_time() < deadline;) {
+            g_main_context_iteration(NULL, FALSE);
+            g_usleep(1000);
+        }
+        ticks = 0;
         spin_for(500);
         gtk_window_destroy(GTK_WINDOW(window));
         spin_for(50);
+        g_object_unref(empty);
         verdict = ticks >= 10;  /* ~30 attesi a 60 Hz */
         if (!verdict) {
             g_printerr("frame clock irregolare (%u tick in 500 ms): verifiche sul frame clock saltate\n", ticks);
@@ -1820,6 +1837,506 @@ test_selected(const char *name)
     return selected;
 }
 
+/* --- M2.7: seek, step in ms, frame-step esatto, velocità --- */
+
+#define NS_PER_MS 1000000LL
+
+/* Attende che il frame mostrato (timestamp dell'ultimo buffer arrivato al sink) valga `expected_ns`. */
+static gboolean
+wait_frame_end(SyncviewVideoPlayer *player, gint64 expected_ns, int timeout_ms)
+{
+    gint64 deadline = g_get_monotonic_time() + (gint64)timeout_ms * 1000;
+
+    while (g_get_monotonic_time() < deadline) {
+        if (llabs(syncview_video_player_get_frame_end_ns(player) - expected_ns) <= 1000) {
+            return TRUE;
+        }
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
+    return llabs(syncview_video_player_get_frame_end_ns(player) - expected_ns) <= 1000;
+}
+
+/* Attende che il frame mostrato non cambi per 250 ms (seek/step conclusi) e ne ritorna il timestamp. */
+static gint64
+settled_frame_end(SyncviewVideoPlayer *player)
+{
+    gint64 last = -2;
+    gint64 stable_since = g_get_monotonic_time();
+    gint64 deadline = stable_since + 10 * G_USEC_PER_SEC;
+
+    while (g_get_monotonic_time() < deadline) {
+        gint64 now_pts = syncview_video_player_get_frame_end_ns(player);
+        if (now_pts != last) {
+            last = now_pts;
+            stable_since = g_get_monotonic_time();
+        } else if (g_get_monotonic_time() - stable_since > 250000) {
+            return now_pts;
+        }
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
+    return last;
+}
+
+static SyncviewVideoPlayer *
+loaded_player(PosEvents *ev, const char *path)
+{
+    SyncviewVideoPlayer *player = pos_player(0, ev);
+
+    assert(syncview_video_player_load(player, path, NULL));
+    assert(spin_until(&ev->got_loaded, 10000));
+    return player;
+}
+
+static gboolean
+wait_last_position_between(PosEvents *ev, gint64 low, gint64 high, int timeout_ms)
+{
+    gint64 deadline = g_get_monotonic_time() + (gint64)timeout_ms * 1000;
+
+    while (g_get_monotonic_time() < deadline) {
+        if (ev->positions->len > 0 && last_pos(ev) >= low && last_pos(ev) <= high) {
+            return TRUE;
+        }
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
+    return ev->positions->len > 0 && last_pos(ev) >= low && last_pos(ev) <= high;
+}
+
+static void
+test_seek_and_step_need_a_video(void)
+{
+    PosEvents ev;
+    SyncviewVideoPlayer *player = pos_player(0, &ev);
+    GError *error = NULL;
+
+    assert(!syncview_video_player_seek(player, 1000, &error));
+    assert(g_error_matches(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED));
+    g_clear_error(&error);
+    assert(!syncview_video_player_step_ms(player, 40, &error));
+    assert(g_error_matches(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED));
+    g_clear_error(&error);
+    assert(!syncview_video_player_step_frames(player, 1, &error));
+    assert(g_error_matches(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED));
+    g_clear_error(&error);
+    assert(!syncview_video_player_set_playback_rate(player, 2.0, &error));
+    assert(g_error_matches(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED));
+    g_clear_error(&error);
+    assert(ev.positions->len == 0);
+    assert(syncview_video_player_get_frame_rate(player) == 0.0 && syncview_video_player_get_frame_end_ns(player) == -1);
+
+    pos_events_free(&ev);
+    g_object_unref(player);
+}
+
+static void
+test_seek(const char *dir)
+{
+    char *path = make_video(dir, "seek.webm", 320, 240, 100);  /* 4 s a 25 fps: un frame ogni 40 ms */
+    PosEvents ev;
+    SyncviewVideoPlayer *player = loaded_player(&ev, path);
+
+    assert(llabs(syncview_video_player_get_frame_end_ns(player) - 40 * NS_PER_MS) <= 1000);  /* primo frame: 0-40 ms */
+    assert(syncview_video_player_get_frame_rate(player) == 25.0);
+
+    /* Seek accurato: il frame mostrato è quello richiesto, la posizione è riportata a seek concluso. */
+    assert(syncview_video_player_seek(player, 2000, NULL));
+    assert(wait_frame_end(player, 2040 * NS_PER_MS, 5000));  /* frame 2000-2040 */
+    assert(wait_last_position_between(&ev, 1990, 2010, 2000));
+    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);  /* lo stato non cambia */
+    assert(!syncview_video_player_is_ticking(player));
+
+    /* Un punto in mezzo a un frame mostra il frame che lo contiene. */
+    assert(syncview_video_player_seek(player, 1290, NULL));
+    assert(wait_frame_end(player, 1320 * NS_PER_MS, 5000));  /* frame 1280-1320 */
+
+    /* Fuori intervallo: limitato a 0..durata. */
+    assert(syncview_video_player_seek(player, -500, NULL));
+    assert(wait_frame_end(player, 40 * NS_PER_MS, 5000));
+    assert(wait_last_position_between(&ev, 0, 10, 2000));
+    gint64 duration = syncview_video_player_get_duration(player);
+    assert(syncview_video_player_seek(player, duration + 100000, NULL));
+    assert(wait_last_position_between(&ev, duration - 80, duration, 5000));
+    /* (a un seek esattamente alla durata non arriva alcun frame, solo EOS: si verifica la sola posizione) */
+
+    /* Un nuovo load() azzera subito frame e framerate del video scartato. */
+    assert(syncview_video_player_get_frame_end_ns(player) > 0 && syncview_video_player_get_frame_rate(player) == 25.0);
+    ev.got_loaded = FALSE;
+    assert(syncview_video_player_load(player, path, NULL));
+    assert(syncview_video_player_get_frame_end_ns(player) == -1 && syncview_video_player_get_frame_rate(player) == 0.0);
+    assert(spin_until(&ev.got_loaded, 10000));
+    assert(syncview_video_player_get_frame_rate(player) == 25.0);
+
+    /* Durante la riproduzione: continua a girare dal nuovo punto. */
+    assert(syncview_video_player_seek(player, 0, NULL));
+    assert(wait_frame_end(player, 40 * NS_PER_MS, 5000));
+    assert(syncview_video_player_play(player, NULL));
+    assert(syncview_video_player_seek(player, 2000, NULL));
+    spin_for(500);
+    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
+    assert(syncview_video_player_is_ticking(player));
+    gint64 pos = syncview_video_player_get_position(player);
+    assert(pos >= 2000 && pos <= 3000);
+    assert(syncview_video_player_pause(player, NULL));
+
+    pos_events_free(&ev);
+    g_object_unref(player);
+    g_free(path);
+}
+
+static void
+test_seek_after_end_of_video(const char *dir)
+{
+    char *path = make_video(dir, "seekend.webm", 320, 240, 25);  /* 1 s */
+    PosEvents ev;
+    SyncviewVideoPlayer *player = loaded_player(&ev, path);
+
+    assert(syncview_video_player_play(player, NULL));
+    gint64 deadline = g_get_monotonic_time() + 10 * G_USEC_PER_SEC;
+    while (syncview_video_player_get_playback_state(player) != SYNCVIEW_PLAYBACK_STOPPED &&
+           g_get_monotonic_time() < deadline) {
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
+    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
+
+    /* Dopo la fine ci si sposta a metà: play() riprende da lì, non dall'inizio. */
+    assert(syncview_video_player_seek(player, 400, NULL));
+    assert(wait_frame_end(player, 440 * NS_PER_MS, 5000));
+    assert(syncview_video_player_play(player, NULL));
+    spin_for(100);
+    gint64 pos = syncview_video_player_get_position(player);
+    assert(pos >= 400);
+
+    pos_events_free(&ev);
+    g_object_unref(player);
+    g_free(path);
+}
+
+static void
+test_step_ms(const char *dir)
+{
+    char *path = make_video(dir, "stepms.webm", 320, 240, 100);
+    PosEvents ev;
+    SyncviewVideoPlayer *player = loaded_player(&ev, path);
+
+    assert(syncview_video_player_step_ms(player, 200, NULL));
+    assert(wait_last_position_between(&ev, 195, 205, 5000));
+    assert(wait_frame_end(player, 240 * NS_PER_MS, 5000));
+    assert(syncview_video_player_step_ms(player, 1000, NULL));
+    assert(wait_last_position_between(&ev, 1195, 1205, 5000));
+    assert(syncview_video_player_step_ms(player, -200, NULL));
+    assert(wait_last_position_between(&ev, 995, 1005, 5000));
+    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
+
+    /* Limiti 0..durata. */
+    assert(syncview_video_player_step_ms(player, -100000, NULL));
+    assert(wait_last_position_between(&ev, 0, 10, 5000));
+    gint64 duration = syncview_video_player_get_duration(player);
+    assert(syncview_video_player_step_ms(player, 100000, NULL));
+    assert(wait_last_position_between(&ev, duration - 80, duration, 5000));
+
+    /* Subito dopo un seek (ancora in corso) e ravvicinati: partono dalla destinazione, non dalla posizione vecchia. */
+    assert(syncview_video_player_seek(player, 400, NULL));
+    assert(syncview_video_player_step_ms(player, 40, NULL));
+    assert(wait_last_position_between(&ev, 435, 445, 5000));
+    for (int i = 0; i < 5; i++) {
+        assert(syncview_video_player_step_ms(player, 40, NULL));
+    }
+    assert(wait_last_position_between(&ev, 635, 645, 5000));
+    spin_for(300);
+    assert(last_pos(&ev) >= 635 && last_pos(&ev) <= 645);
+
+    /* In riproduzione lo step mette in pausa, come nell'originale. */
+    assert(syncview_video_player_seek(player, 520, NULL));
+    assert(wait_frame_end(player, 560 * NS_PER_MS, 5000));
+    assert(syncview_video_player_play(player, NULL));
+    spin_for(200);
+    assert(syncview_video_player_step_ms(player, 100, NULL));
+    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
+    assert(!syncview_video_player_is_ticking(player));
+
+    pos_events_free(&ev);
+    g_object_unref(player);
+    g_free(path);
+}
+
+/*
+ * Frame-step esatto (O1). Verità di riferimento: i timestamp che si ottengono avanzando di un frame alla volta
+ * (GST_EVENT_STEP è esatto per definizione). Tutto il resto — step all'indietro, salti di N frame, passi ravvicinati
+ * senza attendere — deve ricadere esattamente sugli stessi timestamp. I container in ms (WebM) a 30 fps hanno pts
+ * irregolari (0, 33, 67, 100...): è il caso che un calcolo ingenuo «pos − 1000/fps» sbaglierebbe.
+ */
+#define STEP_FRAMES 12
+
+static void
+step_and_settle(SyncviewVideoPlayer *player, int count, gint64 *pts_out)
+{
+    assert(syncview_video_player_step_frames(player, count, NULL));
+    *pts_out = settled_frame_end(player);
+}
+
+static void
+check_exact_frame_step(const char *dir, int fps)
+{
+    char *name = g_strdup_printf("exact%d.webm", fps);
+    char *path = make_video_fps(dir, name, 160, 120, 60, fps, FALSE);
+    PosEvents ev;
+    SyncviewVideoPlayer *player = loaded_player(&ev, path);
+    gint64 truth[STEP_FRAMES + 1];
+
+    assert(syncview_video_player_get_frame_rate(player) == (double)fps);
+    gint64 frame_ns = GST_SECOND / fps;
+    truth[0] = settled_frame_end(player);
+    assert(llabs(truth[0] - frame_ns) <= 2 * NS_PER_MS);  /* primo frame: finisce dopo ~1/fps */
+
+    /* Riferimento: un frame avanti alla volta; ogni passo cambia frame e ne avanza uno solo (~1/fps). */
+    for (int i = 1; i <= STEP_FRAMES; i++) {
+        step_and_settle(player, 1, &truth[i]);
+        assert(truth[i] > truth[i - 1]);
+        assert(llabs((truth[i] - truth[i - 1]) - frame_ns) <= 1500 * 1000);  /* ms di arrotondamento del container */
+    }
+    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
+    /* La posizione segue il frame: da dove inizia a dove finisce. */
+    assert(wait_last_position_between(&ev, (truth[STEP_FRAMES] - frame_ns) / NS_PER_MS - 2, truth[STEP_FRAMES] / NS_PER_MS, 2000));
+
+    /* Indietro un frame alla volta: esattamente gli stessi frame, in ordine inverso. */
+    for (int i = STEP_FRAMES - 1; i >= 0; i--) {
+        gint64 pts;
+        step_and_settle(player, -1, &pts);
+        assert(pts == truth[i]);
+    }
+
+    /* Dal primo frame non si va oltre. */
+    gint64 pts;
+    step_and_settle(player, -1, &pts);
+    assert(pts == truth[0]);
+
+    /* Salti di N frame in una volta. */
+    step_and_settle(player, 5, &pts);
+    assert(pts == truth[5]);
+    step_and_settle(player, -3, &pts);
+    assert(pts == truth[2]);
+    step_and_settle(player, STEP_FRAMES - 2, &pts);
+    assert(pts == truth[STEP_FRAMES]);
+    step_and_settle(player, -STEP_FRAMES, &pts);
+    assert(pts == truth[0]);
+
+    /* Passi ravvicinati, senza attendere la fine del seek precedente: nessun frame perso. */
+    step_and_settle(player, STEP_FRAMES, &pts);
+    assert(pts == truth[STEP_FRAMES]);
+    for (int i = 0; i < 6; i++) {
+        assert(syncview_video_player_step_frames(player, -1, NULL));
+    }
+    assert(settled_frame_end(player) == truth[STEP_FRAMES - 6]);
+    for (int i = 0; i < 4; i++) {
+        assert(syncview_video_player_step_frames(player, 1, NULL));
+    }
+    assert(settled_frame_end(player) == truth[STEP_FRAMES - 2]);
+
+    /*
+     * Seek esattamente sull'inizio di un frame e step indietro SUBITO (seek ancora in corso): a 30 fps i pts in ms
+     * distano 33 o 34 ms, quindi «inizio − 1/fps» può cadere un frame troppo indietro senza un margine sull'ancora.
+     */
+    for (int j = 1; j <= STEP_FRAMES; j++) {
+        gint64 start_ms = (truth[j] - frame_ns + NS_PER_MS / 2) / NS_PER_MS;  /* pts del frame j, intero in ms */
+        assert(syncview_video_player_seek(player, start_ms, NULL));
+        assert(syncview_video_player_step_frames(player, -1, NULL));
+        assert(settled_frame_end(player) == truth[j - 1]);
+    }
+
+    /* Oltre l'ultimo frame non si va: molti passi avanti ravvicinati si fermano sull'ultimo, e si torna indietro di uno. */
+    gint64 duration_ns = syncview_video_player_get_duration(player) * NS_PER_MS;
+    for (int i = 0; i < 100; i++) {
+        assert(syncview_video_player_step_frames(player, 1, NULL));
+    }
+    gint64 last_end = settled_frame_end(player);
+    assert(last_end >= duration_ns - 2 * NS_PER_MS && last_end <= duration_ns + 2 * NS_PER_MS);
+    step_and_settle(player, -1, &pts);
+    assert(llabs((last_end - pts) - frame_ns) <= 2 * NS_PER_MS);
+
+    /* Dopo un seek arbitrario l'ancora si ricalcola dal frame mostrato. */
+    assert(syncview_video_player_seek(player, 1000, NULL));
+    gint64 shown = settled_frame_end(player);
+    assert(shown > 1000 * NS_PER_MS && shown <= 1000 * NS_PER_MS + frame_ns + 2 * NS_PER_MS);
+    step_and_settle(player, -1, &pts);
+    assert(pts < shown && shown - pts <= frame_ns + 1500 * 1000);
+    gint64 back = pts;
+    step_and_settle(player, 1, &pts);
+    assert(pts == shown);
+    (void)back;
+
+    /* In riproduzione lo step mette in pausa e avanza di un frame rispetto al frame mostrato. */
+    assert(syncview_video_player_play(player, NULL));
+    spin_for(300);
+    assert(syncview_video_player_step_frames(player, 1, NULL));
+    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
+    assert(!syncview_video_player_is_ticking(player));
+    gint64 after_play = settled_frame_end(player);
+    step_and_settle(player, 1, &pts);
+    assert(pts > after_play && pts - after_play <= frame_ns + 1500 * 1000);
+
+    pos_events_free(&ev);
+    g_object_unref(player);
+    g_free(path);
+    g_free(name);
+}
+
+static void
+test_frame_step_exact_25fps(const char *dir)
+{
+    check_exact_frame_step(dir, 25);
+}
+
+static void
+test_frame_step_exact_30fps(const char *dir)
+{
+    check_exact_frame_step(dir, 30);
+}
+
+static void
+test_frame_step_unknown_frame_rate(const char *dir)
+{
+    char *path = make_video_fps(dir, "vfr.webm", 160, 120, 50, 25, TRUE);
+    PosEvents ev;
+    SyncviewVideoPlayer *player = loaded_player(&ev, path);
+
+    /* Framerate variabile/sconosciuto: ricade sullo step in ms dell'originale (40 ms per frame). */
+    assert(syncview_video_player_get_frame_rate(player) == 0.0);
+    assert(syncview_video_player_step_frames(player, 5, NULL));
+    assert(wait_last_position_between(&ev, 195, 205, 5000));
+    assert(syncview_video_player_step_frames(player, -2, NULL));
+    assert(wait_last_position_between(&ev, 115, 125, 5000));
+
+    pos_events_free(&ev);
+    g_object_unref(player);
+    g_free(path);
+}
+
+/* Velocità media della posizione (ms di video per ms reale) su una finestra di ~`window_ms` di orologio. */
+static double
+measured_speed(SyncviewVideoPlayer *player, int window_ms)
+{
+    gint64 t0 = g_get_monotonic_time();
+    gint64 p0 = syncview_video_player_get_position(player);
+
+    spin_for(window_ms);
+    gint64 t1 = g_get_monotonic_time();
+    gint64 p1 = syncview_video_player_get_position(player);
+    return (double)(p1 - p0) / ((double)(t1 - t0) / 1000.0);
+}
+
+static void
+test_playback_rate(const char *dir)
+{
+    char *path = make_video(dir, "rate.webm", 160, 120, 250);  /* 10 s */
+    PosEvents ev;
+    SyncviewVideoPlayer *player = loaded_player(&ev, path);
+    GError *error = NULL;
+
+    assert(syncview_video_player_get_playback_rate(player) == 1.0);
+
+    /* Argomenti non validi: nessun cambiamento. */
+    double bad[] = { 0.0, -1.0, NAN, INFINITY };
+    for (guint i = 0; i < G_N_ELEMENTS(bad); i++) {
+        assert(!syncview_video_player_set_playback_rate(player, bad[i], &error));
+        assert(g_error_matches(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_INVALID_ARGUMENT));
+        g_clear_error(&error);
+    }
+    assert(syncview_video_player_get_playback_rate(player) == 1.0);
+
+    /* Da fermo: la velocità si imposta e vale al play(), senza spostare il frame mostrato. */
+    assert(syncview_video_player_set_playback_rate(player, 2.0, NULL));
+    assert(syncview_video_player_get_playback_rate(player) == 2.0);
+    assert(llabs(settled_frame_end(player) - 40 * NS_PER_MS) <= 1000);
+    assert(syncview_video_player_play(player, NULL));
+    spin_for(300);
+    double speed = measured_speed(player, 800);
+    assert(speed > 1.5 && speed < 2.6);
+
+    /* In riproduzione cambia senza interrompere né spostare il video. */
+    gint64 before = syncview_video_player_get_position(player);
+    assert(syncview_video_player_set_playback_rate(player, 0.5, NULL));
+    gint64 after = syncview_video_player_get_position(player);
+    assert(after >= before - 100 && after - before < 300);  /* nessun salto (al più un frame indietro per il seek) */
+    spin_for(300);
+    speed = measured_speed(player, 1000);
+    assert(speed > 0.3 && speed < 0.75);
+    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
+
+    assert(syncview_video_player_set_playback_rate(player, 1.0, NULL));
+    spin_for(300);
+    speed = measured_speed(player, 800);
+    assert(speed > 0.75 && speed < 1.3);
+
+    /* Un seek e uno stop non la riportano a 1.0x. */
+    assert(syncview_video_player_set_playback_rate(player, 2.0, NULL));
+    assert(syncview_video_player_seek(player, 1000, NULL));
+    spin_for(300);
+    speed = measured_speed(player, 800);
+    assert(speed > 1.5 && speed < 2.6);
+    assert(syncview_video_player_stop(player, NULL));
+    assert(syncview_video_player_get_playback_rate(player) == 2.0);
+    assert(syncview_video_player_play(player, NULL));
+    spin_for(300);
+    speed = measured_speed(player, 800);
+    assert(speed > 1.5 && speed < 2.6);
+    assert(syncview_video_player_pause(player, NULL));
+
+    /* Un nuovo load() riparte a 1.0x. */
+    ev.got_loaded = FALSE;
+    assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
+    assert(syncview_video_player_get_playback_rate(player) == 1.0);
+    assert(syncview_video_player_play(player, NULL));
+    spin_for(300);
+    speed = measured_speed(player, 800);
+    assert(speed > 0.75 && speed < 1.3);
+
+    pos_events_free(&ev);
+    g_object_unref(player);
+    g_free(path);
+}
+
+static void
+test_seek_step_log(const char *dir)
+{
+    /* Le operazioni lasciano traccia nel log (modulo VIDEO), come nell'originale. */
+    char *path = make_video(dir, "log27.webm", 160, 120, 50);
+    char *log_path = g_build_filename(dir, "m27.log", NULL);
+    PosEvents ev;
+
+    g_unsetenv("SYNCVIEW_DEBUG");
+    assert(logger_init(log_path, FALSE, NULL));
+    SyncviewVideoPlayer *player = loaded_player(&ev, path);
+    assert(syncview_video_player_seek(player, 400, NULL));
+    assert(syncview_video_player_step_ms(player, 40, NULL));
+    assert(syncview_video_player_step_frames(player, 1, NULL));
+    assert(syncview_video_player_set_playback_rate(player, 1.5, NULL));
+    spin_for(300);
+    gint64 duration = syncview_video_player_get_duration(player);
+    assert(duration >= 1900 && duration <= 2100);
+    assert(syncview_video_player_seek(player, 10000, NULL));  /* oltre la fine: si registra la destinazione effettiva */
+    spin_for(300);
+    pos_events_free(&ev);
+    g_object_unref(player);
+    logger_shutdown();
+
+    char *log = NULL;
+    assert(g_file_get_contents(log_path, &log, NULL, NULL));
+    assert(strstr(log, "[VIDEO 1] Timeline seek: 00:00 (400ms)") != NULL);
+    char *clamped = g_strdup_printf("[VIDEO 1] Timeline seek: 00:0%d (%lldms)", (int)(duration / 1000), (long long)duration);
+    assert(strstr(log, clamped) != NULL);
+    g_free(clamped);
+    assert(strstr(log, "10000ms") == NULL);
+    assert(strstr(log, "[VIDEO 1] Step (ms)") != NULL);
+    assert(strstr(log, "[VIDEO 1] Step Frame") != NULL);
+    assert(strstr(log, "[VIDEO 1] Velocità") != NULL && strstr(log, "1.50x") != NULL);
+    g_free(log);
+    g_free(log_path);
+    g_free(path);
+}
+
 /*
  * Con SYNCVIEW_TEST_TRACE=1 stampa il nome di ogni test prima di eseguirlo (utile se uno si blocca);
  * con SYNCVIEW_TEST_ONLY=<t1>,<t2>… esegue solo i test di load/riproduzione il cui nome contiene uno dei termini
@@ -1910,6 +2427,16 @@ main(void)
         RUN_TEST(test_tick_widget_destroyed_while_playing(dir));
         RUN_TEST(test_frame_clock_drives_the_ticks(dir));
         RUN_TEST(test_dispose_while_ticking(dir));
+
+        RUN_TEST(test_seek_and_step_need_a_video());
+        RUN_TEST(test_seek(dir));
+        RUN_TEST(test_seek_after_end_of_video(dir));
+        RUN_TEST(test_step_ms(dir));
+        RUN_TEST(test_frame_step_exact_25fps(dir));
+        RUN_TEST(test_frame_step_exact_30fps(dir));
+        RUN_TEST(test_frame_step_unknown_frame_rate(dir));
+        RUN_TEST(test_playback_rate(dir));
+        RUN_TEST(test_seek_step_log(dir));
 
         /* Nessuno smontaggio di pipeline deve restare appeso (un blocco interno a GStreamer lo farebbe fallire qui). */
         assert(drain_teardowns(15000));

@@ -3,6 +3,8 @@
 #include "core/logger.h"
 #include "core/settings.h"
 
+#include <math.h>
+
 /* Aggiornamenti di posizione non più frequenti di così durante la riproduzione (~50 Hz): basta per la timeline. */
 #define POSITION_MIN_INTERVAL_US 20000
 /* Intervallo del timer di ripiego (senza widget/frame clock), ~30 Hz. */
@@ -30,6 +32,105 @@ enum {
 
 static GParamSpec *properties[N_PROPS];
 
+/*
+ * Il sink riceve i buffer sul thread di streaming: un probe sul suo pad di ingresso registra il timestamp (in stream
+ * time, lo stesso della posizione) dell'ultimo frame arrivato e il framerate dai caps. Serve al frame-step esatto
+ * (O1), che deve sapere QUALE frame è mostrato, non solo la posizione richiesta: nei container con timestamp in ms
+ * (WebM/Matroska) i pts di un video a 30 fps non sono multipli esatti della durata nominale del frame.
+ * Dopo un seek accurato il decoder ritaglia il frame all'istante richiesto (pts = punto di arrivo, durata ridotta di
+ * conseguenza): il pts non dice più dove il frame INIZIA, ma pts + durata resta la sua fine esatta.
+ * Con conteggio dei riferimenti perché il probe può girare mentre il player è già stato distrutto (teardown differito).
+ */
+typedef struct {
+    GMutex lock;
+    GstSegment segment;
+    gboolean have_segment;
+    gint64 pts_ns;       /* stream time dell'ultimo buffer, -1 se nessuno */
+    gint64 end_ns;       /* pts + durata dell'ultimo buffer: la FINE del frame, -1 se nessuno (vedi sotto) */
+    int fps_n, fps_d;    /* 0/1 = sconosciuto o variabile */
+} FrameInfo;
+
+static void
+frame_info_clear(gpointer data)
+{
+    g_mutex_clear(&((FrameInfo *)data)->lock);
+}
+
+static FrameInfo *
+frame_info_new(void)
+{
+    FrameInfo *info = g_rc_box_new0(FrameInfo);
+
+    g_mutex_init(&info->lock);
+    gst_segment_init(&info->segment, GST_FORMAT_TIME);
+    info->pts_ns = -1;
+    info->end_ns = -1;
+    info->fps_d = 1;
+    return info;
+}
+
+static void
+frame_info_unref(gpointer data)
+{
+    g_rc_box_release_full(data, frame_info_clear);
+}
+
+static void
+frame_info_reset(FrameInfo *info)
+{
+    g_mutex_lock(&info->lock);
+    info->pts_ns = -1;
+    info->end_ns = -1;
+    info->fps_n = 0;
+    info->fps_d = 1;
+    g_mutex_unlock(&info->lock);
+}
+
+static GstPadProbeReturn
+on_sink_pad_probe(GstPad *pad, GstPadProbeInfo *probe, gpointer user_data)
+{
+    FrameInfo *info = user_data;
+
+    (void)pad;
+    g_mutex_lock(&info->lock);
+    if (probe->type & GST_PAD_PROBE_TYPE_BUFFER) {
+        GstBuffer *buffer = GST_PAD_PROBE_INFO_BUFFER(probe);
+        if (buffer && GST_BUFFER_PTS_IS_VALID(buffer)) {
+            guint64 st = info->have_segment
+                             ? gst_segment_to_stream_time(&info->segment, GST_FORMAT_TIME, GST_BUFFER_PTS(buffer))
+                             : GST_BUFFER_PTS(buffer);
+            info->pts_ns = st == GST_CLOCK_TIME_NONE ? -1 : (gint64)st;
+            info->end_ns = (info->pts_ns >= 0 && GST_BUFFER_DURATION_IS_VALID(buffer))
+                               ? info->pts_ns + (gint64)GST_BUFFER_DURATION(buffer)
+                               : -1;
+        }
+    } else if (probe->type & GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM) {
+        GstEvent *event = GST_PAD_PROBE_INFO_EVENT(probe);
+        if (GST_EVENT_TYPE(event) == GST_EVENT_SEGMENT) {
+            const GstSegment *segment;
+            gst_event_parse_segment(event, &segment);
+            if (segment->format == GST_FORMAT_TIME) {
+                gst_segment_copy_into(segment, &info->segment);
+                info->have_segment = TRUE;
+            }
+        } else if (GST_EVENT_TYPE(event) == GST_EVENT_CAPS) {
+            GstCaps *caps;
+            int n = 0, d = 1;
+            gst_event_parse_caps(event, &caps);
+            GstStructure *st = gst_caps_get_structure(caps, 0);
+            if (st && gst_structure_get_fraction(st, "framerate", &n, &d) && n > 0 && d > 0) {
+                info->fps_n = n;
+                info->fps_d = d;
+            } else {
+                info->fps_n = 0;
+                info->fps_d = 1;
+            }
+        }
+    }
+    g_mutex_unlock(&info->lock);
+    return GST_PAD_PROBE_OK;
+}
+
 struct _SyncviewVideoPlayer {
     GObject parent_instance;
 
@@ -54,6 +155,13 @@ struct _SyncviewVideoPlayer {
     /* Smontaggio asincrono della pipeline (vedi pipeline_to_null_async) */
     gboolean teardown_running;   /* un set_state(NULL) è in corso nel thread di lavoro */
     char *pending_uri;           /* URI da caricare appena lo smontaggio è finito (load() che sostituisce un video) */
+
+    /* Seek, velocità e frame-step (M2.7) */
+    double rate;                 /* velocità di riproduzione (> 0), 1.0 dopo ogni load */
+    FrameInfo *frame_info;       /* timestamp dell'ultimo frame e fps, scritti dal thread di streaming (probe sul sink) */
+    gint64 pending_seek_ns;      /* destinazione dell'ultimo seek/step non ancora concluso, -1 se nessuno */
+    gint64 pending_seek_us;      /* quando è stato emesso (monotonic), per scartarlo se non si conclude mai */
+    gint64 anchor_ns;            /* metà del frame a cui l'ultimo frame-step esatto ha portato il video, -1 se non valida */
 
     /* Polling della posizione, attivo solo in PLAYING */
     GtkWidget *tick_widget;      /* non posseduto: weak ref, vedi on_tick_widget_gone */
@@ -173,6 +281,7 @@ syncview_video_player_dispose(GObject *object)
         g_object_weak_unref(G_OBJECT(self->tick_widget), on_tick_widget_gone, self);
         self->tick_widget = NULL;
     }
+    g_clear_pointer(&self->frame_info, frame_info_unref);
     if (self->bus_watch_id) {
         g_source_remove(self->bus_watch_id);
         self->bus_watch_id = 0;
@@ -271,6 +380,9 @@ static void
 syncview_video_player_init(SyncviewVideoPlayer *self)
 {
     self->video_index = 0;
+    self->rate = 1.0;
+    self->anchor_ns = -1;
+    self->pending_seek_ns = -1;
 }
 
 /* Crea un elemento GStreamer o imposta un errore che nomina l'elemento mancante. */
@@ -320,6 +432,15 @@ setup_pipeline(SyncviewVideoPlayer *self, GError **error)
         g_set_error(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_PIPELINE,
                     "gtk4paintablesink non ha fornito un paintable");
         return FALSE;
+    }
+
+    self->frame_info = frame_info_new();
+    GstPad *sink_pad = gst_element_get_static_pad(self->video_sink, "sink");
+    if (sink_pad) {
+        /* Il probe ha il suo riferimento a frame_info, rilasciato quando il pad viene distrutto. */
+        gst_pad_add_probe(sink_pad, GST_PAD_PROBE_TYPE_BUFFER | GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM,
+                          on_sink_pad_probe, g_rc_box_acquire(self->frame_info), frame_info_unref);
+        gst_object_unref(sink_pad);
     }
 
     /* Messaggi del bus nel main context corrente (quello GTK); rimosso in dispose. */
@@ -539,6 +660,13 @@ reset_position_and_duration(SyncviewVideoPlayer *self)
 {
     emit_position(self, 0, FALSE);
     emit_duration(self, 0);
+    /* Velocità e frame-step non sopravvivono al video: ogni load riparte a 1.0x (come fa l'originale). */
+    self->rate = 1.0;
+    self->anchor_ns = -1;
+    self->pending_seek_ns = -1;
+    if (self->frame_info) {
+        frame_info_reset(self->frame_info);
+    }
 }
 
 static gboolean
@@ -742,6 +870,28 @@ handle_error_message(SyncviewVideoPlayer *self, GstMessage *message)
     g_clear_error(&gst_error);
 }
 
+/*
+ * Un seek/step si è concluso (ASYNC_DONE, STEP_DONE). Con più seek in volo i messaggi possono riferirsi a uno precedente:
+ * la destinazione pendente si scarta solo se la posizione raggiunta la conferma (o è passato troppo tempo).
+ */
+#define SEEK_CONFIRM_TOLERANCE_NS (150 * GST_MSECOND)
+#define SEEK_PENDING_MAX_US (2 * G_USEC_PER_SEC)
+
+static void
+settle_pending_seek(SyncviewVideoPlayer *self)
+{
+    if (self->pending_seek_ns < 0) {
+        return;
+    }
+
+    gint64 position_ns = 0;
+    gboolean reached = gst_element_query_position(self->pipeline, GST_FORMAT_TIME, &position_ns) &&
+                       llabs(position_ns - self->pending_seek_ns) <= SEEK_CONFIRM_TOLERANCE_NS;
+    if (reached || g_get_monotonic_time() - self->pending_seek_us > SEEK_PENDING_MAX_US) {
+        self->pending_seek_ns = -1;
+    }
+}
+
 static gboolean
 on_bus_message(GstBus *bus, GstMessage *message, gpointer user_data)
 {
@@ -789,7 +939,17 @@ on_bus_message(GstBus *bus, GstMessage *message, gpointer user_data)
             g_signal_emit(self, signals[SIGNAL_LOAD_STATE_CHANGED], 0, TRUE);
             g_object_unref(self);
         } else if (from_pipeline && self->loaded) {
-            /* Fine di un seek (stop(), e i seek di M2.7): la nuova posizione è quella da mostrare. */
+            /* Fine di un seek (stop(), seek/step di M2.7): la nuova posizione è quella da mostrare. */
+            settle_pending_seek(self);
+            publish_position(self, FALSE);
+        }
+        break;
+
+    case GST_MESSAGE_STEP_DONE:
+        /* Fine di un frame-step avanti: il frame mostrato è cambiato. */
+        if (from_pipeline && self->loaded) {
+            log_gst("player %d: STEP_DONE", self->video_index + 1);
+            settle_pending_seek(self);
             publish_position(self, FALSE);
         }
         break;
@@ -803,6 +963,8 @@ on_bus_message(GstBus *bus, GstMessage *message, gpointer user_data)
     case GST_MESSAGE_EOS:
         /* Fine del video (come QMediaPlayer::EndOfMedia -> Stopped): resta caricato e fermo sull'ultimo frame. */
         log_gst("player %d: EOS", self->video_index + 1);
+        self->anchor_ns = -1;  /* un frame-step oltre l'ultimo frame non ha spostato nulla */
+        self->pending_seek_ns = -1;
         if (from_pipeline && self->loaded && self->playback_state == SYNCVIEW_PLAYBACK_PLAYING) {
             gst_element_set_state(self->pipeline, GST_STATE_PAUSED);
             self->at_end = TRUE;
@@ -993,14 +1155,28 @@ change_pipeline_state(SyncviewVideoPlayer *self, GstState state, GError **error)
     return TRUE;
 }
 
+/* Seek accurato con flush alla velocità corrente (un seek_simple la riporterebbe a 1.0x). Invalida l'ancora dello step. */
+static gboolean
+seek_to_ns(SyncviewVideoPlayer *self, gint64 position_ns, GError **error)
+{
+    self->anchor_ns = -1;
+    self->pending_seek_ns = position_ns;
+    self->pending_seek_us = g_get_monotonic_time();
+    if (!gst_element_seek(self->pipeline, self->rate, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE,
+                          GST_SEEK_TYPE_SET, position_ns, GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE)) {
+        g_set_error(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_PIPELINE,
+                    "Seek a %lld ms non riuscito", (long long)(position_ns / GST_MSECOND));
+        self->pending_seek_ns = -1;
+        return FALSE;
+    }
+    return TRUE;
+}
+
 /* Riporta il video all'inizio (seek con flush): primo frame visibile, nessun cambio di stato della pipeline. */
 static gboolean
 rewind_to_start(SyncviewVideoPlayer *self, GError **error)
 {
-    if (!gst_element_seek_simple(self->pipeline, GST_FORMAT_TIME,
-                                 GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE, 0)) {
-        g_set_error_literal(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_PIPELINE,
-                            "Impossibile tornare all'inizio del video");
+    if (!seek_to_ns(self, 0, error)) {
         return FALSE;
     }
     self->at_end = FALSE;
@@ -1025,6 +1201,8 @@ syncview_video_player_play(SyncviewVideoPlayer *self, GError **error)
     if (!change_pipeline_state(self, GST_STATE_PLAYING, error)) {
         return FALSE;
     }
+    self->anchor_ns = -1;
+    self->pending_seek_ns = -1;  /* da qui la posizione è quella che scorre */
 
     set_playback_state(self, SYNCVIEW_PLAYBACK_PLAYING);
     return TRUE;
@@ -1080,6 +1258,249 @@ syncview_video_player_toggle_play_pause(SyncviewVideoPlayer *self, GError **erro
 
     return self->playback_state == SYNCVIEW_PLAYBACK_PLAYING ? syncview_video_player_pause(self, error)
                                                              : syncview_video_player_play(self, error);
+}
+
+/* --- Seek, velocità e frame-step (M2.7) --- */
+
+static gint64
+query_position_ns(SyncviewVideoPlayer *self)
+{
+    gint64 position_ns = 0;
+
+    if (!gst_element_query_position(self->pipeline, GST_FORMAT_TIME, &position_ns) || position_ns < 0) {
+        return 0;
+    }
+    return position_ns;
+}
+
+/* Posizione da cui partire per un movimento relativo: la destinazione di un seek ancora in corso, altrimenti quella letta. */
+static gint64
+current_position_ns(SyncviewVideoPlayer *self)
+{
+    return self->pending_seek_ns >= 0 ? self->pending_seek_ns : query_position_ns(self);
+}
+
+/* Porta `position_ns` dentro 0..durata (la durata si applica solo se nota). */
+static gint64
+clamp_to_duration_ns(SyncviewVideoPlayer *self, gint64 position_ns)
+{
+    if (position_ns < 0) {
+        return 0;
+    }
+    gint64 limit = self->duration_ms * GST_MSECOND;
+    return (limit > 0 && position_ns > limit) ? limit : position_ns;
+}
+
+gboolean
+syncview_video_player_seek(SyncviewVideoPlayer *self, gint64 position_ms, GError **error)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), FALSE);
+
+    if (!require_loaded(self, error)) {
+        return FALSE;
+    }
+
+    gint64 target_ns = clamp_to_duration_ns(self, position_ms * GST_MSECOND);
+    if (!seek_to_ns(self, target_ns, error)) {
+        return FALSE;
+    }
+
+    /* Da un video arrivato in fondo ci si è spostati: un play() successivo riprende da qui, non da 0. */
+    self->at_end = FALSE;
+    log_timeline_seek(self->video_index, target_ns / GST_MSECOND);
+    return TRUE;
+}
+
+gboolean
+syncview_video_player_step_ms(SyncviewVideoPlayer *self, gint64 delta_ms, GError **error)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), FALSE);
+
+    if (!require_loaded(self, error)) {
+        return FALSE;
+    }
+
+    /* Come nell'originale, lo step mette in pausa se il video sta girando. */
+    if (self->playback_state == SYNCVIEW_PLAYBACK_PLAYING && !syncview_video_player_pause(self, error)) {
+        return FALSE;
+    }
+
+    gint64 target_ns = clamp_to_duration_ns(self, current_position_ns(self) + delta_ms * GST_MSECOND);
+    if (!seek_to_ns(self, target_ns, error)) {
+        return FALSE;
+    }
+
+    self->at_end = FALSE;
+    char *details = g_strdup_printf("%+lld ms, posizione %lld ms", (long long)delta_ms,
+                                    (long long)(target_ns / GST_MSECOND));
+    log_video_action(self->video_index, "Step (ms)", details);
+    g_free(details);
+    return TRUE;
+}
+
+double
+syncview_video_player_get_frame_rate(SyncviewVideoPlayer *self)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), 0.0);
+
+    double fps = 0.0;
+    g_mutex_lock(&self->frame_info->lock);
+    if (self->frame_info->fps_n > 0) {
+        fps = (double)self->frame_info->fps_n / self->frame_info->fps_d;
+    }
+    g_mutex_unlock(&self->frame_info->lock);
+    return fps;
+}
+
+gint64
+syncview_video_player_get_frame_end_ns(SyncviewVideoPlayer *self)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), -1);
+
+    g_mutex_lock(&self->frame_info->lock);
+    gint64 end = self->frame_info->end_ns >= 0 ? self->frame_info->end_ns : self->frame_info->pts_ns;
+    g_mutex_unlock(&self->frame_info->lock);
+    return end;
+}
+
+/*
+ * Frame-step esatto (O1). Si ragiona sul PUNTO CENTRALE del frame mostrato (l'«ancora»): un seek accurato a un
+ * punto qualsiasi dell'intervallo di un frame mostra quel frame, quindi mirare al centro tollera errori di arrotondamento
+ * dei timestamp (±mezzo frame) che mirando al pts esatto farebbero cadere nel frame sbagliato. L'ancora si ricava dal pts
+ * dell'ultimo buffer arrivato al sink e poi si fa avanzare di frame interi a ogni step, così passi ripetuti in fretta
+ * (prima che il seek precedente sia concluso) non perdono il conto.
+ */
+gboolean
+syncview_video_player_step_frames(SyncviewVideoPlayer *self, int frame_count, GError **error)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), FALSE);
+
+    if (!require_loaded(self, error)) {
+        return FALSE;
+    }
+    if (frame_count == 0) {
+        return TRUE;
+    }
+
+    double fps = syncview_video_player_get_frame_rate(self);
+    if (fps <= 0.0) {
+        /* Frame rate sconosciuto o variabile: ricade sullo step in ms dell'originale (40 ms = 25 fps). */
+        log_gst("player %d: frame rate sconosciuto, step di %d x %d ms", self->video_index + 1, frame_count,
+                SYNCVIEW_DEFAULT_FRAME_STEP_MS);
+        return syncview_video_player_step_ms(self, (gint64)frame_count * SYNCVIEW_DEFAULT_FRAME_STEP_MS, error);
+    }
+
+    if (self->playback_state == SYNCVIEW_PLAYBACK_PLAYING && !syncview_video_player_pause(self, error)) {
+        return FALSE;
+    }
+
+    g_mutex_lock(&self->frame_info->lock);
+    gint64 frame_ns = gst_util_uint64_scale(GST_SECOND, self->frame_info->fps_d, self->frame_info->fps_n);
+    gint64 pts_ns = self->frame_info->pts_ns;
+    gint64 end_ns = self->frame_info->end_ns;
+    g_mutex_unlock(&self->frame_info->lock);
+
+    gint64 anchor = self->anchor_ns;
+    if (anchor < 0) {
+        if (end_ns > pts_ns && pts_ns >= 0) {
+            anchor = end_ns - frame_ns / 2;  /* la fine del frame è esatta anche dopo un seek accurato */
+        } else {
+            anchor = (pts_ns >= 0 ? pts_ns : query_position_ns(self)) + frame_ns / 2;
+        }
+        if (self->pending_seek_ns >= 0) {
+            /*
+             * Un seek non ancora concluso: il frame mostrato è ancora il vecchio, conta la destinazione. Un seek
+             * utente cade spesso esattamente sul confine di un frame, dove l'arrotondamento dei timestamp potrebbe
+             * far finire uno step indietro nel frame sbagliato: 1 ms di margine lo evita (un frame dura >= 10 ms).
+             */
+            anchor = self->pending_seek_ns + GST_MSECOND;
+        }
+    }
+    gboolean busy = self->pending_seek_ns >= 0;  /* un seek o uno step precedente non è ancora concluso */
+    anchor += (gint64)frame_count * frame_ns;
+    gint64 duration_ns = self->duration_ms * GST_MSECOND;
+    if (duration_ns > 0 && anchor > duration_ns - frame_ns / 2) {
+        anchor = duration_ns - frame_ns / 2;  /* ultimo frame */
+    }
+    if (anchor < frame_ns / 2) {
+        anchor = frame_ns / 2;  /* primo frame */
+    }
+
+    if (frame_count > 0 && !busy) {
+        /*
+         * Via veloce: GST_EVENT_STEP, senza rifare la decodifica da un keyframe. Un nuovo step mentre ne è in corso un
+         * altro LO SOSTITUISCE (i frame del primo andrebbero persi), quindi si usa solo a pipeline ferma.
+         */
+        GstEvent *step = gst_event_new_step(GST_FORMAT_BUFFERS, (guint64)frame_count, 1.0, TRUE, FALSE);
+        if (!gst_element_send_event(self->pipeline, step)) {
+            g_set_error_literal(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_PIPELINE,
+                                "Frame-step non riuscito");
+            return FALSE;
+        }
+        self->pending_seek_ns = anchor;
+        self->pending_seek_us = g_get_monotonic_time();
+    } else if (!seek_to_ns(self, anchor, error)) {
+        /* Indietro, oppure avanti con un movimento già in corso: seek accurato al frame di destinazione (stesso frame
+         * che lo step avrebbe mostrato, e si somma correttamente ai passi ancora in volo). */
+        return FALSE;
+    } else {
+        self->at_end = FALSE;
+    }
+    self->anchor_ns = anchor;  /* dopo seek_to_ns, che la invalida */
+
+    char fps_text[G_ASCII_DTOSTR_BUF_SIZE];
+    g_ascii_formatd(fps_text, sizeof(fps_text), "%.3f", fps);
+    char *details = g_strdup_printf("%+d frame (esatto, %s fps)", frame_count, fps_text);
+    log_video_action(self->video_index, "Step Frame", details);
+    g_free(details);
+    return TRUE;
+}
+
+gboolean
+syncview_video_player_set_playback_rate(SyncviewVideoPlayer *self, double rate, GError **error)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), FALSE);
+
+    if (!(rate > 0.0) || !isfinite(rate)) {
+        g_set_error(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_INVALID_ARGUMENT,
+                    "Velocità non valida: %g (deve essere > 0)", rate);
+        return FALSE;
+    }
+    if (!require_loaded(self, error)) {
+        return FALSE;
+    }
+    if (rate == self->rate) {
+        return TRUE;  /* un seek ridondante non è innocuo (vedi change_pipeline_state) */
+    }
+
+    /*
+     * Seek accurato alla posizione corrente con la nuova velocità. Il cambio istantaneo senza flush
+     * (GST_SEEK_FLAG_INSTANT_RATE_CHANGE) sarebbe più fluido, ma con matroskademux provoca un CRITICAL di GStreamer
+     * (gst_segment_position_from_running_time_full): provato e scartato.
+     */
+    gint64 position_ns = self->anchor_ns >= 0 ? self->anchor_ns : current_position_ns(self);
+    gint64 anchor = self->anchor_ns;
+    double previous = self->rate;
+    self->rate = rate;
+    if (!seek_to_ns(self, position_ns, error)) {
+        self->rate = previous;
+        return FALSE;
+    }
+    self->anchor_ns = anchor;  /* stesso frame: l'ancora resta valida */
+
+    char rate_text[G_ASCII_DTOSTR_BUF_SIZE];
+    g_ascii_formatd(rate_text, sizeof(rate_text), "%.2f", rate);
+    char *details = g_strdup_printf("%sx", rate_text);
+    log_video_action(self->video_index, "Velocità", details);
+    g_free(details);
+    return TRUE;
+}
+
+double
+syncview_video_player_get_playback_rate(SyncviewVideoPlayer *self)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), 1.0);
+    return self->rate;
 }
 
 SyncviewPlaybackState

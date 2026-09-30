@@ -22,7 +22,7 @@ G_BEGIN_DECLS
  * playback-state-changed, fine del video (EOS).
  * M2.6: posizione e durata (segnali position-changed/duration-changed, getter in ms),
  * aggiornate dal frame clock di GTK solo durante la riproduzione (O5).
- * Seek/frame-step arrivano in M2.7.
+ * M2.7: seek, step in ms, frame-step esatto (O1) e velocità di riproduzione.
  *
  * Segnali (emessi nel main context):
  *   "position-changed" (gint64 ms), "duration-changed" (gint64 ms): vedi la sezione Posizione e durata.
@@ -47,7 +47,8 @@ typedef enum {
     SYNCVIEW_VIDEO_PLAYER_ERROR_PIPELINE,         /* pipeline non costruibile / cambio di stato fallito */
     SYNCVIEW_VIDEO_PLAYER_ERROR_FILE_NOT_FOUND,   /* il file da caricare non esiste ("File non trovato") */
     SYNCVIEW_VIDEO_PLAYER_ERROR_PLAYBACK,         /* errore GStreamer durante il caricamento (segnale "error") */
-    SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED,       /* play/pause/stop senza un video caricato */
+    SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED,       /* play/pause/stop/seek/... senza un video caricato */
+    SYNCVIEW_VIDEO_PLAYER_ERROR_INVALID_ARGUMENT, /* argomento non valido (es. velocità <= 0) */
 } SyncviewVideoPlayerError;
 
 /*
@@ -123,6 +124,40 @@ gboolean syncview_video_player_stop(SyncviewVideoPlayer *self, GError **error);
 gboolean syncview_video_player_toggle_play_pause(SyncviewVideoPlayer *self, GError **error);
 
 SyncviewPlaybackState syncview_video_player_get_playback_state(SyncviewVideoPlayer *self);
+
+/*
+ * Seek, step e velocità (M2.7). Come le altre operazioni agiscono solo a video caricato (altrimenti FALSE con error
+ * NOT_LOADED). Sono asincroni: la nuova posizione arriva col segnale "position-changed" a seek concluso; lo stato di
+ * riproduzione non cambia (un video in PLAYING continua a girare dal nuovo punto), tranne gli step, che mettono in pausa.
+ *
+ *  seek(ms):       seek accurato a `position_ms`, limitato a 0..durata.
+ *  step_ms(delta): come l'originale: pausa se in PLAYING, poi seek relativo alla posizione corrente (limitato a 0..durata).
+ *                  È il comportamento dei preset 40/33/100/200 ms e quello usato in modalità sync (M3.9).
+ *  step_frames(n): frame-step ESATTO (O1): n > 0 avanza di n frame con GST_EVENT_STEP, n < 0 indietreggia con un seek
+ *                  accurato di n frame interi, calcolati dal framerate reale del video. Se il framerate è sconosciuto o
+ *                  variabile ricade su step_ms(n * SYNCVIEW_DEFAULT_FRAME_STEP_MS). Più passi ravvicinati si sommano
+ *                  correttamente anche se i seek precedenti non sono ancora conclusi.
+ *  set_playback_rate(r): velocità di riproduzione, r > 0 (INVALID_ARGUMENT altrimenti); 1.0 dopo ogni load(). In PLAYING
+ *                  è un seek accurato alla posizione corrente (in PLAYING si nota un breve attimo).
+ */
+#define SYNCVIEW_DEFAULT_FRAME_STEP_MS 40
+
+gboolean syncview_video_player_seek(SyncviewVideoPlayer *self, gint64 position_ms, GError **error);
+gboolean syncview_video_player_step_ms(SyncviewVideoPlayer *self, gint64 delta_ms, GError **error);
+gboolean syncview_video_player_step_frames(SyncviewVideoPlayer *self, int frame_count, GError **error);
+gboolean syncview_video_player_set_playback_rate(SyncviewVideoPlayer *self, double rate, GError **error);
+double syncview_video_player_get_playback_rate(SyncviewVideoPlayer *self);
+
+/* Framerate del video caricato in fps (0 se sconosciuto o variabile), dai caps che arrivano al sink. */
+double syncview_video_player_get_frame_rate(SyncviewVideoPlayer *self);
+
+/*
+ * Istante (stream time, stessa base della posizione) in cui FINISCE il frame mostrato, in NANOSECONDI, o -1 se nessun
+ * frame è ancora arrivato al sink. Identifica il frame anche dopo un seek accurato (dove il pts del buffer è portato
+ * all'istante richiesto, ma pts + durata resta la fine esatta). Unica eccezione alla regola «tutto in ms»: serve a
+ * verificare il frame-step esatto, dove il millisecondo non basta.
+ */
+gint64 syncview_video_player_get_frame_end_ns(SyncviewVideoPlayer *self);
 
 /*
  * Posizione e durata (M2.6). Tutto in MILLISECONDI (GStreamer lavora in nanosecondi: la

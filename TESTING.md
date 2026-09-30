@@ -296,6 +296,20 @@ Stesso eseguibile: `syncview:video_player` → **OK** (ora ~30 s; alcuni test ap
 - **Frame clock irregolare (CI)**: sul runner macOS una finestra senza display attivo riceve pochissimi tick (3 aggiornamenti in 800 ms), quindi i test del frame clock misurano prima i tick di una finestra di prova e, se sono meno di 10 in 500 ms, saltano le sole verifiche che lo richiedono (messaggio «frame clock irregolare»). Quelle col timer di ripiego restano sempre attive. In locale, con display, girano tutte.
 - **Nota sul test del frame clock**: una finestra *nascosta* (`set_visible(FALSE)`) NON ferma i tick in GTK4 — il frame clock continua finché il widget è in una finestra; per questo il test stacca il widget dalla finestra.
 
+### M2.7 — seek, step in ms, frame-step esatto, velocità
+
+Stesso eseguibile: `syncview:video_player` → **OK** (ora ~70 s; i test di M2.7 non aprono finestre). Il frame mostrato si legge con `syncview_video_player_get_frame_end_ns()` (fine del frame).
+
+- [ ] **Senza video**: `seek`/`step_ms`/`step_frames`/`set_playback_rate` → `NOT_LOADED`, nessun segnale; `get_frame_rate()` = 0 e `get_frame_end_ns()` = −1.
+- [ ] **`seek`**: il frame mostrato è quello che contiene l'istante richiesto (2000 → frame 2000–2040; 1290 → frame 1280–1320), la posizione è riportata a seek concluso, lo stato non cambia; fuori intervallo limitato a 0..durata (il log riporta la destinazione **effettiva**); in `PLAYING` il video continua dal nuovo punto; dopo la fine del video un `seek` seguito da `play()` riprende da lì, non da 0; un nuovo `load()` azzera subito frame e framerate.
+- [ ] **`step_ms`**: +200 → 200±5 ms, −200, limiti 0 e durata, **mette in pausa** se in `PLAYING` (polling spento); subito dopo un `seek` ancora in corso e in 5 passi ravvicinati parte dalla destinazione (440, poi 640 ms), non dalla posizione vecchia.
+- [ ] **Frame-step esatto (O1), 25 e 30 fps**: riferimento = i frame ottenuti avanzando di uno alla volta; poi indietro uno alla volta, salti di N (+5, −3, +10, −12), 6 passi indietro e 4 avanti **ravvicinati**, seek **esattamente sull'inizio** di un frame seguito subito da uno step indietro (a 30 fps i pts in ms distano 33/34 ms: senza il margine sull'ancora cade un frame troppo indietro), 100 passi avanti che si fermano sull'ultimo frame, indietro di uno da lì, step dopo un seek arbitrario, step durante la riproduzione (pausa + un solo frame). Ogni volta il frame è **esattamente** quello atteso.
+- [ ] **Framerate sconosciuto** (file con framerate variabile, `capssetter` a 0/1): `get_frame_rate()` = 0 e `step_frames(n)` ricade su n × 40 ms.
+- [ ] **Velocità**: 1.0 iniziale; ≤ 0, NaN e ∞ → `INVALID_ARGUMENT` senza cambiare nulla; da fermo vale al `play()`; misurata sulla posizione: 2.0 → 1.5–2.6x, 0.5 → 0.3–0.75x, 1.0 → 0.75–1.3x (tolleranze larghe per i runner lenti); cambiandola in riproduzione il video non salta (al più un frame indietro) e non si ferma; **sopravvive** a `seek()` e `stop()`; un nuovo `load()` la riporta a 1.0.
+- [ ] **Log**: `Timeline seek`, `Step (ms)`, `Step Frame`, `Velocità` nel modulo VIDEO; numeri con il punto decimale anche con la locale italiana.
+- **Mutation testing M2.7** (script ad hoc): 20 mutazioni (clamp, `at_end`, pausa dello step, seek pendente, ancora dalla fine del frame, step avanti sempre con evento, velocità ignorata/non azzerata/non validata, ripiego senza fps, margine di 1 ms, reset di `frame_info`, clamp ultimo/primo frame, log…): tutte rilevate tranne due equivalenti — «velocità uguale alla corrente non evita il seek» (solo lavoro risparmiato) e «`play()` non azzera il seek pendente» (l'`ASYNC_DONE` lo azzera comunque). Le lacune emerse (clamp superiore, margine, reset, ultimo frame) sono diventate test.
+- **Scoperte verificate**: (1) dopo un seek accurato il pts del buffer arrivato al sink è il punto di arrivo, non l'inizio del frame; (2) più `GST_EVENT_STEP` ravvicinati si sostituiscono (3 passi su 4 persi); (3) `INSTANT_RATE_CHANGE` con `matroskademux` dà un CRITICAL di GStreamer; (4) `step_ms` subito dopo un `seek` leggeva la posizione vecchia.
+
 ### Riepilogo atteso
 
 ```
@@ -307,7 +321,7 @@ deve riportare **14/14** allo stato attuale (`dummy`, `time_format`, `settings`,
 
 ## Cosa NON è ancora testabile
 
-- **Seek, frame-step, `playback_rate`, muto**: da M2.7 in poi. Oggi il player carica, riproduce, mette in pausa e ferma, e riporta posizione e durata (M2.4–M2.6), ma non si può ancora spostare a un punto arbitrario.
+- **Muto e volume**: da M2.8 in poi. Il player carica, riproduce, mette in pausa e ferma, riporta posizione e durata, e si sposta con seek, step e velocità (M2.4–M2.7).
 - **Interfaccia oltre la finestra vuota di M0.2**: griglia 2x2, timeline, marker a schermo, dialoghi, scorciatoie, tema, zoom/pan, titlebar custom (M3–M7). Le finestre di debug "Log" e "Moduli" sono previste in M2.9 (oggi esistono solo il filtro e il sink del logger, testati da `logger_filter`).
 - **Download/installazione delle dipendenze e dialog del primo avvio**: M2.11–M2.12. La sola *verifica* (M2.10) c'è: `syncview --check-deps`.
 - **Export**: M6.
