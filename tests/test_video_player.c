@@ -1387,6 +1387,13 @@ check_position_while_playing(const char *dir, gboolean with_window)
     assert(!syncview_video_player_is_ticking(player));  /* in pausa: nessun polling */
     assert(syncview_video_player_play(player, NULL));
     assert(syncview_video_player_is_ticking(player));  /* in PLAYING: attivo */
+    /* Su runner lenti (CI macOS) il primo frame arriva dopo un po': la frequenza si misura dal primo aggiornamento. */
+    for (gint64 deadline = g_get_monotonic_time() + 10 * G_USEC_PER_SEC;
+         ev.positions->len == 0 && g_get_monotonic_time() < deadline;) {
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
+    assert(ev.positions->len > 0);
     spin_for(800);
 
     guint n = ev.positions->len;
