@@ -1306,6 +1306,43 @@ last_pos(PosEvents *ev)
     return pos_at(ev, ev->positions->len - 1);
 }
 
+/*
+ * Il frame clock di GTK dipende dall'ambiente: su un runner senza display attivo (CI macOS) una finestra
+ * occlusa riceve pochissimi tick. Le verifiche che richiedono un frame clock regolare si eseguono solo se lo è.
+ */
+static gboolean
+tick_counter(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
+{
+    (void)widget;
+    (void)clock;
+    (*(guint *)data)++;
+    return G_SOURCE_CONTINUE;
+}
+
+static gboolean
+frame_clock_usable(void)
+{
+    static int verdict = -1;
+
+    if (verdict < 0) {
+        guint ticks = 0;
+        GtkWidget *window = gtk_window_new();
+        GtkWidget *label = gtk_label_new("tick");
+
+        gtk_window_set_child(GTK_WINDOW(window), label);
+        gtk_widget_add_tick_callback(label, tick_counter, &ticks, NULL);
+        gtk_window_present(GTK_WINDOW(window));
+        spin_for(500);
+        gtk_window_destroy(GTK_WINDOW(window));
+        spin_for(50);
+        verdict = ticks >= 10;  /* ~30 attesi a 60 Hz */
+        if (!verdict) {
+            g_printerr("frame clock irregolare (%u tick in 500 ms): verifiche sul frame clock saltate\n", ticks);
+        }
+    }
+    return verdict;
+}
+
 /* Finestra con il video, così il player ha un frame clock reale (tick callback). */
 typedef struct {
     GtkWidget *window;
@@ -1373,6 +1410,9 @@ test_load_reports_duration(const char *dir)
 static void
 check_position_while_playing(const char *dir, gboolean with_window)
 {
+    if (with_window && !frame_clock_usable()) {
+        return;
+    }
     char *path = make_video(dir, with_window ? "pw.webm" : "pf.webm", 320, 240, 100);
     PosEvents ev;
     SyncviewVideoPlayer *player = pos_player(with_window ? 1 : 0, &ev);
@@ -1580,6 +1620,9 @@ test_position_reset_on_reload_and_error(const char *dir)
 static void
 test_ticker_only_while_playing(const char *dir)
 {
+    if (!frame_clock_usable()) {
+        return;
+    }
     char *path = make_video(dir, "tk.webm", 320, 240, 25);
     PosEvents ev;
     SyncviewVideoPlayer *player = pos_player(0, &ev);
@@ -1622,6 +1665,9 @@ test_ticker_only_while_playing(const char *dir)
 static void
 test_tick_widget_destroyed_while_playing(const char *dir)
 {
+    if (!frame_clock_usable()) {
+        return;
+    }
     char *path = make_video(dir, "tw.webm", 320, 240, 100);
     PosEvents ev;
     SyncviewVideoPlayer *player = pos_player(1, &ev);
@@ -1650,6 +1696,9 @@ test_tick_widget_destroyed_while_playing(const char *dir)
 static void
 test_frame_clock_drives_the_ticks(const char *dir)
 {
+    if (!frame_clock_usable()) {
+        return;
+    }
     char *path = make_video(dir, "fc.webm", 320, 240, 100);
     PosEvents ev;
     SyncviewVideoPlayer *player = pos_player(0, &ev);
@@ -1703,7 +1752,7 @@ test_dispose_while_ticking(const char *dir)
         Shown shown = { NULL, NULL };
 
         assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
-        if (i % 2) {
+        if (i % 2 && frame_clock_usable()) {
             shown = show_window_for(player);
         }
         assert(syncview_video_player_play(player, NULL));
