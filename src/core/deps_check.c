@@ -187,12 +187,37 @@ item_free(DepsItem *item)
     g_free(item->title);
     g_free(item->detail);
     g_free(item->instructions);
+    g_free(item->package_manager);
+    g_strfreev(item->packages);
     g_free(item);
+}
+
+/* Come risolvere un componente mancante: risoluzione, testo per l'installazione a mano e, se installabile, pacchetti. */
+typedef struct {
+    DepsResolution resolution;
+    char *instructions;      /* owned */
+    char *package_manager;   /* owned, solo SYSTEM_PACKAGES */
+    char **packages;         /* owned, solo SYSTEM_PACKAGES */
+} InstallPlan;
+
+static InstallPlan
+plan_none(void)
+{
+    InstallPlan plan = { DEPS_RESOLUTION_NONE, NULL, NULL, NULL };
+    return plan;
+}
+
+/* Un piano "manuale" con un testo e una risoluzione espliciti (es. DOWNLOADABLE per ffmpeg su Windows/macOS). */
+static InstallPlan
+plan_text(DepsResolution resolution, char *instructions)
+{
+    InstallPlan plan = { resolution, instructions, NULL, NULL };
+    return plan;
 }
 
 static void
 report_add(DepsReport *report, const char *id, const char *title, DepsFeature feature, DepsStatus status,
-           DepsResolution resolution, char *detail, char *instructions)
+           char *detail, InstallPlan plan)
 {
     DepsItem *item = g_new0(DepsItem, 1);
 
@@ -200,9 +225,11 @@ report_add(DepsReport *report, const char *id, const char *title, DepsFeature fe
     item->title = g_strdup(title);
     item->feature = feature;
     item->status = status;
-    item->resolution = resolution;
+    item->resolution = plan.resolution;
     item->detail = detail ? detail : g_strdup("");
-    item->instructions = instructions ? instructions : g_strdup("");
+    item->instructions = plan.instructions ? plan.instructions : g_strdup("");
+    item->package_manager = plan.package_manager;
+    item->packages = plan.packages;
     g_ptr_array_add(report->items, item);
 }
 
@@ -305,10 +332,20 @@ deps_report_to_text(const DepsReport *report)
 
         g_string_append_printf(text, "%-22s %s (%s)\n    %s\n", tag, item->title, feature_label(item->feature),
                                item->detail);
-        if (item->status != DEPS_STATUS_OK && *item->instructions) {
-            g_string_append_printf(text, "    -> %s%s\n",
-                                   item->resolution == DEPS_RESOLUTION_DOWNLOADABLE ? "scaricabile dall'app; in alternativa: " : "",
-                                   item->instructions);
+        if (item->status != DEPS_STATUS_OK) {
+            if (item->resolution == DEPS_RESOLUTION_SYSTEM_PACKAGES && item->packages) {
+                char *packages = g_strjoinv(" ", item->packages);
+                g_string_append_printf(text, "    -> SyncView può installarlo (%s: %s); il sistema chiederà la password di amministratore\n",
+                                       item->package_manager, packages);
+                g_free(packages);
+            } else if (item->resolution == DEPS_RESOLUTION_DOWNLOADABLE) {
+                g_string_append(text, "    -> SyncView può scaricarlo\n");
+            }
+            if (*item->instructions) {
+                g_string_append_printf(text, "    %s %s\n",
+                                       item->resolution == DEPS_RESOLUTION_INSTRUCTIONS ? "->" : "   a mano:",
+                                       item->instructions);
+            }
         }
     }
 
@@ -317,6 +354,51 @@ deps_report_to_text(const DepsReport *report)
                            deps_report_can_export(report) ? "possibile" : "NON possibile",
                            deps_report_is_complete(report) ? "si" : "no");
     return g_string_free(text, FALSE);
+}
+
+char **
+deps_report_collect_packages(const DepsReport *report, gboolean include_optional, char **package_manager)
+{
+    GPtrArray *names = g_ptr_array_new_with_free_func(g_free);
+    char *pm = NULL;
+
+    for (guint i = 0; i < report->items->len; i++) {
+        const DepsItem *item = g_ptr_array_index(report->items, i);
+
+        /* Un componente OK ha risoluzione NONE: qui restano solo quelli mancanti installabili. */
+        if (item->resolution != DEPS_RESOLUTION_SYSTEM_PACKAGES || !item->packages) {
+            continue;
+        }
+        if (item->status == DEPS_STATUS_OPTIONAL_MISSING && !include_optional) {
+            continue;
+        }
+
+        if (!pm) {
+            pm = g_strdup(item->package_manager);
+        }
+        for (size_t k = 0; item->packages[k]; k++) {
+            gboolean dup = FALSE;
+            for (guint n = 0; n < names->len; n++) {
+                dup |= strcmp(g_ptr_array_index(names, n), item->packages[k]) == 0;
+            }
+            if (!dup) {
+                g_ptr_array_add(names, g_strdup(item->packages[k]));
+            }
+        }
+    }
+
+    if (package_manager) {
+        *package_manager = pm;
+    } else {
+        g_free(pm);
+    }
+
+    if (names->len == 0) {
+        g_ptr_array_free(names, TRUE);
+        return NULL;
+    }
+    g_ptr_array_add(names, NULL);
+    return (char **)g_ptr_array_free(names, FALSE);
 }
 
 void
@@ -347,37 +429,42 @@ deps_report_log(const DepsReport *report)
 
 typedef enum { PM_NONE, PM_PACMAN, PM_APT, PM_DNF, PM_ZYPPER } PackageManager;
 
-/* Nomi dei pacchetti per distribuzione; NULL = nome non verificato, si dà un'indicazione generica. */
+/*
+ * Nomi dei pacchetti per distribuzione. Un nome presente è un vero nome di pacchetto installabile dai repository
+ * predefiniti (verificato); NULL = non disponibile nei repository predefiniti o nome non verificato: in quel caso
+ * l'app non tenta l'installazione automatica e mostra la nota (`manual_note`) per l'installazione a mano.
+ */
 typedef struct {
     const char *arch;    /* pacman */
     const char *apt;
     const char *dnf;
     const char *zypper;
-    const char *brew_win_note;  /* macOS/Windows: indicazione testuale */
+    const char *manual_note;  /* dove trovarlo quando manca per qualche distribuzione */
 } PackageSet;
 
 static const PackageSet PKG_BASE = {
-    "gst-plugins-base", "gstreamer1.0-plugins-base", "gstreamer1-plugins-base", "gstreamer-plugins-base",
-    "GStreamer base",
+    "gst-plugins-base", "gstreamer1.0-plugins-base", "gstreamer1-plugins-base", "gstreamer-plugins-base", NULL,
 };
 static const PackageSet PKG_GOOD = {
-    "gst-plugins-good", "gstreamer1.0-plugins-good", "gstreamer1-plugins-good", "gstreamer-plugins-good",
-    "GStreamer good",
+    "gst-plugins-good", "gstreamer1.0-plugins-good", "gstreamer1-plugins-good", "gstreamer-plugins-good", NULL,
 };
 static const PackageSet PKG_BAD = {
-    "gst-plugins-bad", "gstreamer1.0-plugins-bad", "gstreamer1-plugins-bad-free", "gstreamer-plugins-bad",
-    "GStreamer bad",
+    "gst-plugins-bad", "gstreamer1.0-plugins-bad", "gstreamer1-plugins-bad-free", "gstreamer-plugins-bad", NULL,
 };
+/* gst-libav: su Fedora è in RPM Fusion e su openSUSE in Packman (repository di terze parti, non predefiniti). */
 static const PackageSet PKG_LIBAV = {
-    "gst-libav", "gstreamer1.0-libav", "gstreamer1-libav (da RPM Fusion)", "gstreamer-plugins-libav",
-    "GStreamer libav",
+    "gst-libav", "gstreamer1.0-libav", NULL, NULL,
+    "Fedora: gstreamer1-libav da RPM Fusion; openSUSE: gstreamer-plugins-libav da Packman",
 };
-/* Verificati: Arch gst-plugin-gtk4 (TESTING.md), Debian/Ubuntu gstreamer1.0-gtk4, Fedora gstreamer1-plugin-gtk4. */
+/* Verificati: Arch gst-plugin-gtk4, Debian/Ubuntu gstreamer1.0-gtk4, Fedora gstreamer1-plugin-gtk4; openSUSE non verificato. */
 static const PackageSet PKG_GTK4 = {
-    "gst-plugin-gtk4", "gstreamer1.0-gtk4", "gstreamer1-plugin-gtk4", NULL, "gst-plugins-rs (gtk4paintablesink)",
+    "gst-plugin-gtk4", "gstreamer1.0-gtk4", "gstreamer1-plugin-gtk4", NULL,
+    "openSUSE: pacchetto che fornisce il plugin GStreamer gtk4paintablesink (gst-plugins-rs)",
 };
+/* ffmpeg: su Fedora serve RPM Fusion (ffmpeg-free non include libx264); su openSUSE il ffmpeg completo è in Packman. */
 static const PackageSet PKG_FFMPEG = {
-    "ffmpeg", "ffmpeg", "ffmpeg (da RPM Fusion: ffmpeg-free non include libx264)", "ffmpeg", "ffmpeg",
+    "ffmpeg", "ffmpeg", NULL, NULL,
+    "Fedora: ffmpeg da RPM Fusion (ffmpeg-free non include libx264); openSUSE: ffmpeg da Packman",
 };
 
 static PackageManager
@@ -397,68 +484,82 @@ detect_package_manager(const DepsProbes *probes)
     return PM_NONE;
 }
 
-static char *
-linux_install_command(PackageManager pm, const PackageSet *const *sets, size_t n)
+static const char *
+package_name_for(PackageManager pm, const PackageSet *set)
 {
-    GPtrArray *names = g_ptr_array_new();
-    const char *verb = NULL;
-
-    for (size_t i = 0; i < n; i++) {
-        const char *name = pm == PM_PACMAN ? sets[i]->arch : pm == PM_APT ? sets[i]->apt
-                           : pm == PM_DNF ? sets[i]->dnf : sets[i]->zypper;
-        if (!name) {
-            g_ptr_array_free(names, TRUE);
-            return NULL;  /* nome non verificato per questa distribuzione */
-        }
-        g_ptr_array_add(names, (gpointer)name);
-    }
-    g_ptr_array_add(names, NULL);
-
-    verb = pm == PM_PACMAN ? "sudo pacman -S" : pm == PM_APT ? "sudo apt install"
-           : pm == PM_DNF ? "sudo dnf install" : "sudo zypper install";
-    char *joined = g_strjoinv(" ", (char **)names->pdata);
-    char *command = g_strdup_printf("%s %s", verb, joined);
-
-    g_free(joined);
-    g_ptr_array_free(names, TRUE);
-    return command;
+    return pm == PM_PACMAN ? set->arch : pm == PM_APT ? set->apt : pm == PM_DNF ? set->dnf : set->zypper;
 }
 
-/* Istruzioni per installare `sets` (i pacchetti che forniscono il componente) sulla piattaforma corrente. */
-static char *
-build_instructions(const DepsProbes *probes, const PackageSet *const *sets, size_t n, const char *what)
+static const char *
+package_manager_program(PackageManager pm)
+{
+    return pm == PM_PACMAN ? "pacman" : pm == PM_APT ? "apt-get" : pm == PM_DNF ? "dnf" : "zypper";
+}
+
+static const char *
+manual_install_verb(PackageManager pm)
+{
+    return pm == PM_PACMAN ? "sudo pacman -S" : pm == PM_APT ? "sudo apt install"
+           : pm == PM_DNF ? "sudo dnf install" : "sudo zypper install";
+}
+
+/* Piano per installare `sets` (i pacchetti che forniscono il componente) sulla piattaforma corrente. */
+static InstallPlan
+build_plan(const DepsProbes *probes, const PackageSet *const *sets, size_t n, const char *what)
 {
     switch (probes->platform) {
     case DEPS_PLATFORM_LINUX: {
         PackageManager pm = detect_package_manager(probes);
-        char *command = pm == PM_NONE ? NULL : linux_install_command(pm, sets, n);
+        gboolean all_named = pm != PM_NONE;
 
-        if (command) {
-            char *text = g_strdup_printf("Installa %s: %s", what, command);
-            g_free(command);
-            return text;
+        for (size_t i = 0; all_named && i < n; i++) {
+            all_named = package_name_for(pm, sets[i]) != NULL;
         }
 
-        /* Gestore sconosciuto o nome non verificato: elenco per famiglia di distribuzioni. */
-        GString *generic = g_string_new(NULL);
-        g_string_append_printf(generic, "Installa %s dal gestore di pacchetti della distribuzione (", what);
+        if (all_named) {
+            /* Installabile dall'app: nomi verificati per questo gestore. */
+            GPtrArray *names = g_ptr_array_new();
+            for (size_t i = 0; i < n; i++) {
+                g_ptr_array_add(names, g_strdup(package_name_for(pm, sets[i])));
+            }
+            g_ptr_array_add(names, NULL);
+
+            char *joined = g_strjoinv(" ", (char **)names->pdata);
+            InstallPlan plan = {
+                DEPS_RESOLUTION_SYSTEM_PACKAGES,
+                g_strdup_printf("Installa %s: %s %s", what, manual_install_verb(pm), joined),
+                g_strdup(package_manager_program(pm)),
+                (char **)g_ptr_array_free(names, FALSE),
+            };
+            g_free(joined);
+            return plan;
+        }
+
+        /* Nessun gestore riconosciuto, o nome non disponibile nei repository predefiniti: solo istruzioni. */
+        GString *text = g_string_new(NULL);
+        g_string_append_printf(text, "Installa %s dal gestore di pacchetti della distribuzione (", what);
         for (size_t i = 0; i < n; i++) {
-            g_string_append_printf(generic, "%sArch: %s; Debian/Ubuntu: %s; Fedora: %s", i ? " | " : "",
-                                   sets[i]->arch, sets[i]->apt, sets[i]->dnf ? sets[i]->dnf : "?");
+            g_string_append_printf(text, "%sArch: %s; Debian/Ubuntu: %s; Fedora: %s", i ? " | " : "",
+                                   sets[i]->arch, sets[i]->apt, sets[i]->dnf ? sets[i]->dnf : "non nei repository predefiniti");
+            if (sets[i]->manual_note) {
+                g_string_append_printf(text, "; %s", sets[i]->manual_note);
+            }
         }
-        g_string_append(generic, ")");
-        return g_string_free(generic, FALSE);
+        g_string_append(text, ")");
+        return plan_text(DEPS_RESOLUTION_INSTRUCTIONS, g_string_free(text, FALSE));
     }
     case DEPS_PLATFORM_WINDOWS:
-        return g_strdup_printf("Reinstalla SyncView: il pacchetto per Windows include %s. "
+        return plan_text(DEPS_RESOLUTION_INSTRUCTIONS,
+                         g_strdup_printf("Reinstalla SyncView: il pacchetto per Windows include %s. "
                                "In una build da sorgente con MSYS2: pacman -S mingw-w64-ucrt-x86_64-gst-plugins-base "
                                "mingw-w64-ucrt-x86_64-gst-plugins-good mingw-w64-ucrt-x86_64-gst-plugins-bad "
-                               "mingw-w64-ucrt-x86_64-gst-libav mingw-w64-ucrt-x86_64-gst-plugins-rs", what);
+                               "mingw-w64-ucrt-x86_64-gst-libav mingw-w64-ucrt-x86_64-gst-plugins-rs", what));
     case DEPS_PLATFORM_MACOS:
     default:
-        return g_strdup_printf("Reinstalla SyncView (il bundle per macOS include %s) oppure installa GStreamer 1.28 o "
+        return plan_text(DEPS_RESOLUTION_INSTRUCTIONS,
+                         g_strdup_printf("Reinstalla SyncView (il bundle per macOS include %s) oppure installa GStreamer 1.28 o "
                                "successivo dal sito ufficiale (il suo installer include gtk4paintablesink); "
-                               "verifica con: gst-inspect-1.0 <elemento>", what);
+                               "verifica con: gst-inspect-1.0 <elemento>", what));
     }
 }
 
@@ -507,8 +608,7 @@ check_any_of(DepsReport *report, const DepsProbes *probes, const char *id, const
     char *found = found_list(probes, names);
 
     if (found) {
-        report_add(report, id, title, feature, DEPS_STATUS_OK, DEPS_RESOLUTION_NONE,
-                   g_strdup_printf("Trovato: %s", found), NULL);
+        report_add(report, id, title, feature, DEPS_STATUS_OK, g_strdup_printf("Trovato: %s", found), plan_none());
         g_free(found);
         return;
     }
@@ -516,9 +616,8 @@ check_any_of(DepsReport *report, const DepsProbes *probes, const char *id, const
     char *names_joined = g_strjoinv(", ", (char **)names);
     report_add(report, id, title, feature,
                feature == DEPS_FEATURE_OPTIONAL ? DEPS_STATUS_OPTIONAL_MISSING : DEPS_STATUS_MISSING,
-               DEPS_RESOLUTION_INSTRUCTIONS,
                g_strdup_printf("%s (cercati: %s)", missing_text, names_joined),
-               build_instructions(probes, sets, n_sets, what));
+               build_plan(probes, sets, n_sets, what));
     g_free(names_joined);
 }
 
@@ -552,13 +651,13 @@ check_demuxers(DepsReport *report, const DepsProbes *probes)
 
     if (missing->len == 0) {
         report_add(report, "gst-demuxers", "Demuxer dei formati supportati", DEPS_FEATURE_PLAYBACK,
-                   DEPS_STATUS_OK, DEPS_RESOLUTION_NONE, g_strdup_printf("Tutti presenti: %s", ok->str), NULL);
+                   DEPS_STATUS_OK, g_strdup_printf("Tutti presenti: %s", ok->str), plan_none());
     } else {
         const PackageSet *sets[] = { &PKG_GOOD, &PKG_LIBAV };
         report_add(report, "gst-demuxers", "Demuxer dei formati supportati", DEPS_FEATURE_PLAYBACK,
-                   DEPS_STATUS_MISSING, DEPS_RESOLUTION_INSTRUCTIONS,
+                   DEPS_STATUS_MISSING,
                    g_strdup_printf("Formati senza demuxer: %s%s%s", missing->str, ok->len ? " — presenti: " : "", ok->str),
-                   build_instructions(probes, sets, G_N_ELEMENTS(sets), "i plugin GStreamer good e libav"));
+                   build_plan(probes, sets, G_N_ELEMENTS(sets), "i plugin GStreamer good e libav"));
     }
 
     g_string_free(missing, TRUE);
@@ -601,17 +700,17 @@ check_hw_decoders(DepsReport *report, const DepsProbes *probes)
 
     if (found) {
         report_add(report, "gst-hw-decoders", "Decoder video hardware", DEPS_FEATURE_OPTIONAL, DEPS_STATUS_OK,
-                   DEPS_RESOLUTION_NONE, g_strdup_printf("Disponibili: %s", found), NULL);
+                   g_strdup_printf("Disponibili: %s", found), plan_none());
         g_free(found);
         return;
     }
 
     const PackageSet *sets[] = { &PKG_BAD };
     report_add(report, "gst-hw-decoders", "Decoder video hardware", DEPS_FEATURE_OPTIONAL,
-               DEPS_STATUS_OPTIONAL_MISSING, DEPS_RESOLUTION_INSTRUCTIONS,
+               DEPS_STATUS_OPTIONAL_MISSING,
                g_strdup("Nessun decoder hardware trovato: la decodifica sarà software (più carico sulla CPU "
                         "con più video contemporanei)"),
-               build_instructions(probes, sets, G_N_ELEMENTS(sets), "i plugin GStreamer bad (decoder va/nvcodec) e i driver della GPU"));
+               build_plan(probes, sets, G_N_ELEMENTS(sets), "i plugin GStreamer bad (decoder va/nvcodec) e i driver della GPU"));
 }
 
 /* ffmpeg ------------------------------------------------------------ */
@@ -666,20 +765,33 @@ find_h264_encoder(const char *encoders_output)
     return joined;
 }
 
+/*
+ * Come ottenere ffmpeg: su Windows/macOS l'app lo scarica in ~/.syncview/deps (senza privilegi); su Linux si
+ * installa dai pacchetti della distribuzione (con elevazione gestita dal sistema) se il nome è verificato,
+ * altrimenti istruzioni.
+ */
+static InstallPlan
+ffmpeg_plan(const DepsProbes *probes, const PackageSet *const *sets, const char *what)
+{
+    InstallPlan plan = build_plan(probes, sets, 1, what);
+
+    if (probes->platform != DEPS_PLATFORM_LINUX) {
+        plan.resolution = DEPS_RESOLUTION_DOWNLOADABLE;
+    }
+    return plan;
+}
+
 static void
 check_ffmpeg(DepsReport *report, const DepsProbes *probes, const char *deps_dir)
 {
     const char *title = "ffmpeg";
-    /* Su Windows/macOS l'app può scaricarlo; su Linux va installato dal gestore di pacchetti. */
-    DepsResolution resolution = probes->platform == DEPS_PLATFORM_LINUX ? DEPS_RESOLUTION_INSTRUCTIONS
-                                                                        : DEPS_RESOLUTION_DOWNLOADABLE;
     const PackageSet *sets[] = { &PKG_FFMPEG };
     char *path = probes->find_program("ffmpeg", deps_dir, probes->user_data);
 
     if (!path) {
-        report_add(report, "ffmpeg", title, DEPS_FEATURE_EXPORT, DEPS_STATUS_MISSING, resolution,
+        report_add(report, "ffmpeg", title, DEPS_FEATURE_EXPORT, DEPS_STATUS_MISSING,
                    g_strdup_printf("ffmpeg non trovato (cercato in %s e nel PATH)", deps_dir ? deps_dir : "-"),
-                   build_instructions(probes, sets, 1, "ffmpeg (con encoder H.264, es. libx264)"));
+                   ffmpeg_plan(probes, sets, "ffmpeg (con encoder H.264, es. libx264)"));
         return;
     }
 
@@ -688,9 +800,9 @@ check_ffmpeg(DepsReport *report, const DepsProbes *probes, const char *deps_dir)
     char *version = version_out ? parse_ffmpeg_version(version_out) : NULL;
 
     if (!version_out) {
-        report_add(report, "ffmpeg", title, DEPS_FEATURE_EXPORT, DEPS_STATUS_MISSING, resolution,
+        report_add(report, "ffmpeg", title, DEPS_FEATURE_EXPORT, DEPS_STATUS_MISSING,
                    g_strdup_printf("Trovato %s ma non eseguibile (o senza risposta entro 5 s)", path),
-                   build_instructions(probes, sets, 1, "una versione funzionante di ffmpeg"));
+                   ffmpeg_plan(probes, sets, "una versione funzionante di ffmpeg"));
         g_free(path);
         return;
     }
@@ -700,13 +812,14 @@ check_ffmpeg(DepsReport *report, const DepsProbes *probes, const char *deps_dir)
     char *h264 = encoders_out ? find_h264_encoder(encoders_out) : NULL;
 
     if (h264) {
-        report_add(report, "ffmpeg", title, DEPS_FEATURE_EXPORT, DEPS_STATUS_OK, DEPS_RESOLUTION_NONE,
-                   g_strdup_printf("%s, versione %s, encoder H.264: %s", path, version ? version : "sconosciuta", h264), NULL);
+        report_add(report, "ffmpeg", title, DEPS_FEATURE_EXPORT, DEPS_STATUS_OK,
+                   g_strdup_printf("%s, versione %s, encoder H.264: %s", path, version ? version : "sconosciuta", h264),
+                   plan_none());
     } else {
-        report_add(report, "ffmpeg", title, DEPS_FEATURE_EXPORT, DEPS_STATUS_MISSING, resolution,
+        report_add(report, "ffmpeg", title, DEPS_FEATURE_EXPORT, DEPS_STATUS_MISSING,
                    g_strdup_printf("%s (versione %s) non ha nessun encoder H.264 (libx264 o hardware): l'export non è possibile",
                                    path, version ? version : "sconosciuta"),
-                   build_instructions(probes, sets, 1, "ffmpeg con encoder H.264 (es. libx264)"));
+                   ffmpeg_plan(probes, sets, "ffmpeg con encoder H.264 (es. libx264)"));
     }
 
     g_free(h264);

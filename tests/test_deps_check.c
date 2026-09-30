@@ -403,16 +403,33 @@ test_ffmpeg_search_directory(void)
 }
 
 static void
-test_install_instructions(void)
+assert_packages(const DepsItem *it, const char *pm, const char *const *expected)
 {
-    struct {
-        const char *pm_program;
-        const char *expect_gtk4;
-        const char *expect_ffmpeg;
-    } cases[] = {
-        { "pacman", "sudo pacman -S gst-plugin-gtk4", "sudo pacman -S ffmpeg" },
-        { "apt-get", "sudo apt install gstreamer1.0-gtk4", "sudo apt install ffmpeg" },
-        { "dnf", "sudo dnf install gstreamer1-plugin-gtk4", "sudo dnf install ffmpeg" },
+    assert(it->resolution == DEPS_RESOLUTION_SYSTEM_PACKAGES);
+    assert(it->package_manager && strcmp(it->package_manager, pm) == 0);
+    assert(it->packages != NULL);
+    size_t n = 0;
+    for (; expected[n]; n++) {
+        assert(it->packages[n] && strcmp(it->packages[n], expected[n]) == 0);
+    }
+    assert(it->packages[n] == NULL);  /* né più né meno di quelli attesi */
+}
+
+static void
+assert_not_auto(const DepsItem *it)
+{
+    assert(it->resolution != DEPS_RESOLUTION_SYSTEM_PACKAGES);
+    assert(it->package_manager == NULL && it->packages == NULL);
+}
+
+static void
+test_system_packages_plan(void)
+{
+    /* Arch / Debian-Ubuntu / Fedora: il plugin gtk4 è installabile dall'app con i nomi verificati. */
+    struct { const char *pm_program; const char *pm; const char *gtk4_pkg; const char *manual; } cases[] = {
+        { "pacman", "pacman", "gst-plugin-gtk4", "sudo pacman -S gst-plugin-gtk4" },
+        { "apt-get", "apt-get", "gstreamer1.0-gtk4", "sudo apt install gstreamer1.0-gtk4" },
+        { "dnf", "dnf", "gstreamer1-plugin-gtk4", "sudo dnf install gstreamer1-plugin-gtk4" },
     };
 
     for (size_t i = 0; i < G_N_ELEMENTS(cases); i++) {
@@ -420,36 +437,88 @@ test_install_instructions(void)
         Fake *f = fake_new(DEPS_PLATFORM_LINUX, &probes);
         g_hash_table_insert(f->programs, g_strdup(cases[i].pm_program), g_strdup("/usr/bin/pm"));
         fake_remove(f, "gtk4paintablesink");
-        g_hash_table_remove(f->programs, "ffmpeg");
 
         DepsReport *r = deps_check_run(&probes, "/deps");
-        assert(HAS(item(r, "gst-gtk4sink")->instructions, cases[i].expect_gtk4));
-        assert(HAS(item(r, "ffmpeg")->instructions, cases[i].expect_ffmpeg));
+        const char *expected[] = { cases[i].gtk4_pkg, NULL };
+        assert_packages(item(r, "gst-gtk4sink"), cases[i].pm, expected);
+        assert(HAS(item(r, "gst-gtk4sink")->instructions, cases[i].manual));  /* ripiego a mano sempre presente */
+        assert(item(r, "gst-gtk4sink")->status == DEPS_STATUS_MISSING);
         deps_report_free(r);
         fake_free(f);
     }
 
-    /* zypper: il nome del pacchetto gtk4 non è verificato -> indicazione generica con i nomi delle altre distro. */
+    /* Componente presente: nessun piano. */
     DepsProbes probes;
     Fake *f = fake_new(DEPS_PLATFORM_LINUX, &probes);
-    g_hash_table_insert(f->programs, g_strdup("zypper"), g_strdup("/usr/bin/zypper"));
-    fake_remove(f, "gtk4paintablesink");
+    g_hash_table_insert(f->programs, g_strdup("pacman"), g_strdup("/usr/bin/pacman"));
     DepsReport *r = deps_check_run(&probes, "/deps");
-    const char *txt = item(r, "gst-gtk4sink")->instructions;
-    assert(!HAS(txt, "zypper install") && HAS(txt, "gst-plugin-gtk4") && HAS(txt, "gstreamer1.0-gtk4"));
+    for (size_t k = 0; k < deps_report_count(r); k++) {
+        assert_not_auto(deps_report_get(r, k));
+    }
     deps_report_free(r);
 
-    /* Nessun gestore di pacchetti riconosciuto: stessa indicazione generica. */
+    /* Più set per lo stesso componente (demuxer: good + libav) e nessun duplicato. */
+    fake_remove(f, "qtdemux");
+    r = deps_check_run(&probes, "/deps");
+    const char *good_libav[] = { "gst-plugins-good", "gst-libav", NULL };
+    assert_packages(item(r, "gst-demuxers"), "pacman", good_libav);
+    deps_report_free(r);
+
+    /* ffmpeg assente su Arch/Debian: installabile; su Fedora e openSUSE no (RPM Fusion/Packman). */
+    g_hash_table_remove(f->programs, "ffmpeg");
+    r = deps_check_run(&probes, "/deps");
+    const char *ff[] = { "ffmpeg", NULL };
+    assert_packages(item(r, "ffmpeg"), "pacman", ff);
+    deps_report_free(r);
+
+    g_hash_table_remove(f->programs, "pacman");
+    g_hash_table_insert(f->programs, g_strdup("apt-get"), g_strdup("/usr/bin/apt-get"));
+    r = deps_check_run(&probes, "/deps");
+    assert_packages(item(r, "ffmpeg"), "apt-get", ff);
+    deps_report_free(r);
+
+    g_hash_table_remove(f->programs, "apt-get");
+    g_hash_table_insert(f->programs, g_strdup("dnf"), g_strdup("/usr/bin/dnf"));
+    r = deps_check_run(&probes, "/deps");
+    assert_not_auto(item(r, "ffmpeg"));
+    assert(item(r, "ffmpeg")->resolution == DEPS_RESOLUTION_INSTRUCTIONS);
+    assert(HAS(item(r, "ffmpeg")->instructions, "RPM Fusion"));
+    deps_report_free(r);
+
+    /* Fedora: anche gst-libav (decoder H.264 senza libav) è solo a mano; il plugin gtk4 invece è automatico. */
+    fake_remove(f, "avdec_h264");
+    fake_remove(f, "vah264dec");
+    fake_remove(f, "gtk4paintablesink");
+    r = deps_check_run(&probes, "/deps");
+    assert_not_auto(item(r, "gst-decoder-h264"));
+    assert(HAS(item(r, "gst-decoder-h264")->instructions, "RPM Fusion"));
+    const char *gtk4_dnf[] = { "gstreamer1-plugin-gtk4", NULL };
+    assert_packages(item(r, "gst-gtk4sink"), "dnf", gtk4_dnf);
+    deps_report_free(r);
+
+    /* openSUSE: nome del pacchetto gtk4 non verificato -> niente installazione automatica. */
+    g_hash_table_remove(f->programs, "dnf");
+    g_hash_table_insert(f->programs, g_strdup("zypper"), g_strdup("/usr/bin/zypper"));
+    r = deps_check_run(&probes, "/deps");
+    assert_not_auto(item(r, "gst-gtk4sink"));
+    assert(item(r, "gst-gtk4sink")->resolution == DEPS_RESOLUTION_INSTRUCTIONS);
+    assert(!HAS(item(r, "gst-gtk4sink")->instructions, "zypper install"));
+    assert(HAS(item(r, "gst-gtk4sink")->instructions, "gst-plugin-gtk4") && HAS(item(r, "gst-gtk4sink")->instructions, "gstreamer1.0-gtk4"));
+    deps_report_free(r);
+
+    /* Nessun gestore di pacchetti riconosciuto: solo istruzioni generiche. */
     g_hash_table_remove(f->programs, "zypper");
     r = deps_check_run(&probes, "/deps");
+    assert_not_auto(item(r, "gst-gtk4sink"));
     assert(HAS(item(r, "gst-gtk4sink")->instructions, "Fedora: gstreamer1-plugin-gtk4"));
     deps_report_free(r);
     fake_free(f);
 
-    /* Windows e macOS: non comandi di un gestore di pacchetti Linux. */
+    /* Windows e macOS: nessun pacchetto di sistema e nessun comando Linux. */
     f = fake_new(DEPS_PLATFORM_WINDOWS, &probes);
     fake_remove(f, "gtk4paintablesink");
     r = deps_check_run(&probes, "/deps");
+    assert_not_auto(item(r, "gst-gtk4sink"));
     assert(HAS(item(r, "gst-gtk4sink")->instructions, "Reinstalla SyncView") && HAS(item(r, "gst-gtk4sink")->instructions, "gst-plugins-rs"));
     assert(!HAS(item(r, "gst-gtk4sink")->instructions, "sudo"));
     deps_report_free(r);
@@ -458,7 +527,60 @@ test_install_instructions(void)
     f = fake_new(DEPS_PLATFORM_MACOS, &probes);
     fake_remove(f, "gtk4paintablesink");
     r = deps_check_run(&probes, "/deps");
+    assert_not_auto(item(r, "gst-gtk4sink"));
     assert(HAS(item(r, "gst-gtk4sink")->instructions, "GStreamer 1.28") && !HAS(item(r, "gst-gtk4sink")->instructions, "sudo"));
+    deps_report_free(r);
+    fake_free(f);
+}
+
+static void
+test_collect_packages(void)
+{
+    DepsProbes probes;
+    Fake *f = fake_new(DEPS_PLATFORM_LINUX, &probes);
+    g_hash_table_insert(f->programs, g_strdup("pacman"), g_strdup("/usr/bin/pacman"));
+
+    /* Sistema completo: niente da installare. */
+    DepsReport *r = deps_check_run(&probes, "/deps");
+    char *pm = (char *)"non impostato";
+    assert(deps_report_collect_packages(r, TRUE, &pm) == NULL && pm == NULL);
+    deps_report_free(r);
+
+    /* Mancano gtk4, H.264 (libav), HEVC (opzionale), ffmpeg e i decoder hardware (opzionale). */
+    fake_remove(f, "gtk4paintablesink");
+    fake_remove(f, "avdec_h264");
+    fake_remove(f, "vah264dec");
+    fake_remove(f, "avdec_h265");
+    g_hash_table_remove(f->programs, "ffmpeg");
+    r = deps_check_run(&probes, "/deps");
+
+    /* Solo i richiesti: nell'ordine dei componenti, senza duplicati. */
+    char **required = deps_report_collect_packages(r, FALSE, &pm);
+    assert(required != NULL && pm && strcmp(pm, "pacman") == 0);
+    assert(g_strv_length(required) == 3);
+    assert(strcmp(required[0], "gst-plugin-gtk4") == 0 && strcmp(required[1], "gst-libav") == 0 && strcmp(required[2], "ffmpeg") == 0);
+    g_strfreev(required);
+    g_free(pm);
+
+    /* Con gli opzionali: HEVC riusa gst-libav (già presente, nessun duplicato), i decoder hardware aggiungono gst-plugins-bad. */
+    char **all = deps_report_collect_packages(r, TRUE, NULL);
+    assert(all != NULL && g_strv_length(all) == 4);
+    assert(strcmp(all[0], "gst-plugin-gtk4") == 0 && strcmp(all[1], "gst-libav") == 0);
+    assert(strcmp(all[2], "gst-plugins-bad") == 0 && strcmp(all[3], "ffmpeg") == 0);  /* ordine dei componenti: hw prima di ffmpeg */
+    for (guint a = 0; all[a]; a++) {
+        for (guint b = a + 1; all[b]; b++) {
+            assert(strcmp(all[a], all[b]) != 0);
+        }
+    }
+    g_strfreev(all);
+    deps_report_free(r);
+    fake_free(f);
+
+    /* Windows/macOS: nessun pacchetto di sistema. */
+    f = fake_new(DEPS_PLATFORM_MACOS, &probes);
+    fake_remove(f, "gtk4paintablesink");
+    r = deps_check_run(&probes, "/deps");
+    assert(deps_report_collect_packages(r, TRUE, &pm) == NULL && pm == NULL);
     deps_report_free(r);
     fake_free(f);
 }
@@ -476,7 +598,8 @@ test_text_and_log(const char *dir)
     char *text = deps_report_to_text(r);
     assert(HAS(text, "[OK]") && HAS(text, "[MANCANTE]") && HAS(text, "[OPZIONALE MANCANTE]"));
     assert(HAS(text, "gtk4paintablesink") && HAS(text, "(riproduzione)") && HAS(text, "(export)") && HAS(text, "(opzionale)"));
-    assert(HAS(text, "sudo pacman -S gst-plugin-gtk4"));
+    assert(HAS(text, "SyncView può installarlo (pacman: gst-plugin-gtk4)") && HAS(text, "password di amministratore"));
+    assert(HAS(text, "a mano: Installa il plugin GStreamer gtk4 (gst-plugins-rs): sudo pacman -S gst-plugin-gtk4"));
     assert(HAS(text, "Riproduzione: NON possibile | Export: possibile | Completo: no"));
     g_free(text);
 
@@ -612,7 +735,8 @@ main(void)
     test_hw_decoders_per_platform();
     test_ffmpeg();
     test_ffmpeg_search_directory();
-    test_install_instructions();
+    test_system_packages_plan();
+    test_collect_packages();
     test_text_and_log(dir);
     test_real_probes_invariants();
 #ifndef G_OS_WIN32

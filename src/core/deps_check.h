@@ -44,10 +44,18 @@ typedef enum {
     DEPS_STATUS_OPTIONAL_MISSING,  /* componente opzionale assente */
 } DepsStatus;
 
+/*
+ * Come si ottiene un componente mancante. L'app deve poterlo installare da sola
+ * (M2.11); `INSTRUCTIONS` è solo il ripiego quando non esiste un modo automatico
+ * verificato.
+ */
 typedef enum {
-    DEPS_RESOLUTION_NONE,          /* niente da fare (stato OK) */
-    DEPS_RESOLUTION_DOWNLOADABLE,  /* l'app può scaricarlo (M2.11), previo consenso */
-    DEPS_RESOLUTION_INSTRUCTIONS,  /* va installato dall'utente: vedi `instructions` */
+    DEPS_RESOLUTION_NONE,             /* niente da fare (stato OK) */
+    DEPS_RESOLUTION_SYSTEM_PACKAGES,  /* pacchetti della distribuzione, installati dall'app tramite il gestore
+                                         di pacchetti con elevazione dei privilegi gestita dal sistema (la
+                                         password la chiede il sistema, mai l'app): vedi package_manager/packages */
+    DEPS_RESOLUTION_DOWNLOADABLE,     /* artefatto scaricato dall'app in ~/.syncview/deps, senza privilegi */
+    DEPS_RESOLUTION_INSTRUCTIONS,     /* nessun modo automatico verificato: va installato a mano (vedi `instructions`) */
 } DepsResolution;
 
 typedef struct {
@@ -57,7 +65,15 @@ typedef struct {
     DepsStatus status;
     DepsResolution resolution;
     char *detail;        /* cosa è stato trovato / cosa manca (mai NULL) */
-    char *instructions;  /* come risolvere (mai NULL; "" se status OK) */
+    char *instructions;  /* come risolvere a mano (mai NULL; "" se status OK): ripiego anche quando l'app può installare */
+
+    /*
+     * Solo per resolution == DEPS_RESOLUTION_SYSTEM_PACKAGES (altrimenti NULL): programma del gestore di pacchetti
+     * ("pacman", "apt-get", "dnf", "zypper") e nomi dei pacchetti, NULL-terminati. Sono nomi da una tabella interna
+     * verificata, mai testo preso da input esterno: l'installer li passa al gestore come argomenti, senza shell.
+     */
+    char *package_manager;
+    char **packages;
 } DepsItem;
 
 typedef struct DepsReport DepsReport;
@@ -104,6 +120,14 @@ gboolean deps_report_can_play(const DepsReport *report);
 gboolean deps_report_can_export(const DepsReport *report);
 /* TRUE se tutto è OK, opzionali compresi. */
 gboolean deps_report_is_complete(const DepsReport *report);
+
+/*
+ * Pacchetti di sistema da installare per risolvere i componenti mancanti con resolution SYSTEM_PACKAGES:
+ * senza duplicati, nell'ordine dei componenti, NULL-terminati (da liberare con g_strfreev); NULL se non ce ne
+ * sono. I componenti opzionali sono inclusi solo con include_optional. *package_manager riceve il programma
+ * del gestore (g_free), o NULL. Tutti i componenti di un report usano lo stesso gestore.
+ */
+char **deps_report_collect_packages(const DepsReport *report, gboolean include_optional, char **package_manager);
 
 /* Report leggibile, una riga per componente + istruzioni per i mancanti. Da liberare con g_free. */
 char *deps_report_to_text(const DepsReport *report);
