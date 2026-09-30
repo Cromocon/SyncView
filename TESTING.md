@@ -176,12 +176,18 @@ Un test C usa `assert()`: se passa non stampa nulla ed esce con codice 0; se una
 - [ ] `syncview:module_logging` → **OK**: in modalità normale i log di azione utente/errore dei moduli finiscono sul file (database creato, batch save, migrazione JSON→SQLite, errore batch su violazione UNIQUE, `user_paths.json` salvato, percorso impostato/rimosso) e `stderr` resta vuoto; in debug, su file e stderr, compaiono anche gli eventi del piano (`[SYNC]` calculate/sync_all/setter, `[MARKER]` SQL con righe coinvolte, caricamento, store add/update/remove).
 - [ ] Manuale (richiede display): `./build/src/syncview --debug` stampa su stderr `Applicazione SyncView avviata` e `[UI] Finestra principale creata`; senza `--debug` stderr vuoto e il file `~/.syncview/syncview_log.txt` contiene solo le righe INFO.
 
+### M1.15 — Filtro per modulo e sink del logger
+
+- [ ] `syncview:logger_filter` → **OK**.
+- [ ] Copre: nomi degli 8 moduli e default tutti abilitati; filtro applicato a **file, stderr e sink** (modulo disabilitato → sparisce ovunque, riabilitato → torna); mappatura delle categorie storiche sui moduli e livello corretto per ogni funzione `log_*`; `ERROR` mai filtrato (nemmeno con tutti i moduli disabilitati, nemmeno `log_export` fallito con `EXPORT` disabilitato); `logger_init()` riporta il filtro al default; filtro attivo anche in modalità normale (sul file) senza alcun sink invocato e con stderr vuoto; più sink, rimozione e id sconosciuti; sink rientrante (il log emesso dal sink non rientra nei sink ma finisce sul file, registrare/rimuovere sink dal sink non va in deadlock); 4 thread × 200 messaggi senza perdite con toggle concorrente del filtro.
+- Nota: ThreadSanitizer non è affidabile su questi test perché `libglib` di sistema non è instrumentata (segnala come race anche accessi protetti da `GMutex`); la concorrenza è verificata dal test multi-thread + ASan.
+
 ### Riepilogo atteso
 
 ```
 meson test -C build
 ```
-deve riportare **10/10 OK** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`).
+deve riportare **11/11 OK** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`).
 
 ---
 

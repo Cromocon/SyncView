@@ -24,6 +24,67 @@
  * Thread-safe (GStreamer logga da thread propri).
  */
 
+/* --- Livelli, moduli, filtro e sink (finestre di debug) --- */
+
+typedef enum {
+    LOGGER_LEVEL_DEBUG,
+    LOGGER_LEVEL_INFO,
+    LOGGER_LEVEL_WARNING,
+    LOGGER_LEVEL_ERROR,
+} LoggerLevel;
+
+/*
+ * Modulo di provenienza di un messaggio. Le categorie storiche si
+ * mappano così: log_user_action -> USER; log_video_action/log_playback/
+ * log_timeline_seek -> VIDEO; log_export/log_export_action -> EXPORT;
+ * log_sync -> SYNC; log_marker -> MARKER; log_gst -> GST; log_ui -> UI;
+ * log_error e i messaggi del logger stesso (avvio) -> APP.
+ */
+typedef enum {
+    LOGGER_MODULE_APP,
+    LOGGER_MODULE_USER,
+    LOGGER_MODULE_VIDEO,
+    LOGGER_MODULE_EXPORT,
+    LOGGER_MODULE_SYNC,
+    LOGGER_MODULE_MARKER,
+    LOGGER_MODULE_GST,
+    LOGGER_MODULE_UI,
+    LOGGER_MODULE_COUNT
+} LoggerModule;
+
+/* Nome breve ("SYNC", "MARKER", ...) per le UI; "?" se module non è valido. */
+const char *logger_module_name(LoggerModule module);
+
+/*
+ * Abilita/disabilita i messaggi di un modulo su TUTTE le destinazioni (file,
+ * stderr, sink). Default: tutti abilitati; logger_init() li riabilita.
+ * I messaggi di livello ERROR non vengono mai filtrati. Thread-safe.
+ * Questa è l'unica API che legge/scrive il filtro: i moduli che loggano
+ * non la usano (la usa la finestra "Moduli" di debug).
+ */
+void logger_set_module_enabled(LoggerModule module, gboolean enabled);
+gboolean logger_is_module_enabled(LoggerModule module);
+
+/*
+ * Sink: callback che riceve ogni messaggio effettivamente emesso (dopo il
+ * filtro), oltre a file e stderr. Invocati SOLO in modalità debug.
+ *  - Il sink gira nel thread che ha chiamato log_*() (spesso un thread
+ *    GStreamer o worker): non deve toccare widget GTK direttamente, ma
+ *    accodare e rimandare al main thread (g_idle_add).
+ *  - `timestamp` e `message` valgono solo durante la chiamata (copiarli).
+ *  - I log emessi da dentro un sink non vengono recapitati ai sink (nessuna
+ *    ricorsione) ma vanno comunque su file/stderr.
+ *  - Il sink non è invocato con il lock del logger: può chiamare
+ *    logger_add_sink/logger_remove_sink. Dopo logger_remove_sink() una
+ *    chiamata già in corso in un altro thread può ancora completarsi.
+ */
+typedef void (*LoggerSinkFunc)(LoggerLevel level, LoggerModule module, const char *timestamp,
+                               const char *message, gpointer user_data);
+
+/* Registra un sink; ritorna un id (> 0) da passare a logger_remove_sink(). */
+guint logger_add_sink(LoggerSinkFunc func, gpointer user_data);
+void logger_remove_sink(guint sink_id);
+
 /* ~/.syncview/syncview_log.txt. Il chiamante libera con g_free(). */
 char *logger_default_file(void);
 
