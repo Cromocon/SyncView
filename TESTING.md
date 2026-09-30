@@ -182,6 +182,20 @@ Un test C usa `assert()`: se passa non stampa nulla ed esce con codice 0; se una
 - [ ] Copre: nomi degli 8 moduli e default tutti abilitati; filtro applicato a **file, stderr e sink** (modulo disabilitato → sparisce ovunque, riabilitato → torna); mappatura delle categorie storiche sui moduli e livello corretto per ogni funzione `log_*`; `ERROR` mai filtrato (nemmeno con tutti i moduli disabilitati, nemmeno `log_export` fallito con `EXPORT` disabilitato); `logger_init()` riporta il filtro al default; filtro attivo anche in modalità normale (sul file) senza alcun sink invocato e con stderr vuoto; più sink, rimozione e id sconosciuti; sink rientrante (il log emesso dal sink non rientra nei sink ma finisce sul file, registrare/rimuovere sink dal sink non va in deadlock); 4 thread × 200 messaggi senza perdite con toggle concorrente del filtro.
 - Nota: ThreadSanitizer non è affidabile su questi test perché `libglib` di sistema non è instrumentata (segnala come race anche accessi protetti da `GMutex`); la concorrenza è verificata dal test multi-thread + ASan.
 
+### M1.16 — Passata sanitizer completa
+
+Da una build pulita, su tutti i test M1.1–M1.15:
+
+```
+meson setup build-asan -Db_sanitize=address -Db_lundef=false --buildtype=debug
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:abort_on_error=1 meson test -C build-asan
+```
+
+- [ ] 11/11 **OK**, zero errori ASan e **zero leak** (LeakSanitizer).
+- [ ] Stessa passata con `-Db_sanitize=address,undefined` → 11/11 OK, zero `runtime error` UBSan.
+- Prima di fidarsi di "zero leak" verificare che LeakSanitizer sia attivo nell'ambiente (alcuni sandbox/container lo disabilitano in silenzio): un programma di prova che perde 123 byte deve produrre `SUMMARY: AddressSanitizer: 123 byte(s) leaked`.
+- ThreadSanitizer **non** è un criterio affidabile con `libglib` di sistema (non instrumentata: falsi positivi sui `GMutex`).
+
 ### Riepilogo atteso
 
 ```

@@ -7,7 +7,7 @@ Per il riferimento architetturale completo (non ancora implementato) vedi la sez
 ## Stato implementativo
 
 - **M0 (Scaffolding)**: ✅ completa (M0.1-M0.6). Build Meson funzionante, tutte le dipendenze collegate, CI multi-piattaforma (Linux/macOS/Windows) verde.
-- **M1 (Core logic, nessuna dipendenza da GTK)**: 🚧 in corso — completate M1.1-M1.15, manca M1.16 (passata ASan finale).
+- **M1 (Core logic, nessuna dipendenza da GTK)**: ✅ completa (M1.1-M1.16). 11 test Meson verdi su Linux/macOS/Windows in CI; passata ASan (leak detection attiva) e ASan+UBSan pulite.
 - **M2-M8**: non ancora iniziate.
 
 ### Moduli implementati
