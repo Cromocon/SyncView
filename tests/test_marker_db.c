@@ -345,6 +345,70 @@ test_save_batch_rolls_back_on_error(const char *dir)
     g_free(path);
 }
 
+static void
+test_soft_delete(const char *dir)
+{
+    char *path = g_build_filename(dir, "softdelete.db", NULL);
+    MarkerDb *db = marker_db_open(path, NULL);
+
+    MarkerStore *store = marker_store_new();
+    char *ids[3];
+    for (int i = 0; i < 3; i++) {
+        ids[i] = g_strdup(marker_store_add(store, 1000 * (i + 1), "#000000", "d", NULL, i)->id);
+    }
+    assert(marker_db_save_batch(db, store, NULL));
+    marker_store_free(store);
+
+    char *sql = g_strdup_printf("SELECT updated_at FROM markers WHERE id = '%s'", ids[1]);
+    char *updated_before = query_scalar(path, sql);
+    g_free(sql);
+
+    assert(marker_db_delete(db, ids[1], NULL));
+
+    /* Riga ancora presente con is_deleted=1 e dati intatti (soft, non hard delete). */
+    sql = g_strdup_printf("SELECT is_deleted || '|' || timestamp || '|' || description FROM markers "
+                          "WHERE id = '%s'", ids[1]);
+    char *row = query_scalar(path, sql);
+    g_free(sql);
+    assert(row && strcmp(row, "1|2000|d") == 0);
+    g_free(row);
+
+    /* updated_at aggiornato, ISO8601. */
+    sql = g_strdup_printf("SELECT updated_at FROM markers WHERE id = '%s'", ids[1]);
+    char *updated_after = query_scalar(path, sql);
+    g_free(sql);
+    assert(strcmp(updated_before, updated_after) != 0 && updated_after[10] == 'T');
+    g_free(updated_before);
+    g_free(updated_after);
+
+    /* Gli altri marker non sono toccati. */
+    char *others = query_scalar(path, "SELECT count(*) FROM markers WHERE is_deleted = 0");
+    assert(strcmp(others, "2") == 0);
+    g_free(others);
+
+    /* Assente da load_all, presente con include_deleted. */
+    MarkerStore *loaded = marker_db_load_all(db, FALSE, NULL);
+    assert(marker_store_count(loaded) == 2);
+    assert(marker_store_find_by_id(loaded, ids[1]) == NULL);
+    marker_store_free(loaded);
+    loaded = marker_db_load_all(db, TRUE, NULL);
+    assert(marker_store_count(loaded) == 3);
+    marker_store_free(loaded);
+
+    /* Idempotente; id inesistente non è un errore e non modifica nulla. */
+    assert(marker_db_delete(db, ids[1], NULL));
+    assert(marker_db_delete(db, "inesistente", NULL));
+    char *deleted = query_scalar(path, "SELECT count(*) FROM markers WHERE is_deleted = 1");
+    assert(strcmp(deleted, "1") == 0);
+    g_free(deleted);
+
+    for (int i = 0; i < 3; i++) {
+        g_free(ids[i]);
+    }
+    marker_db_free(db);
+    g_free(path);
+}
+
 int
 main(void)
 {
@@ -359,6 +423,7 @@ main(void)
     test_save_load_roundtrip(dir);
     test_load_excludes_deleted(dir);
     test_save_batch_rolls_back_on_error(dir);
+    test_soft_delete(dir);
 
     marker_db_free(NULL);
 

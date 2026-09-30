@@ -150,6 +150,11 @@ Un test C usa `assert()`: se passa non stampa nulla ed esce con codice 0; se una
 - [ ] `syncview:marker_db` → **OK** (stesso test di M1.9, esteso).
 - [ ] Copre: round-trip di 50 marker (timestamp duplicati, `video_index` -1/0..3, descrizioni con apici/virgolette/accenti, default di category/description) con confronto campo per campo, `video_index` globale salvato come `NULL`, upsert (stesso numero di righe, campi aggiornati, `created_at` invariato, `updated_at` ISO8601), batch su store vuoto, `load_all` che esclude `is_deleted=1` (e lo include con `include_deleted`), rollback dell'intero batch su violazione `UNIQUE`.
 
+### M1.11 — `marker_db_delete` (soft delete)
+
+- [ ] `syncview:marker_db` → **OK**.
+- [ ] Copre: riga ancora presente con `is_deleted=1` e dati intatti, `updated_at` aggiornato, altri marker non toccati, assenza da `load_all` (presenza con `include_deleted`), idempotenza, id inesistente = successo senza modifiche (come l'originale).
+
 ### Riepilogo atteso
 
 ```

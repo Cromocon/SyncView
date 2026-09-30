@@ -352,3 +352,34 @@ marker_db_load_all(MarkerDb *db, gboolean include_deleted, GError **error)
     sqlite3_close(conn);
     return store;
 }
+
+gboolean
+marker_db_delete(MarkerDb *db, const char *id, GError **error)
+{
+    sqlite3 *conn = connect_db(db, error);
+    if (!conn) {
+        return FALSE;
+    }
+
+    sqlite3_stmt *stmt = NULL;
+    gboolean ok = FALSE;
+
+    if (sqlite3_prepare_v2(conn, "UPDATE markers SET is_deleted = 1, updated_at = ? WHERE id = ?",
+                           -1, &stmt, NULL) == SQLITE_OK) {
+        char *now = marker_iso8601_now();
+
+        sqlite3_bind_text(stmt, 1, now, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 2, id, -1, SQLITE_STATIC);
+        ok = sqlite3_step(stmt) == SQLITE_DONE;
+
+        g_free(now);
+    }
+
+    if (!ok) {
+        set_sql_error(error, conn);
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(conn);
+    return ok;
+}

@@ -50,6 +50,14 @@ const char *marker_db_get_path(const MarkerDb *db);
 gboolean marker_db_save_batch(MarkerDb *db, const MarkerStore *store, GError **error);
 
 /*
+ * Soft delete: imposta is_deleted=1 e aggiorna updated_at per il marker
+ * con l'id dato (come delete_marker). La riga resta nel DB ed è esclusa da
+ * marker_db_load_all. Come nell'originale, un id inesistente non è un
+ * errore (nessuna riga modificata, ritorna TRUE); FALSE solo per errori SQLite.
+ */
+gboolean marker_db_delete(MarkerDb *db, const char *id, GError **error);
+
+/*
  * Carica i marker in un nuovo MarkerStore (ordinato per timestamp; owned
  * dal chiamante, da liberare con marker_store_free). I marker con
  * is_deleted=1 sono esclusi, a meno di include_deleted. Ritorna NULL e
