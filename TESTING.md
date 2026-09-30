@@ -293,6 +293,7 @@ Stesso eseguibile: `syncview:video_player` → **OK** (ora ~30 s; alcuni test ap
 - **Mutation testing M2.6** (script ad hoc, non in repo): ogni mutazione del player (bus watch non rimosso, ASYNC_DONE senza guardia, errore senza reset, throttle assente, polling anche in pausa, ecc.) deve far fallire almeno un test. Unica equivalente: «`pause()` non pubblica la posizione finale», coperta comunque dall'`ASYNC_DONE`. Il throttle si vede solo col test a finestra.
 - **Sanitizer**: la suite completa passa con `-Db_sanitize=address` (con `tests/lsan.supp`: driver GPU/EGL/Mesa e proxy Wayland di GTK, nessuno stack nostro) e con `-Db_sanitize=undefined`.
 - **Diagnostica**: `SYNCVIEW_TEST_TRACE=1` stampa ogni test all'avvio; `SYNCVIEW_TEST_ONLY=<sottostringa>` esegue solo i test il cui nome la contiene (per escludere le finestre: evitare `frame_clock`, `ticker`, `tick_widget`, `ticking`).
+- **Frame clock irregolare (CI)**: sul runner macOS una finestra senza display attivo riceve pochissimi tick (3 aggiornamenti in 800 ms), quindi i test del frame clock misurano prima i tick di una finestra di prova e, se sono meno di 10 in 500 ms, saltano le sole verifiche che lo richiedono (messaggio «frame clock irregolare»). Quelle col timer di ripiego restano sempre attive. In locale, con display, girano tutte.
 - **Nota sul test del frame clock**: una finestra *nascosta* (`set_visible(FALSE)`) NON ferma i tick in GTK4 — il frame clock continua finché il widget è in una finestra; per questo il test stacca il widget dalla finestra.
 
 ### Riepilogo atteso
