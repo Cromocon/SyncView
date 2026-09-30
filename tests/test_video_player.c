@@ -1397,6 +1397,13 @@ check_position_while_playing(const char *dir, gboolean with_window)
     spin_for(800);
 
     guint n = ev.positions->len;
+    if (n < 8 || n > 60) {
+        g_printerr("check_position_while_playing(window=%d): %u aggiornamenti in ~800 ms, posizioni:", with_window, n);
+        for (guint i = 0; i < n; i++) {
+            g_printerr(" %" G_GINT64_FORMAT, pos_at(&ev, i));
+        }
+        g_printerr("\n");
+    }
     assert(n >= 8);  /* ~30-50 aggiornamenti al secondo, non uno ogni tanto */
     assert(n <= 60);  /* ma limitati (<=~50 Hz): non uno per ogni tick dello schermo */
     for (guint i = 0; i < n; i++) {
