@@ -227,3 +227,81 @@ marker_store_update(MarkerStore *store, const char *id, const MarkerUpdate *upda
 
     return m;
 }
+
+/* Primo indice con timestamp >= timestamp_ms (lower bound). */
+static guint
+lower_bound(const MarkerStore *store, int64_t timestamp_ms)
+{
+    guint lo = 0;
+    guint hi = store->markers->len;
+
+    while (lo < hi) {
+        guint mid = lo + (hi - lo) / 2;
+        const Marker *m = g_ptr_array_index(store->markers, mid);
+        if (m->timestamp_ms < timestamp_ms) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo;
+}
+
+const Marker *
+marker_store_get_at(const MarkerStore *store, int64_t timestamp_ms, int64_t tolerance_ms)
+{
+    guint idx = upper_bound(store, timestamp_ms);
+    const Marker *left = idx > 0 ? g_ptr_array_index(store->markers, idx - 1) : NULL;
+    const Marker *right = NULL;
+
+    if (idx < store->markers->len) {
+        /* Tra i marker con lo stesso timestamp a destra vince l'ultimo. */
+        const Marker *first_right = g_ptr_array_index(store->markers, idx);
+        right = g_ptr_array_index(store->markers, upper_bound(store, first_right->timestamp_ms) - 1);
+    }
+
+    int64_t left_dist = left ? timestamp_ms - left->timestamp_ms : G_MAXINT64;
+    int64_t right_dist = right ? right->timestamp_ms - timestamp_ms : G_MAXINT64;
+
+    if (left && left_dist <= tolerance_ms && left_dist < right_dist) {
+        return left;
+    }
+    if (right && right_dist <= tolerance_ms) {
+        return right;
+    }
+    return NULL;
+}
+
+const Marker *
+marker_store_get_next(const MarkerStore *store, int64_t timestamp_ms)
+{
+    guint idx = upper_bound(store, timestamp_ms);
+    return idx < store->markers->len ? g_ptr_array_index(store->markers, idx) : NULL;
+}
+
+const Marker *
+marker_store_get_previous(const MarkerStore *store, int64_t timestamp_ms)
+{
+    guint idx = lower_bound(store, timestamp_ms);
+    return idx > 0 ? g_ptr_array_index(store->markers, idx - 1) : NULL;
+}
+
+size_t
+marker_store_get_range(const MarkerStore *store, int64_t start_ms, int64_t end_ms,
+                       size_t *first_index)
+{
+    if (first_index) {
+        *first_index = 0;
+    }
+    if (start_ms > end_ms) {
+        return 0;
+    }
+
+    guint first = lower_bound(store, start_ms);
+    guint end = upper_bound(store, end_ms);
+
+    if (first_index) {
+        *first_index = first;
+    }
+    return end > first ? end - first : 0;
+}

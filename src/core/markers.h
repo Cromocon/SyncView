@@ -107,4 +107,34 @@ gboolean marker_store_remove(MarkerStore *store, const char *id);
  */
 const Marker *marker_store_update(MarkerStore *store, const char *id, const MarkerUpdate *update);
 
+/*
+ * Query su timestamp, O(log n) con binary search sull'array ordinato.
+ * Semantica identica alle scansioni lineari di MarkerManager (Python).
+ * I Marker ritornati non sono owned e restano validi fino a
+ * add/remove/update successivi.
+ */
+
+/*
+ * Marker più vicino a timestamp_ms entro tolerance_ms (distanza <=
+ * tolerance), o NULL. A parità di distanza vince quello successivo
+ * nell'ordine dello store (come get_marker_at, che usa `<=`).
+ */
+const Marker *marker_store_get_at(const MarkerStore *store, int64_t timestamp_ms,
+                                  int64_t tolerance_ms);
+
+/* Primo marker con timestamp > timestamp_ms (get_next_marker), o NULL. */
+const Marker *marker_store_get_next(const MarkerStore *store, int64_t timestamp_ms);
+
+/* Ultimo marker con timestamp < timestamp_ms (get_previous_marker), o NULL. */
+const Marker *marker_store_get_previous(const MarkerStore *store, int64_t timestamp_ms);
+
+/*
+ * Marker con start_ms <= timestamp <= end_ms (get_markers_in_range). Sono
+ * contigui nello store: ritorna il numero di marker e scrive in
+ * first_index (se non NULL) l'indice del primo, da usare con
+ * marker_store_get(). Ritorna 0 se il range è vuoto o start_ms > end_ms.
+ */
+size_t marker_store_get_range(const MarkerStore *store, int64_t start_ms, int64_t end_ms,
+                              size_t *first_index);
+
 #endif /* SYNCVIEW_CORE_MARKERS_H */

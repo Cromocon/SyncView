@@ -7,7 +7,7 @@ Per il riferimento architetturale completo (non ancora implementato) vedi la sez
 ## Stato implementativo
 
 - **M0 (Scaffolding)**: ✅ completa (M0.1-M0.6). Build Meson funzionante, tutte le dipendenze collegate, CI multi-piattaforma (Linux/macOS/Windows) verde.
-- **M1 (Core logic, nessuna dipendenza da GTK)**: 🚧 in corso — completate M1.1-M1.7, mancano M1.8-M1.15 (binary search query, marker_db/SQLite, migrazione JSON, user_paths, logger+debug mode, ASan finale).
+- **M1 (Core logic, nessuna dipendenza da GTK)**: 🚧 in corso — completate M1.1-M1.8, mancano M1.9-M1.15 ( marker_db/SQLite, migrazione JSON, user_paths, logger+debug mode, ASan finale).
 - **M2-M8**: non ancora iniziate.
 
 ### Moduli implementati
@@ -28,8 +28,9 @@ Tutti i moduli sopra sono compilati in `libsyncview_core` (static library, `src/
 - **`core/markers` usa GLib (`GDateTime`)** per generare `created_at`/l'epoch usato nell'`id`, invece di API POSIX pure (`clock_gettime`) — scelta per coerenza cross-platform (comportamento identico su Linux/macOS/Windows) e perché GLib è comunque una dipendenza già presente. Prima introduzione di GLib in un modulo `core/`; `src/meson.build` è stato riorganizzato per dichiarare le `dependency()` prima della libreria statica, cui viene passato `glib_dep` — la propagazione ai target che fanno `link_with` funziona senza bisogno di ridichiarare la dipendenza nei test.
 - **L'`id` dei marker non è byte-identico all'originale**: stessa forma (`marker_<timestamp_ms>_<epoch_seconds>`), ma la rappresentazione del numero in virgola mobile non è garantita identica a quella di Python — è un id opaco (mai parsato), l'unicità/forma sono ciò che conta.
 - **Nessun campo `updated_at` nella struct `Marker`**: confermato leggendo `core/markers.py` per intero che la dataclass originale non ce l'ha — viene aggiunto solo a livello di schema SQLite al salvataggio (`core/marker_db.c`, M1.9+).
-- **`MarkerStore` usa inserimento ordinato (upper bound) invece di append + sort**: stesso risultato dell'originale (sort stabile: a parità di timestamp vince l'ordine di inserimento). `marker_store_update` prende una struct `MarkerUpdate` con bitmask `fields` al posto dei `**kwargs` Python; le query binary search (`get_at`/`get_next`/range) arrivano in M1.8.
+- **`MarkerStore` usa inserimento ordinato (upper bound) invece di append + sort**: stesso risultato dell'originale (sort stabile: a parità di timestamp vince l'ordine di inserimento). `marker_store_update` prende una struct `MarkerUpdate` con bitmask `fields` al posto dei `**kwargs` Python; 
 - **`marker_store_add` ritorna `const Marker*` non owned** (vale fino a remove/free); `marker_store_add_marker` accetta un `Marker*` già costruito (ownership trasferita) per il caricamento dal DB (M1.10).
+- **Query di `MarkerStore` replicano le scansioni lineari di `MarkerManager`, non `MarkerSpatialIndex`**: `get_at` ha tolleranza inclusiva e a pareggio di distanza (o timestamp duplicati) vince il marker successivo nell'ordine, come `get_marker_at` (`<=`). `find_nearest` dello spatial index (vince il precedente a pareggio) non è portato. `get_range` ritorna `(first_index, count)` perché i risultati sono contigui, senza allocare liste.
 
 ## Note per chi implementa
 

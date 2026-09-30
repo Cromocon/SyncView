@@ -135,6 +135,11 @@ Un test C usa `assert()`: se passa non stampa nulla ed esce con codice 0; se una
 - [ ] `syncview:markers` → **OK** (stesso test di M1.6, esteso).
 - [ ] Copre: store vuoto, `add`/`get`/`find_by_id`, `update` parziale per bitmask (`description` NULL → `""`), `update`/`remove` su id inesistente, ordinamento per timestamp con inserimenti sparsi, stabilità a parità di timestamp, riposizionamento dopo update del timestamp, `remove` dal mezzo.
 
+### M1.8 — Query binary search del `MarkerStore`
+
+- [ ] `syncview:markers` → **OK**.
+- [ ] Copre: store vuoto, `get_next`/`get_previous` strettamente >/<, `get_at` con tolleranza inclusiva e pareggio di distanza (vince il successivo), `get_range` inclusivo/vuoto/invertito, e confronto contro scansioni lineari (copie di `MarkerManager`) su 4×200 marker casuali (seed fisso, con molti timestamp duplicati) × 2000 query ciascuno.
+
 ### Riepilogo atteso
 
 ```
