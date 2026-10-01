@@ -140,7 +140,11 @@ test(
   'main_window',
   test_main_window,
   timeout: 240,
-  env: {'LSAN_OPTIONS': 'suppressions=' + meson.current_source_dir() / 'lsan.supp'},
+  # SYNCVIEW_DEBUG: gli eventi [GST] del player (stati, ASYNC_DONE, errori) vanno su stderr; Meson li mostra solo se il test fallisce.
+  env: {
+    'LSAN_OPTIONS': 'suppressions=' + meson.current_source_dir() / 'lsan.supp',
+    'SYNCVIEW_DEBUG': '1',
+  },
 )
 
 test_deps_check = executable(
