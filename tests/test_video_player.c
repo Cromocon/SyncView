@@ -1898,6 +1898,22 @@ settled_frame_end(SyncviewVideoPlayer *player)
     return last;
 }
 
+/*
+ * Come settled_frame_end, ma prima attende (al più `change_timeout_ms`) che il frame mostrato cambi rispetto a `before`:
+ * su un runner lento un seek può metterci più di 250 ms, e «stabile» sarebbe ancora il frame vecchio.
+ */
+static gint64
+settled_after(SyncviewVideoPlayer *player, gint64 before, int change_timeout_ms)
+{
+    gint64 deadline = g_get_monotonic_time() + (gint64)change_timeout_ms * 1000;
+
+    while (syncview_video_player_get_frame_end_ns(player) == before && g_get_monotonic_time() < deadline) {
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
+    return settled_frame_end(player);
+}
+
 static SyncviewVideoPlayer *
 loaded_player(PosEvents *ev, const char *path)
 {
@@ -2092,8 +2108,10 @@ test_step_ms(const char *dir)
 static void
 step_and_settle(SyncviewVideoPlayer *player, int count, gint64 *pts_out)
 {
+    gint64 before = syncview_video_player_get_frame_end_ns(player);
+
     assert(syncview_video_player_step_frames(player, count, NULL));
-    *pts_out = settled_frame_end(player);
+    *pts_out = settled_after(player, before, 3000);  /* ai bordi (primo/ultimo frame) il frame non cambia */
 }
 
 static void
@@ -2145,14 +2163,16 @@ check_exact_frame_step(const char *dir, int fps)
     /* Passi ravvicinati, senza attendere la fine del seek precedente: nessun frame perso. */
     step_and_settle(player, STEP_FRAMES, &pts);
     assert(pts == truth[STEP_FRAMES]);
+    gint64 before_rapid = syncview_video_player_get_frame_end_ns(player);
     for (int i = 0; i < 6; i++) {
         assert(syncview_video_player_step_frames(player, -1, NULL));
     }
-    assert(settled_frame_end(player) == truth[STEP_FRAMES - 6]);
+    assert(settled_after(player, before_rapid, 5000) == truth[STEP_FRAMES - 6]);
+    before_rapid = syncview_video_player_get_frame_end_ns(player);
     for (int i = 0; i < 4; i++) {
         assert(syncview_video_player_step_frames(player, 1, NULL));
     }
-    assert(settled_frame_end(player) == truth[STEP_FRAMES - 2]);
+    assert(settled_after(player, before_rapid, 5000) == truth[STEP_FRAMES - 2]);
 
     /*
      * Seek esattamente sull'inizio di un frame e step indietro SUBITO (seek ancora in corso): a 30 fps i pts in ms
@@ -2160,26 +2180,32 @@ check_exact_frame_step(const char *dir, int fps)
      */
     for (int j = 1; j <= STEP_FRAMES; j++) {
         gint64 start_ms = (truth[j] - frame_ns + NS_PER_MS / 2) / NS_PER_MS;  /* pts del frame j, intero in ms */
+        gint64 before_j = syncview_video_player_get_frame_end_ns(player);
         assert(syncview_video_player_seek(player, start_ms, NULL));
         assert(syncview_video_player_step_frames(player, -1, NULL));
-        assert(settled_frame_end(player) == truth[j - 1]);
+        assert(settled_after(player, before_j, 5000) == truth[j - 1]);
     }
 
     /* Oltre l'ultimo frame non si va: molti passi avanti ravvicinati si fermano sull'ultimo, e si torna indietro di uno. */
     gint64 duration_ns = syncview_video_player_get_duration(player) * NS_PER_MS;
+    gint64 before_last = syncview_video_player_get_frame_end_ns(player);
     for (int i = 0; i < 100; i++) {
         assert(syncview_video_player_step_frames(player, 1, NULL));
     }
-    gint64 last_end = settled_frame_end(player);
+    gint64 last_end = settled_after(player, before_last, 5000);
     assert(last_end >= duration_ns - 2 * NS_PER_MS && last_end <= duration_ns + 2 * NS_PER_MS);
     step_and_settle(player, -1, &pts);
     assert(llabs((last_end - pts) - frame_ns) <= 2 * NS_PER_MS);
 
     /* Dopo un seek arbitrario l'ancora si ricalcola dal frame mostrato. */
+    gint64 before_seek = syncview_video_player_get_frame_end_ns(player);
     assert(syncview_video_player_seek(player, 1000, NULL));
-    gint64 shown = settled_frame_end(player);
+    gint64 shown = settled_after(player, before_seek, 5000);
     assert(shown > 1000 * NS_PER_MS && shown <= 1000 * NS_PER_MS + frame_ns + 2 * NS_PER_MS);
     step_and_settle(player, -1, &pts);
+    if (!(pts < shown && shown - pts <= frame_ns + 1500 * 1000)) {
+        g_printerr("step indietro dopo seek: prima=%lld dopo=%lld frame=%lld (ns)\n", (long long)shown, (long long)pts, (long long)frame_ns);
+    }
     assert(pts < shown && shown - pts <= frame_ns + 1500 * 1000);
     gint64 back = pts;
     step_and_settle(player, 1, &pts);
@@ -2189,10 +2215,11 @@ check_exact_frame_step(const char *dir, int fps)
     /* In riproduzione lo step mette in pausa e avanza di un frame rispetto al frame mostrato. */
     assert(syncview_video_player_play(player, NULL));
     spin_for(300);
+    gint64 before_play_step = syncview_video_player_get_frame_end_ns(player);
     assert(syncview_video_player_step_frames(player, 1, NULL));
     assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
     assert(!syncview_video_player_is_ticking(player));
-    gint64 after_play = settled_frame_end(player);
+    gint64 after_play = settled_after(player, before_play_step, 5000);
     step_and_settle(player, 1, &pts);
     assert(pts > after_play && pts - after_play <= frame_ns + 1500 * 1000);
 
