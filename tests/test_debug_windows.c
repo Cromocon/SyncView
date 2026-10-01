@@ -137,6 +137,18 @@ test_opens_two_windows_and_shows_lines(void)
     log_error("prova-errore", NULL);
     settle(d.log);
 
+    if (syncview_debug_log_window_get_line_count(d.log) != before + 4) {
+        g_printerr("righe attese %u, trovate %u; dopo la riga %u:\n", before + 4,
+                   syncview_debug_log_window_get_line_count(d.log), before);
+        for (guint i = before; i < syncview_debug_log_window_get_line_count(d.log); i++) {
+            const char *m = NULL;
+            LoggerLevel lv;
+            LoggerModule md;
+
+            syncview_debug_log_window_get_line(d.log, i, &lv, &md, &m);
+            g_printerr("  [%u] livello=%d modulo=%d «%s»\n", i, lv, md, m);
+        }
+    }
     assert(syncview_debug_log_window_get_line_count(d.log) == before + 4);
     assert(count_lines_containing(d.log, "prova-azione") == 1);
     assert(count_lines_containing(d.log, "prova-ui 42") == 1);
