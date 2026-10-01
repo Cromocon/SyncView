@@ -2,6 +2,8 @@
 
 La CI di GitHub ha un runner macOS senza display attivo e senza GPU: non può verificare tutto ciò che riguarda finestre, frame clock e rendering. Questo file elenca cosa va provato **a mano su un Mac reale** (con schermo). Si aggiorna a ogni milestone; a fine M2 va consegnato a chi ha il Mac.
 
+Cosa fa la CI su macOS: esegue `video_player` e `debug_windows` (con le verifiche sul frame clock saltate) e **salta `main_window`**. Il file gemello per Windows è [TEST_WINDOWS.md](TEST_WINDOWS.md).
+
 Chi prova: segni ogni voce con ✅ / ❌ e, per ogni ❌, allega l'output richiesto (vedi «Cosa raccogliere»).
 
 ## Riepilogo: cosa di M2 NON è confermato su macOS
