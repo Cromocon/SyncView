@@ -1454,19 +1454,26 @@ check_position_while_playing(const char *dir, gboolean with_window)
         gtk_widget_remove_tick_callback(shown.picture, clock_tick_id);
     }
     guint n = ev.positions->len;
-    /* Con un frame clock che non batte (< 16 tick in ~800 ms) la frequenza non si può pretendere: si verifica il resto. */
+    /* Con un frame clock che non batte (< 16 tick in ~800 ms) non si può pretendere nulla sugli aggiornamenti. */
     gboolean clock_regular = !with_window || clock_ticks >= 16;
     if (!clock_regular) {
-        g_printerr("frame clock irregolare in riproduzione (%u tick): frequenza degli aggiornamenti non verificata\n", clock_ticks);
+        /* Il main loop è rimasto fermo a lungo: anche posizioni e tempi che seguono non sono più verificabili. */
+        g_printerr("frame clock irregolare in riproduzione (%u tick): verifiche sugli aggiornamenti saltate\n", clock_ticks);
+        assert(syncview_video_player_pause(player, NULL));
+        gtk_window_destroy(GTK_WINDOW(shown.window));
+        pos_events_free(&ev);
+        g_object_unref(player);
+        g_free(path);
+        return;
     }
-    if (clock_regular && (n < 8 || n > 60)) {
+    if (n < 8 || n > 60) {
         g_printerr("check_position_while_playing(window=%d): %u aggiornamenti in ~800 ms, posizioni:", with_window, n);
         for (guint i = 0; i < n; i++) {
             g_printerr(" %" G_GINT64_FORMAT, pos_at(&ev, i));
         }
         g_printerr("\n");
     }
-    assert(!clock_regular || n >= 8);  /* ~30-50 aggiornamenti al secondo, non uno ogni tanto */
+    assert(n >= 8);  /* ~30-50 aggiornamenti al secondo, non uno ogni tanto */
     assert(n <= 60);  /* ma limitati (<=~50 Hz): non uno per ogni tick dello schermo */
     for (guint i = 0; i < n; i++) {
         assert(pos_at(&ev, i) >= 0 && pos_at(&ev, i) <= duration);
