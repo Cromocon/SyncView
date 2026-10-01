@@ -149,6 +149,12 @@ new_window(const char *paths_file)
     GtkWidget *window = syncview_main_window_new(app, paths_file);
 
     gtk_window_present(GTK_WINDOW(window));
+    /* Come nel test del player: si attende che la finestra sia mappata (il sink ne ha bisogno per il contesto GL). */
+    for (gint64 deadline = g_get_monotonic_time() + 5 * G_USEC_PER_SEC;
+         !gtk_widget_get_mapped(window) && g_get_monotonic_time() < deadline;) {
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
     return window;
 }
 
@@ -354,7 +360,8 @@ test_saved_video_is_reloaded_at_startup(void)
     /* Nuova finestra: ricarica da sola il video salvato. */
     GtkWidget *second = new_window(paths_file);
 
-    assert(syncview_main_window_get_state(second) == SYNCVIEW_MAIN_WINDOW_LOADING);
+    assert(syncview_main_window_get_state(second) == SYNCVIEW_MAIN_WINDOW_LOADING ||
+           syncview_main_window_get_state(second) == SYNCVIEW_MAIN_WINDOW_LOADED);
     assert(spin_until_state(second, SYNCVIEW_MAIN_WINDOW_LOADED, 15000));
     close_window(second);
 
