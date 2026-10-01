@@ -66,7 +66,18 @@ spin_until_state(GtkWidget *window, SyncviewMainWindowState wanted, int timeout_
         g_main_context_iteration(NULL, FALSE);
         g_usleep(1000);
     }
-    return syncview_main_window_get_state(window) == wanted;
+    if (syncview_main_window_get_state(window) != wanted) {
+        GtkWidget *title = syncview_main_window_get_widget(window, "card-title");
+        GtkWidget *detail = syncview_main_window_get_widget(window, "card-detail");
+        SyncviewVideoPlayer *player = syncview_main_window_get_player(window);
+
+        g_printerr("attesa dello stato %d scaduta: stato=%d titolo=«%s» dettaglio=«%s» player: loading=%d loaded=%d\n", wanted,
+                   syncview_main_window_get_state(window), gtk_label_get_text(GTK_LABEL(title)),
+                   gtk_label_get_text(GTK_LABEL(detail)), player ? syncview_video_player_is_loading(player) : -1,
+                   player ? syncview_video_player_is_loaded(player) : -1);
+        return FALSE;
+    }
+    return TRUE;
 }
 
 static char *
