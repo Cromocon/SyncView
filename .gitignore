@@ -6,6 +6,7 @@ __pycache__/
 .Python
 
 # Ambiente virtuale
+.impeccable/
 .venv/
 venv/
 ENV/

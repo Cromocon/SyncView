@@ -1,0 +1,37 @@
+/* GENERATO da design/tokens_tool.py a partire da design/tokens.json: non modificare a mano. */
+/* Tema chiaro · pieno sole */
+
+@define-color syncview_bg #E3E7ED;
+@define-color syncview_surf #FFFFFF;
+@define-color syncview_surf2 #EDF0F4;
+@define-color syncview_text #131D2A;
+@define-color syncview_mute #455468;
+@define-color syncview_border #66768C;
+@define-color syncview_line #B9C3D0;
+@define-color syncview_accent #3E4A8C;
+@define-color syncview_ok #2B6A45;
+@define-color syncview_err #A52F2F;
+@define-color syncview_warn #8A6100;
+@define-color syncview_on_accent #FFFFFF;
+@define-color syncview_on_ok #FFFFFF;
+@define-color syncview_on_err #FFFFFF;
+@define-color syncview_on_warn #FFFFFF;
+@define-color syncview_accent_soft #D5D7E6;
+@define-color syncview_ok_soft #DDE7E1;
+@define-color syncview_err_soft #F1DEDE;
+@define-color syncview_warn_soft #EAE3D1;
+@define-color syncview_ok_text #2B6A45;
+@define-color syncview_err_text #A52F2F;
+@define-color syncview_warn_text #7E5A04;
+@define-color syncview_ch_a #2A4E86;
+@define-color syncview_on_ch_a #FFFFFF;
+@define-color syncview_ch_b #7DCDBB;
+@define-color syncview_on_ch_b #0B0F14;
+@define-color syncview_ch_c #8A63B8;
+@define-color syncview_on_ch_c #FFFFFF;
+@define-color syncview_ch_d #B0557E;
+@define-color syncview_on_ch_d #FFFFFF;
+
+/* Metriche (GTK CSS non ha variabili: i valori si copiano nei selettori dei widget) */
+/*   bordo: 2px; carattere: monospace; dimensioni px: 12 13 15 17 26; spaziatura px: 4 8 12 16 24 */
+/*   raggi px: control=6 field=8 card=12 window=14 pill=999; anello di focus: 3px + 2px di distacco */

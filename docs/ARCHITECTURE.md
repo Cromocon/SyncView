@@ -67,3 +67,7 @@ Tutti i moduli sopra sono compilati in `libsyncview_core` (static library, `src/
 ## Note per chi implementa
 
 Man mano che ogni modulo (`core/`, `video/`, `ui/`, `util/`) viene scritto, aggiungere qui una riga nella tabella sopra e, se rilevante, una voce nella sezione "Decisioni prese durante l'implementazione". Le deviazioni note rispetto al comportamento dell'app Python originale vanno invece in `MIGRATION_NOTES.md` (creato in M2.1: [MIGRATION_NOTES.md](MIGRATION_NOTES.md)).
+
+## Design system
+
+Il redesign visivo è prodotto da Claude Design a partire dal brief `design/README.md` (progetto «SyncView» su claude.ai/design, direzione scelta: **1b «Strumento di precisione»**, versione sobria). `design/tokens.json` è la **fonte unica dei token** (colori di base per tema scuro e chiaro, quattro canali video con forma e lettera, metriche); `design/tokens_tool.py build` genera `design/generated/syncview-{light,dark}.css` con `@define-color syncview_*` per `GtkCssProvider` (i derivati — tinte morbide, testo sui colori, testo tenue — si calcolano nello script) e `check` verifica i contrasti AA e che i CSS generati siano aggiornati; gira come test Meson `design_tokens`. GTK CSS non ha variabili per misure e raggi: le metriche stanno in `tokens.json` e si applicano nei selettori dei widget (M2.8). Colori e indicatori non dipendono solo dal tinta: i canali hanno sempre forma (● ■ ▲ ◆) e lettera A–D.

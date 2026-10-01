@@ -72,6 +72,13 @@ test(
   args: [files('check_no_adhoc_logging.py'), meson.project_source_root() / 'src'],
 )
 
+# Token di design: contrasti AA in entrambi i temi e CSS GTK4 generato aggiornato (design/tokens.json è la fonte unica).
+test(
+  'design_tokens',
+  python,
+  args: [meson.project_source_root() / 'design' / 'tokens_tool.py', 'check'],
+)
+
 test_module_logging = executable(
   'test_module_logging',
   'test_module_logging.c',

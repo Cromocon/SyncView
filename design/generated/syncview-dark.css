@@ -1,0 +1,37 @@
+/* GENERATO da design/tokens_tool.py a partire da design/tokens.json: non modificare a mano. */
+/* Tema scuro · penombra e schermo grande */
+
+@define-color syncview_bg #11151B;
+@define-color syncview_surf #1A2029;
+@define-color syncview_surf2 #242C38;
+@define-color syncview_text #E7EBF1;
+@define-color syncview_mute #A4AFBF;
+@define-color syncview_border #66758A;
+@define-color syncview_line #333E4D;
+@define-color syncview_accent #9AA6DE;
+@define-color syncview_ok #62AD83;
+@define-color syncview_err #E07575;
+@define-color syncview_warn #CFA03E;
+@define-color syncview_on_accent #0B0F14;
+@define-color syncview_on_ok #0B0F14;
+@define-color syncview_on_err #0B0F14;
+@define-color syncview_on_warn #0B0F14;
+@define-color syncview_accent_soft #363D51;
+@define-color syncview_ok_soft #263737;
+@define-color syncview_err_soft #3A2E35;
+@define-color syncview_warn_soft #3B372D;
+@define-color syncview_ok_text #62AD83;
+@define-color syncview_err_text #E18181;
+@define-color syncview_warn_text #CFA03E;
+@define-color syncview_ch_a #4B7CC0;
+@define-color syncview_on_ch_a #0B0F14;
+@define-color syncview_ch_b #7CD0C0;
+@define-color syncview_on_ch_b #0B0F14;
+@define-color syncview_ch_c #B49CDD;
+@define-color syncview_on_ch_c #0B0F14;
+@define-color syncview_ch_d #C9708F;
+@define-color syncview_on_ch_d #0B0F14;
+
+/* Metriche (GTK CSS non ha variabili: i valori si copiano nei selettori dei widget) */
+/*   bordo: 1px; carattere: monospace; dimensioni px: 12 13 15 17 26; spaziatura px: 4 8 12 16 24 */
+/*   raggi px: control=6 field=8 card=12 window=14 pill=999; anello di focus: 3px + 2px di distacco */

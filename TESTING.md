@@ -198,8 +198,8 @@ meson setup build-asan -Db_sanitize=address -Db_lundef=false --buildtype=debug
 ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:abort_on_error=1 meson test -C build-asan
 ```
 
-- [ ] 14/14 **OK**, zero errori ASan e **zero leak** nel codice SyncView (LeakSanitizer; per `discoverer` con le soppressioni di terze parti in `tests/lsan.supp`).
-- [ ] Stessa passata con `-Db_sanitize=address,undefined` → 14/14 OK, zero `runtime error` UBSan.
+- [ ] 15/15 **OK**, zero errori ASan e **zero leak** nel codice SyncView (LeakSanitizer; per `discoverer` con le soppressioni di terze parti in `tests/lsan.supp`).
+- [ ] Stessa passata con `-Db_sanitize=address,undefined` → 15/15 OK, zero `runtime error` UBSan.
 - Prima di fidarsi di "zero leak" verificare che LeakSanitizer sia attivo nell'ambiente (alcuni sandbox/container lo disabilitano in silenzio): un programma di prova che perde 123 byte deve produrre `SUMMARY: AddressSanitizer: 123 byte(s) leaked`.
 - ThreadSanitizer **non** è un criterio affidabile con `libglib` di sistema (non instrumentata: falsi positivi sui `GMutex`).
 
@@ -310,12 +310,21 @@ Stesso eseguibile: `syncview:video_player` → **OK** (ora ~70 s; i test di M2.7
 - **Mutation testing M2.7** (script ad hoc): 20 mutazioni (clamp, `at_end`, pausa dello step, seek pendente, ancora dalla fine del frame, step avanti sempre con evento, velocità ignorata/non azzerata/non validata, ripiego senza fps, margine di 1 ms, reset di `frame_info`, clamp ultimo/primo frame, log…): tutte rilevate tranne due equivalenti — «velocità uguale alla corrente non evita il seek» (solo lavoro risparmiato) e «`play()` non azzera il seek pendente» (l'`ASYNC_DONE` lo azzera comunque). Le lacune emerse (clamp superiore, margine, reset, ultimo frame) sono diventate test.
 - **Scoperte verificate**: (1) dopo un seek accurato il pts del buffer arrivato al sink è il punto di arrivo, non l'inizio del frame; (2) più `GST_EVENT_STEP` ravvicinati si sostituiscono (3 passi su 4 persi); (3) `INSTANT_RATE_CHANGE` con `matroskademux` dà un CRITICAL di GStreamer; (4) `step_ms` subito dopo un `seek` leggeva la posizione vecchia.
 
+### Design system — token (`design/`)
+
+`syncview:design_tokens` (`design/tokens_tool.py check`) → **OK**.
+
+- [ ] **Contrasti AA in entrambi i temi** (chiaro e scuro): testo ≥ 4,5:1 su sfondo, superficie e superficie 2; secondario ≥ 4,5:1; testo sull'accento (Play), sul successo, sull'errore, sull'avviso; testo tenue su tinta morbida; etichette dei 4 canali; elementi grafici ≥ 3:1 (anello di focus, bordi, playhead, marker).
+- [ ] **File generati aggiornati**: `design/generated/syncview-{light,dark}.css` coincidono con quanto produce `tokens_tool.py build` da `design/tokens.json`. Se cambi un token, lancia `python3 design/tokens_tool.py build` e committa anche i CSS.
+- [ ] **Mutazione**: portando `mute` del tema chiaro a `#9AA6B8` il controllo fallisce (1,99:1); ripristinato torna OK.
+- Fonte unica: `design/tokens.json` (solo valori di base; tinte morbide, testo sui colori e testo tenue si derivano nello script con le stesse regole del prototipo di Claude Design).
+
 ### Riepilogo atteso
 
 ```
 meson test -C build
 ```
-deve riportare **14/14** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`, `discoverer`, `video_player`, `deps_check`); in un ambiente senza display o senza `gtk4paintablesink` `video_player` risulta `SKIP` (e `discoverer` se mancano i plugin di prova): è normale.
+deve riportare **15/15** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`, `discoverer`, `video_player`, `deps_check`, `design_tokens`); in un ambiente senza display o senza `gtk4paintablesink` `video_player` risulta `SKIP` (e `discoverer` se mancano i plugin di prova): è normale.
 
 ---
 

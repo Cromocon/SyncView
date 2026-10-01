@@ -33,6 +33,8 @@ Delete = soft delete (`is_deleted=1`), upsert via `INSERT ... ON CONFLICT(id) DO
 
 ## Riferimento visivo per l'overhaul UI
 
+> **Superato.** Il riferimento visivo qui sotto è stato scartato: il redesign è completo e lo produce Claude Design a partire da `design/README.md` (brief) e `PRODUCT.md`. Resta valido solo l'inventario funzionale.
+
 L'utente ha indicato come riferimento di design il sito https://praesidium.artysan.me/ (progetto "PRÆSIDIUM — Field Operations", tema tattico/outdoor). Analizzato (home, pagina "Style tiles", pagina "UI states", pagina "Field" con mappa/zoom): fornisce un linguaggio visivo coerente da adottare per il tema GTK4 CSS al posto della vecchia palette Qt "Night Ops":
 
 - **Palette "Command / Default"** (la direzione attiva di default sul sito): sfondo quasi nero `#11130f`, colore secondario/testo attenuato oliva `#a9b271`, accento primario terracotta `#c47c4c`. Esistono due varianti alternative sul sito (Terrain: `#182019`/`#d8d1bd`/`#91523d`; Range: `#242522`/`#c9bda4`/`#d39b3d`) — da tenere come possibili temi alternativi in CSS (es. selezionabili), ma "Command" come default.
