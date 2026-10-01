@@ -236,3 +236,177 @@ window.syncview .sv-shortcuts .sv-key {
   color: @syncview_text;
   font-weight: 800;
 }
+
+/* ---- Finestre di debug (Log e Moduli) ---- */
+.sv-chip-live {
+  background: @syncview_surf2;
+  color: @syncview_text;
+  border: {{bw}}px solid @syncview_border;
+  border-radius: {{r_pill}}px;
+  padding: 2px {{sp2}}px;
+  font-size: {{fs_s}}px;
+  font-weight: 800;
+}
+.sv-chip-live.sv-paused {
+  background: @syncview_warn_soft;
+  color: @syncview_warn_text;
+  border-color: @syncview_warn;
+}
+
+/* Filtri per modulo: attivo = accento morbido + segno di spunta nel testo (mai solo colore). */
+window.syncview button.sv-filter {
+  min-height: 24px;
+  padding: 0 {{sp2}}px;
+  border-radius: {{r_pill}}px;
+  border: {{bw}}px solid @syncview_border;
+  background: @syncview_surf2;
+  color: @syncview_text;
+  font-weight: 700;
+  font-size: {{fs_s}}px;
+  box-shadow: none;
+}
+window.syncview button.sv-filter label {
+  color: @syncview_text;
+}
+window.syncview button.sv-filter:checked {
+  background: @syncview_accent_soft;
+  border-color: @syncview_accent;
+}
+
+window.syncview dropdown.sv-dropdown button {
+  min-height: 26px;
+  padding: 0 {{sp2}}px;
+  border-radius: {{r_control}}px;
+  border: {{bw}}px solid @syncview_border;
+  background: @syncview_surf2;
+  color: @syncview_text;
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.sv-log-toolbar {
+  padding: {{sp2}}px {{sp3}}px;
+  border-bottom: {{bw}}px solid @syncview_line;
+}
+window.syncview listview.sv-log-list {
+  background: @syncview_surf;
+  color: @syncview_text;
+}
+window.syncview listview.sv-log-list row {
+  padding: 0 {{sp3}}px;
+  background: transparent;
+  color: @syncview_text;
+}
+window.syncview listview.sv-log-list row label.sv-log-module,
+window.syncview listview.sv-log-list row label.sv-log-message {
+  color: @syncview_text;
+}
+window.syncview listview.sv-log-list row label.sv-log-time {
+  color: @syncview_mute;
+}
+.sv-log-row {
+  padding: 5px 0;
+  border-bottom: 1px solid @syncview_line;
+  font-size: {{fs_s}}px;
+}
+.sv-log-time {
+  color: @syncview_mute;
+}
+.sv-log-module {
+  font-weight: 800;
+}
+.sv-lvl {
+  padding: 1px {{sp2}}px;
+  border-radius: {{r_control}}px;
+  border: 1px solid transparent;
+  font-weight: 800;
+}
+window.syncview .sv-log-row label.sv-lvl-info {
+  background: @syncview_surf2;
+  color: @syncview_text;
+  border-color: @syncview_border;
+}
+window.syncview .sv-log-row label.sv-lvl-warn {
+  background: @syncview_warn_soft;
+  color: @syncview_warn_text;
+  border-color: @syncview_warn;
+}
+window.syncview .sv-log-row label.sv-lvl-err {
+  background: @syncview_err_soft;
+  color: @syncview_err_text;
+  border-color: @syncview_err;
+}
+window.syncview .sv-log-row label.sv-lvl-debug {
+  background: @syncview_surf;
+  color: @syncview_mute;
+  border-color: @syncview_line;
+}
+window.syncview .sv-statusbar {
+  background: @syncview_surf2;
+  border-top: {{bw}}px solid @syncview_border;
+  color: @syncview_mute;
+  padding: {{sp2}}px {{sp3}}px;
+}
+window.syncview .sv-statusbar label {
+  color: @syncview_mute;
+}
+
+.sv-module-row {
+  padding: {{sp2}}px {{sp3}}px;
+  border-radius: 10px;
+  border: 1px solid @syncview_line;
+  background: @syncview_surf;
+}
+.sv-module-row .sv-module-desc {
+  color: @syncview_mute;
+  font-size: {{fs_s}}px;
+}
+.sv-module-row .sv-module-name {
+  font-weight: 800;
+}
+window.syncview switch {
+  min-width: 40px;
+  min-height: 22px;
+  border-radius: {{r_pill}}px;
+  border: {{bw}}px solid @syncview_border;
+  background: @syncview_surf2;
+}
+window.syncview switch:checked {
+  background: @syncview_accent;
+  border-color: @syncview_accent;
+}
+window.syncview switch slider {
+  min-width: 14px;
+  min-height: 14px;
+  margin: 2px;
+  border-radius: {{r_pill}}px;
+  border: 0 solid transparent;
+  background: @syncview_border;
+  box-shadow: none;
+}
+window.syncview switch:checked slider {
+  background: @syncview_on_accent;
+}
+
+/* ---- Barre di scorrimento ---- */
+window.syncview scrollbar {
+  background: transparent;
+  border: 0 solid transparent;
+}
+window.syncview scrollbar trough {
+  background: transparent;
+  border: 0 solid transparent;
+  min-width: 10px;
+  min-height: 10px;
+}
+window.syncview scrollbar slider {
+  min-width: 6px;
+  min-height: 6px;
+  margin: 2px;
+  border-radius: {{r_pill}}px;
+  border: 0 solid transparent;
+  background: @syncview_border;
+}
+window.syncview scrollbar slider:hover {
+  background: @syncview_mute;
+}

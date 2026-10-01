@@ -95,6 +95,7 @@ def pairs(c):
         ("Testo errore / tenue", c["err_text"], c["err_soft"], 4.5),
         ("Su avviso", c["on_warn"], c["warn"], 4.5),
         ("Testo avviso / tenue", c["warn_text"], c["warn_soft"], 4.5),
+        ("Testo / accento morbido (filtri attivi)", c["text"], c["accent_soft"], 4.5),
         ("Overlay video (tempo)", WHITE, "#000000", 4.5),
         ("Accento / sfondo (anello focus)", c["accent"], c["bg"], 3.0),
         ("Bordo / sfondo", c["border"], c["bg"], 3.0),

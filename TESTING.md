@@ -198,8 +198,8 @@ meson setup build-asan -Db_sanitize=address -Db_lundef=false --buildtype=debug
 ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:abort_on_error=1 meson test -C build-asan
 ```
 
-- [ ] 16/16 **OK**, zero errori ASan e **zero leak** nel codice SyncView (LeakSanitizer; per `discoverer` con le soppressioni di terze parti in `tests/lsan.supp`).
-- [ ] Stessa passata con `-Db_sanitize=address,undefined` → 16/16 OK, zero `runtime error` UBSan.
+- [ ] 17/17 **OK**, zero errori ASan e **zero leak** nel codice SyncView (LeakSanitizer; per `discoverer` con le soppressioni di terze parti in `tests/lsan.supp`).
+- [ ] Stessa passata con `-Db_sanitize=address,undefined` → 17/17 OK, zero `runtime error` UBSan.
 - Prima di fidarsi di "zero leak" verificare che LeakSanitizer sia attivo nell'ambiente (alcuni sandbox/container lo disabilitano in silenzio): un programma di prova che perde 123 byte deve produrre `SUMMARY: AddressSanitizer: 123 byte(s) leaked`.
 - ThreadSanitizer **non** è un criterio affidabile con `libglib` di sistema (non instrumentata: falsi positivi sui `GMutex`).
 
@@ -332,15 +332,30 @@ Stesso eseguibile: `syncview:video_player` → **OK** (ora ~70 s; i test di M2.7
 - [ ] **Chiusura**: finestra chiusa a metà caricamento e in riproduzione (6 volte) → nessuno smontaggio rimasto in sospeso; ASan/UBSan 16/16 (nuove soppressioni di terze parti: cache dei font fontconfig/pango).
 - [ ] **Uscita ordinata dell'app** (manuale, o `kill -TERM` / `kill -INT` all'app in esecuzione): termina in meno di un secondo, il log riporta «Finestra principale chiusa» e «Applicazione chiusa», nessun processo `syncview` residuo.
 - [ ] **Prova visiva** (manuale): con `SYNCVIEW_THEME=light` e `=dark` la finestra mostra barra del titolo, riquadro video con chip «● A · FEED-1», fps e tempo, tempo grande, barra, pulsanti e barra delle scorciatoie come nei mockup della direzione 1b.
+- **Prove su macOS reale**: elencate in [docs/TEST_MACOS.md](docs/TEST_MACOS.md) (file vivo, da consegnare a fine M2).
 - **macOS in CI**: il test `main_window` è saltato (`SKIP`) perché sul runner il caricamento col video nella finestra non termina: problema aperto, da provare su un Mac reale (vedi PLAN.md, M2.8).
 - **Desktop 9** (solo sviluppo su KDE/Wayland): uno script KWin temporaneo sposta sul «Desktop 9» le finestre dei test e di `syncview`; su un desktop non attivo il compositor non invia frame callback, quindi le verifiche sul frame clock si saltano da sole.
+
+### M2.9 — finestre di debug
+
+`syncview:debug_windows` → **OK** (~12 s; richiede display, non GStreamer; `SKIP` senza display). Si esegue sul «Desktop 9» (vedi nota in fondo).
+
+- [ ] **Solo in debug**: senza `--debug` `syncview_debug_windows_open()` apre 0 finestre e `logger_is_debug_mode()` è falso (anche prima di `logger_init` e dopo `logger_shutdown`); con `--debug` o `SYNCVIEW_DEBUG=1` ne apre 2 (3 con la principale: verificato sull'app vera, 3 finestre contro 1).
+- [ ] **Righe e livelli**: azione utente → `INFO`/`USER`, `log_sync`/`log_ui` → `DEBUG`/`SYNC`/`UI`, `log_error` → `ERROR`/`APP`; l'etichetta `[UI] ` non si ripete nel testo; riga di stato «N righe · 8 moduli attivi», «In diretta», scorrimento automatico ON.
+- [ ] **Interruttori dei moduli**: spento SYNC le sue righe non compaiono più nella finestra Log (il filtro è del logger, quindi vale anche per file e stderr: coperto da `logger_filter`); gli **errori compaiono sempre**, anche con il modulo spento; «Tutti» riaccende; la riga di stato conta i moduli attivi.
+- [ ] **Filtri di vista**: livello minimo Info/Errore e chip del modulo nascondono righe nella vista senza toglierle dal modello (la riga di stato dice «N di M righe»).
+- [ ] **Pausa/Riprendi/Svuota**: in pausa le righe restano in coda («5 in attesa», scorrimento OFF) e alla ripresa compaiono nell'ordine di arrivo; Svuota azzera modello e coda.
+- [ ] **Tetto**: 6000 righe emesse → ne restano 5000, le più recenti, in ordine.
+- [ ] **Thread**: 4 thread × 800 righe (più messaggi GST) mentre il main loop gira → nessuna riga persa né scartata, e per ogni thread l'ordine di emissione è rispettato (40 esecuzioni consecutive senza errori; prima della correzione del risveglio perso falliva ~1 volta su 5).
+- [ ] **Chiusura**: chiudere la principale chiude Log e Moduli (anche se una è già chiusa a mano); log emessi da altri thread mentre la finestra viene chiusa e dopo la chiusura non toccano memoria liberata (ASan 17/17).
+- [ ] **Prova visiva** (manuale): con `SYNCVIEW_THEME=light|dark` e `--debug` le finestre sono leggibili (testo scuro su chiaro e viceversa, livelli con simbolo, interruttori, chip) come nella direzione 1b; nessun `Gtk-WARNING` all'apertura.
 
 ### Riepilogo atteso
 
 ```
 meson test -C build
 ```
-deve riportare **16/16** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`, `discoverer`, `video_player`, `deps_check`, `design_tokens`, `main_window`); in un ambiente senza display o senza `gtk4paintablesink` `video_player` e `main_window` risultano `SKIP` (e `discoverer` se mancano i plugin di prova): è normale.
+deve riportare **17/17** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`, `discoverer`, `video_player`, `deps_check`, `design_tokens`, `main_window`, `debug_windows`); in un ambiente senza display o senza `gtk4paintablesink` `video_player` e `main_window` risultano `SKIP` (e `debug_windows` senza display) (e `discoverer` se mancano i plugin di prova): è normale.
 
 ---
 

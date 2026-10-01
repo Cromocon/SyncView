@@ -81,6 +81,12 @@ gboolean logger_is_module_enabled(LoggerModule module);
 typedef void (*LoggerSinkFunc)(LoggerLevel level, LoggerModule module, const char *timestamp,
                                const char *message, gpointer user_data);
 
+/*
+ * TRUE se il logger è inizializzato in modalità debug (flag --debug/-v o SYNCVIEW_DEBUG). È l'unico modo per i moduli
+ * di sapere se aprire gli strumenti di debug (finestre Log e Moduli): il flag è valutato una sola volta, in logger_init().
+ */
+gboolean logger_is_debug_mode(void);
+
 /* Registra un sink; ritorna un id (> 0) da passare a logger_remove_sink(). */
 guint logger_add_sink(LoggerSinkFunc func, gpointer user_data);
 void logger_remove_sink(guint sink_id);

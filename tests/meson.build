@@ -147,6 +147,21 @@ test(
   },
 )
 
+# Finestre di debug (M2.9). Richiede display GTK: senza, esce con 77 (skip).
+test_debug_windows = executable(
+  'test_debug_windows',
+  'test_debug_windows.c',
+  include_directories: syncview_core_inc,
+  link_with: [syncview_ui_lib, syncview_video_lib, syncview_core_lib],
+  dependencies: [glib_dep, gio_dep, gtk_dep, gstreamer_dep],
+)
+test(
+  'debug_windows',
+  test_debug_windows,
+  timeout: 120,
+  env: {'LSAN_OPTIONS': 'suppressions=' + meson.current_source_dir() / 'lsan.supp'},
+)
+
 test_deps_check = executable(
   'test_deps_check',
   'test_deps_check.c',

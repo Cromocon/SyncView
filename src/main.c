@@ -1,5 +1,6 @@
 #include "core/deps_check.h"
 #include "core/logger.h"
+#include "ui/debug_windows.h"
 #include "ui/main_window.h"
 #include "video/video_player.h"
 
@@ -31,6 +32,7 @@ on_activate(GtkApplication *app, gpointer user_data)
     GtkWidget *window = syncview_main_window_new(app, NULL);
 
     gtk_window_present(GTK_WINDOW(window));
+    syncview_debug_windows_open(app, GTK_WINDOW(window), NULL, NULL);  /* solo con --debug */
 #ifdef G_OS_UNIX
     g_unix_signal_add(SIGINT, on_terminate_signal, app);
     g_unix_signal_add(SIGTERM, on_terminate_signal, app);

@@ -67,6 +67,15 @@ logger_is_module_enabled(LoggerModule module)
     return enabled;
 }
 
+gboolean
+logger_is_debug_mode(void)
+{
+    g_mutex_lock(&state_lock);
+    gboolean debug = initialized && debug_mode;
+    g_mutex_unlock(&state_lock);
+    return debug;
+}
+
 guint
 logger_add_sink(LoggerSinkFunc func, gpointer user_data)
 {

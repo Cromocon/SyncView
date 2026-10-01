@@ -263,6 +263,29 @@ test_gst_debug_propagation(void)
     assert(g_getenv("GST_DEBUG") == NULL);
 }
 
+/* logger_is_debug_mode(): vero solo con logger inizializzato in debug (flag o variabile d'ambiente). */
+static void
+test_is_debug_mode(void)
+{
+    g_unsetenv("SYNCVIEW_DEBUG");
+    assert(!logger_is_debug_mode());  /* prima di init */
+
+    logger_init(NULL, FALSE, NULL);
+    assert(!logger_is_debug_mode());
+    logger_shutdown();
+
+    logger_init(NULL, TRUE, NULL);  /* flag --debug */
+    assert(logger_is_debug_mode());
+    logger_shutdown();
+    assert(!logger_is_debug_mode());  /* dopo lo shutdown */
+
+    g_setenv("SYNCVIEW_DEBUG", "1", TRUE);  /* variabile d'ambiente */
+    logger_init(NULL, FALSE, NULL);
+    assert(logger_is_debug_mode());
+    logger_shutdown();
+    g_unsetenv("SYNCVIEW_DEBUG");
+}
+
 static void
 test_unwritable_file(const char *dir)
 {
@@ -310,6 +333,7 @@ main(void)
     test_uninitialized_is_silent(dir);
     test_truncates_file_on_open(dir);
     test_gst_debug_propagation();
+    test_is_debug_mode();
     test_unwritable_file(dir);
     test_default_file();
 
