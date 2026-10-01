@@ -35,3 +35,242 @@
 /* Metriche (GTK CSS non ha variabili: i valori si copiano nei selettori dei widget) */
 /*   bordo: 2px; carattere: monospace; dimensioni px: 12 13 15 17 26; spaziatura px: 4 8 12 16 24 */
 /*   raggi px: control=6 field=8 card=12 window=14 pill=999; anello di focus: 3px + 2px di distacco */
+
+/*
+ * Foglio di stile dei componenti di SyncView (direzione 1b «Strumento di precisione»).
+ * Modello: tokens_tool.py sostituisce i segnaposto a doppia graffa con le metriche di tokens.json e antepone i colori (@syncview_*).
+ * GTK CSS non ha variabili per misure e raggi, quindi i numeri entrano qui al momento della generazione.
+ */
+
+window.syncview {
+  background-color: @syncview_bg;
+  color: @syncview_text;
+  font-family: monospace;
+  font-size: 13px;
+}
+
+window.syncview * {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Anello di focus: 3 px di accento, staccato di 2 px (mai solo colore: ha spessore e distacco). */
+window.syncview *:focus-visible {
+  outline: 3px solid @syncview_accent;
+  outline-offset: 2px;
+}
+
+/* ---- Barra del titolo ---- */
+window.syncview headerbar {
+  background: @syncview_surf;
+  color: @syncview_text;
+  border-bottom: 2px solid @syncview_border;
+  box-shadow: none;
+  min-height: 42px;
+  padding: 0 12px;
+}
+window.syncview headerbar .sv-title {
+  font-weight: 800;
+}
+window.syncview headerbar .sv-subtitle {
+  color: @syncview_mute;
+}
+window.syncview headerbar button.titlebutton {
+  min-width: 28px;
+  min-height: 26px;
+  border-radius: 6px;
+  border: 2px solid @syncview_line;
+  background: transparent;
+  color: @syncview_text;
+  box-shadow: none;
+}
+window.syncview headerbar button.titlebutton:hover {
+  background: @syncview_surf2;
+}
+
+/* ---- Pulsanti ---- */
+window.syncview button.sv-btn {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 2px solid @syncview_border;
+  background: @syncview_surf2;
+  color: @syncview_text;
+  font-weight: 700;
+  box-shadow: none;
+}
+window.syncview button.sv-btn:hover {
+  background: @syncview_surf;
+}
+window.syncview button.sv-btn:active {
+  background: @syncview_line;
+}
+window.syncview button.sv-btn:disabled {
+  color: @syncview_mute;
+  border-color: @syncview_line;
+  background: transparent;
+}
+
+/* Azione primaria (Play): l'accento è riservato a focus, Play e selezione. */
+window.syncview button.sv-primary {
+  background: @syncview_accent;
+  border-color: @syncview_accent;
+  color: @syncview_on_accent;
+  font-weight: 800;
+  padding: 0 16px;
+}
+window.syncview button.sv-primary:hover {
+  background: @syncview_accent;
+  opacity: 0.9;
+}
+window.syncview button.sv-primary:disabled {
+  background: @syncview_line;
+  border-color: @syncview_line;
+  color: @syncview_mute;
+}
+
+/* Passo (−10 −1 +1 +10) */
+window.syncview button.sv-step {
+  min-height: 26px;
+  min-width: 30px;
+  padding: 0 4px;
+  border-radius: 6px;
+  border: 2px solid @syncview_border;
+  background: @syncview_surf2;
+  color: @syncview_text;
+  font-weight: 700;
+  box-shadow: none;
+}
+window.syncview button.sv-step:hover {
+  background: @syncview_surf;
+}
+window.syncview button.sv-step:disabled {
+  color: @syncview_mute;
+  border-color: @syncview_line;
+  background: transparent;
+}
+
+/* ---- Riquadro video ---- */
+.sv-tile {
+  background: #000000;
+  border: 2px solid @syncview_line;
+  border-radius: 12px;
+}
+.sv-video {
+  background: #000000;
+  border-radius: 12px;
+}
+
+/* Etichette sul video: sempre testo chiaro su nero, leggibili su qualunque immagine. */
+.sv-chip {
+  background: rgba(0, 0, 0, 0.78);
+  color: #FFFFFF;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.sv-chip-time {
+  font-size: 15px;
+  padding: 2px 8px;
+}
+.sv-chip-ch-a {
+  background: @syncview_ch_a;
+  color: @syncview_on_ch_a;
+}
+.sv-chip-end {
+  background: @syncview_surf;
+  color: @syncview_text;
+  border: 2px solid @syncview_line;
+}
+
+/* ---- Schede di stato (nessun video, caricamento, errore) ---- */
+.sv-card {
+  background: @syncview_surf;
+  color: @syncview_text;
+  border: 2px solid @syncview_line;
+  border-radius: 12px;
+  padding: 16px 24px;
+}
+.sv-card .sv-card-title {
+  font-weight: 800;
+  font-size: 15px;
+}
+.sv-card .sv-card-detail {
+  color: @syncview_mute;
+}
+.sv-card.sv-error {
+  border-color: @syncview_err;
+  background: @syncview_err_soft;
+}
+.sv-card.sv-error .sv-card-title {
+  color: @syncview_err_text;
+}
+.sv-card.sv-error .sv-card-detail {
+  color: @syncview_text;
+}
+.sv-card progressbar trough {
+  min-height: 6px;
+  margin: 0;
+  padding: 0;
+  border-radius: 999px;
+  background: @syncview_line;
+  border: 0 solid transparent;
+}
+.sv-card progressbar progress {
+  min-height: 6px;
+  margin: 0;
+  padding: 0;
+  border-radius: 999px;
+  background: @syncview_text;
+  border: 0 solid transparent;
+}
+
+/* ---- Tempo e timeline ---- */
+window.syncview .sv-time {
+  font-size: 26px;
+  font-weight: 800;
+}
+window.syncview .sv-time-total {
+  color: @syncview_mute;
+}
+
+window.syncview scale.sv-seek trough {
+  min-height: 6px;
+  margin: 0;
+  padding: 0;
+  border-radius: 999px;
+  background: @syncview_line;
+  border: 0 solid transparent;
+}
+window.syncview scale.sv-seek highlight {
+  min-height: 6px;
+  margin: 0;
+  padding: 0;
+  background: @syncview_text;
+  border-radius: 999px;
+  border: 0 solid transparent;
+}
+window.syncview scale.sv-seek slider {
+  min-width: 16px;
+  min-height: 16px;
+  border-radius: 999px;
+  background: @syncview_text;
+  border: 2px solid @syncview_bg;
+  box-shadow: none;
+}
+window.syncview scale.sv-seek:disabled {
+  opacity: 0.5;
+}
+
+/* ---- Barra delle scorciatoie ---- */
+window.syncview .sv-shortcuts {
+  background: @syncview_surf;
+  border-top: 2px solid @syncview_border;
+  color: @syncview_mute;
+  font-size: 12px;
+  padding: 4px 12px;
+}
+window.syncview .sv-shortcuts .sv-key {
+  color: @syncview_text;
+  font-weight: 800;
+}

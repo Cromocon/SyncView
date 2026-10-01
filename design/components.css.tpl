@@ -1,41 +1,3 @@
-/* GENERATO da design/tokens_tool.py a partire da design/tokens.json: non modificare a mano. */
-/* Tema scuro · penombra e schermo grande */
-
-@define-color syncview_bg #11151B;
-@define-color syncview_surf #1A2029;
-@define-color syncview_surf2 #242C38;
-@define-color syncview_text #E7EBF1;
-@define-color syncview_mute #A4AFBF;
-@define-color syncview_border #66758A;
-@define-color syncview_line #333E4D;
-@define-color syncview_accent #9AA6DE;
-@define-color syncview_ok #62AD83;
-@define-color syncview_err #E07575;
-@define-color syncview_warn #CFA03E;
-@define-color syncview_on_accent #0B0F14;
-@define-color syncview_on_ok #0B0F14;
-@define-color syncview_on_err #0B0F14;
-@define-color syncview_on_warn #0B0F14;
-@define-color syncview_accent_soft #363D51;
-@define-color syncview_ok_soft #263737;
-@define-color syncview_err_soft #3A2E35;
-@define-color syncview_warn_soft #3B372D;
-@define-color syncview_ok_text #62AD83;
-@define-color syncview_err_text #E18181;
-@define-color syncview_warn_text #CFA03E;
-@define-color syncview_ch_a #4B7CC0;
-@define-color syncview_on_ch_a #0B0F14;
-@define-color syncview_ch_b #7CD0C0;
-@define-color syncview_on_ch_b #0B0F14;
-@define-color syncview_ch_c #B49CDD;
-@define-color syncview_on_ch_c #0B0F14;
-@define-color syncview_ch_d #C9708F;
-@define-color syncview_on_ch_d #0B0F14;
-
-/* Metriche (GTK CSS non ha variabili: i valori si copiano nei selettori dei widget) */
-/*   bordo: 1px; carattere: monospace; dimensioni px: 12 13 15 17 26; spaziatura px: 4 8 12 16 24 */
-/*   raggi px: control=6 field=8 card=12 window=14 pill=999; anello di focus: 3px + 2px di distacco */
-
 /*
  * Foglio di stile dei componenti di SyncView (direzione 1b «Strumento di precisione»).
  * Modello: tokens_tool.py sostituisce i segnaposto a doppia graffa con le metriche di tokens.json e antepone i colori (@syncview_*).
@@ -46,7 +8,7 @@ window.syncview {
   background-color: @syncview_bg;
   color: @syncview_text;
   font-family: monospace;
-  font-size: 13px;
+  font-size: {{fs}}px;
 }
 
 window.syncview * {
@@ -55,18 +17,18 @@ window.syncview * {
 
 /* Anello di focus: 3 px di accento, staccato di 2 px (mai solo colore: ha spessore e distacco). */
 window.syncview *:focus-visible {
-  outline: 3px solid @syncview_accent;
-  outline-offset: 2px;
+  outline: {{ring}}px solid @syncview_accent;
+  outline-offset: {{gap}}px;
 }
 
 /* ---- Barra del titolo ---- */
 window.syncview headerbar {
   background: @syncview_surf;
   color: @syncview_text;
-  border-bottom: 1px solid @syncview_border;
+  border-bottom: {{bw}}px solid @syncview_border;
   box-shadow: none;
   min-height: 42px;
-  padding: 0 12px;
+  padding: 0 {{sp3}}px;
 }
 window.syncview headerbar .sv-title {
   font-weight: 800;
@@ -77,8 +39,8 @@ window.syncview headerbar .sv-subtitle {
 window.syncview headerbar button.titlebutton {
   min-width: 28px;
   min-height: 26px;
-  border-radius: 6px;
-  border: 1px solid @syncview_line;
+  border-radius: {{r_control}}px;
+  border: {{bw}}px solid @syncview_line;
   background: transparent;
   color: @syncview_text;
   box-shadow: none;
@@ -90,9 +52,9 @@ window.syncview headerbar button.titlebutton:hover {
 /* ---- Pulsanti ---- */
 window.syncview button.sv-btn {
   min-height: 32px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid @syncview_border;
+  padding: 0 {{sp3}}px;
+  border-radius: {{r_pill}}px;
+  border: {{bw}}px solid @syncview_border;
   background: @syncview_surf2;
   color: @syncview_text;
   font-weight: 700;
@@ -116,7 +78,7 @@ window.syncview button.sv-primary {
   border-color: @syncview_accent;
   color: @syncview_on_accent;
   font-weight: 800;
-  padding: 0 16px;
+  padding: 0 {{sp4}}px;
 }
 window.syncview button.sv-primary:hover {
   background: @syncview_accent;
@@ -132,9 +94,9 @@ window.syncview button.sv-primary:disabled {
 window.syncview button.sv-step {
   min-height: 26px;
   min-width: 30px;
-  padding: 0 4px;
-  border-radius: 6px;
-  border: 1px solid @syncview_border;
+  padding: 0 {{sp1}}px;
+  border-radius: {{r_control}}px;
+  border: {{bw}}px solid @syncview_border;
   background: @syncview_surf2;
   color: @syncview_text;
   font-weight: 700;
@@ -152,26 +114,26 @@ window.syncview button.sv-step:disabled {
 /* ---- Riquadro video ---- */
 .sv-tile {
   background: #000000;
-  border: 1px solid @syncview_line;
-  border-radius: 12px;
+  border: {{bw}}px solid @syncview_line;
+  border-radius: {{r_card}}px;
 }
 .sv-video {
   background: #000000;
-  border-radius: 12px;
+  border-radius: {{r_card}}px;
 }
 
 /* Etichette sul video: sempre testo chiaro su nero, leggibili su qualunque immagine. */
 .sv-chip {
   background: rgba(0, 0, 0, 0.78);
   color: #FFFFFF;
-  border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 12px;
+  border-radius: {{r_pill}}px;
+  padding: 2px {{sp2}}px;
+  font-size: {{fs_s}}px;
   font-weight: 800;
 }
 .sv-chip-time {
-  font-size: 15px;
-  padding: 2px 8px;
+  font-size: {{fs_m}}px;
+  padding: 2px {{sp2}}px;
 }
 .sv-chip-ch-a {
   background: @syncview_ch_a;
@@ -180,20 +142,20 @@ window.syncview button.sv-step:disabled {
 .sv-chip-end {
   background: @syncview_surf;
   color: @syncview_text;
-  border: 1px solid @syncview_line;
+  border: {{bw}}px solid @syncview_line;
 }
 
 /* ---- Schede di stato (nessun video, caricamento, errore) ---- */
 .sv-card {
   background: @syncview_surf;
   color: @syncview_text;
-  border: 1px solid @syncview_line;
-  border-radius: 12px;
-  padding: 16px 24px;
+  border: {{bw}}px solid @syncview_line;
+  border-radius: {{r_card}}px;
+  padding: {{sp4}}px {{sp5}}px;
 }
 .sv-card .sv-card-title {
   font-weight: 800;
-  font-size: 15px;
+  font-size: {{fs_m}}px;
 }
 .sv-card .sv-card-detail {
   color: @syncview_mute;
@@ -212,7 +174,7 @@ window.syncview button.sv-step:disabled {
   min-height: 6px;
   margin: 0;
   padding: 0;
-  border-radius: 999px;
+  border-radius: {{r_pill}}px;
   background: @syncview_line;
   border: 0 solid transparent;
 }
@@ -220,14 +182,14 @@ window.syncview button.sv-step:disabled {
   min-height: 6px;
   margin: 0;
   padding: 0;
-  border-radius: 999px;
+  border-radius: {{r_pill}}px;
   background: @syncview_text;
   border: 0 solid transparent;
 }
 
 /* ---- Tempo e timeline ---- */
 window.syncview .sv-time {
-  font-size: 26px;
+  font-size: {{fs_xl}}px;
   font-weight: 800;
 }
 window.syncview .sv-time-total {
@@ -238,7 +200,7 @@ window.syncview scale.sv-seek trough {
   min-height: 6px;
   margin: 0;
   padding: 0;
-  border-radius: 999px;
+  border-radius: {{r_pill}}px;
   background: @syncview_line;
   border: 0 solid transparent;
 }
@@ -247,15 +209,15 @@ window.syncview scale.sv-seek highlight {
   margin: 0;
   padding: 0;
   background: @syncview_text;
-  border-radius: 999px;
+  border-radius: {{r_pill}}px;
   border: 0 solid transparent;
 }
 window.syncview scale.sv-seek slider {
   min-width: 16px;
   min-height: 16px;
-  border-radius: 999px;
+  border-radius: {{r_pill}}px;
   background: @syncview_text;
-  border: 1px solid @syncview_bg;
+  border: {{bw}}px solid @syncview_bg;
   box-shadow: none;
 }
 window.syncview scale.sv-seek:disabled {
@@ -265,10 +227,10 @@ window.syncview scale.sv-seek:disabled {
 /* ---- Barra delle scorciatoie ---- */
 window.syncview .sv-shortcuts {
   background: @syncview_surf;
-  border-top: 1px solid @syncview_border;
+  border-top: {{bw}}px solid @syncview_border;
   color: @syncview_mute;
-  font-size: 12px;
-  padding: 4px 12px;
+  font-size: {{fs_s}}px;
+  padding: {{sp1}}px {{sp3}}px;
 }
 window.syncview .sv-shortcuts .sv-key {
   color: @syncview_text;

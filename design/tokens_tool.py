@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Strumento dei token di SyncView.
 
-  tokens_tool.py build   scrive design/generated/syncview-{light,dark}.css dai valori di tokens.json
+  tokens_tool.py build   scrive design/generated/syncview-{light,dark}.css (colori + componenti) da tokens.json e components.css.tpl
   tokens_tool.py check   verifica i contrasti (AA) e che i file generati siano aggiornati; esce con 1 se qualcosa non va
 
 I derivati (tinte morbide, testo sui colori, testo tenue) si calcolano qui con le stesse regole usate da Claude Design nel
@@ -9,10 +9,12 @@ prototipo, così tokens.json contiene solo i valori di base.
 """
 import json
 import pathlib
+import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent
 TOKENS = ROOT / "tokens.json"
+TEMPLATE = ROOT / "components.css.tpl"
 OUT = ROOT / "generated"
 
 INK = "#0B0F14"
@@ -105,6 +107,31 @@ def pairs(c):
     return p
 
 
+def placeholders(theme, tokens):
+    """Valori per i {{segnaposto}} del modello dei componenti."""
+    m = tokens["metrics"]
+    sizes = m["font_sizes_px"]
+    values = {
+        "bw": theme["border_width"],
+        "fs_s": sizes[0], "fs": sizes[1], "fs_m": sizes[2], "fs_l": sizes[3], "fs_xl": sizes[4],
+        "ring": m["focus_ring_px"]["ring"], "gap": m["focus_ring_px"]["gap"],
+    }
+    for i, v in enumerate(m["spacing_px"], start=1):
+        values[f"sp{i}"] = v
+    for k, v in m["radii_px"].items():
+        values["r_" + k] = v
+    return values
+
+
+def render_components(theme, tokens):
+    values = placeholders(theme, tokens)
+    text = TEMPLATE.read_text(encoding="utf-8")
+    missing = sorted(set(re.findall(r"\{\{(\w+)\}\}", text)) - set(values))
+    if missing:
+        raise SystemExit("segnaposto sconosciuti in components.css.tpl: " + ", ".join(missing))
+    return re.sub(r"\{\{(\w+)\}\}", lambda mo: str(values[mo.group(1)]), text)
+
+
 def css_for(name, theme, tokens):
     c = derive(theme)
     m = tokens["metrics"]
@@ -127,7 +154,7 @@ def css_for(name, theme, tokens):
         + f"; anello di focus: {m['focus_ring_px']['ring']}px + {m['focus_ring_px']['gap']}px di distacco */",
         "",
     ]
-    return "\n".join(lines)
+    return "\n".join(lines) + "\n" + render_components(theme, tokens)
 
 
 def load():

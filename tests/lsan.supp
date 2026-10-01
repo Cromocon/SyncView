@@ -20,3 +20,6 @@ leak:unknown module
 # Proxy Wayland creati da GTK quando realizza una finestra (gtk_widget_realize):
 # restano allocati fino alla chiusura del display, che i test non eseguono.
 leak:libwayland-client.so
+# Cache dei font (fontconfig/pango) che GTK inizializza al primo testo disegnato (test con la finestra principale).
+leak:libfontconfig.so
+leak:libpangoft2

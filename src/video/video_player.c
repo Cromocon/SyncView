@@ -161,6 +161,7 @@ struct _SyncviewVideoPlayer {
     FrameInfo *frame_info;       /* timestamp dell'ultimo frame e fps, scritti dal thread di streaming (probe sul sink) */
     gint64 pending_seek_ns;      /* destinazione dell'ultimo seek/step non ancora concluso, -1 se nessuno */
     gint64 pending_seek_us;      /* quando è stato emesso (monotonic), per scartarlo se non si conclude mai */
+    gboolean snap_to_frame;      /* dopo un frame-step esatto la posizione riportata è l'INIZIO del frame mostrato */
     gint64 anchor_ns;            /* metà del frame a cui l'ultimo frame-step esatto ha portato il video, -1 se non valida */
 
     /* Polling della posizione, attivo solo in PLAYING */
@@ -592,6 +593,27 @@ query_position_ms(SyncviewVideoPlayer *self, gboolean *ok)
 {
     gint64 position_ns = 0;
 
+    /*
+     * Dopo un frame-step esatto la posizione è l'inizio del frame mostrato (fine − durata nominale), non il punto di
+     * arrivo del seek (che è il centro del frame): avanti e indietro danno così la stessa lettura, sui confini dei frame.
+     */
+    if (self->snap_to_frame && self->frame_info) {
+        g_mutex_lock(&self->frame_info->lock);
+        gint64 frame_ns = self->frame_info->fps_n > 0
+                              ? (gint64)gst_util_uint64_scale(GST_SECOND, self->frame_info->fps_d, self->frame_info->fps_n)
+                              : 0;
+        gint64 pts_ns = self->frame_info->pts_ns;
+        gint64 end_ns = self->frame_info->end_ns;
+        g_mutex_unlock(&self->frame_info->lock);
+
+        if (frame_ns > 0 && pts_ns >= 0 && end_ns > pts_ns) {
+            gint64 start_ns = MAX(end_ns - frame_ns, 0);
+
+            *ok = TRUE;
+            return (start_ns + GST_MSECOND / 2) / GST_MSECOND;
+        }
+    }
+
     *ok = gst_element_query_position(self->pipeline, GST_FORMAT_TIME, &position_ns) && position_ns >= 0;
     /* GStreamer lavora in nanosecondi: conversione in ms una volta sola, qui. */
     return *ok ? (gint64)GST_TIME_AS_MSECONDS(position_ns) : 0;
@@ -663,6 +685,7 @@ reset_position_and_duration(SyncviewVideoPlayer *self)
     /* Velocità e frame-step non sopravvivono al video: ogni load riparte a 1.0x (come fa l'originale). */
     self->rate = 1.0;
     self->anchor_ns = -1;
+    self->snap_to_frame = FALSE;
     self->pending_seek_ns = -1;
     if (self->frame_info) {
         frame_info_reset(self->frame_info);
@@ -1160,6 +1183,7 @@ static gboolean
 seek_to_ns(SyncviewVideoPlayer *self, gint64 position_ns, GError **error)
 {
     self->anchor_ns = -1;
+    self->snap_to_frame = FALSE;
     self->pending_seek_ns = position_ns;
     self->pending_seek_us = g_get_monotonic_time();
     if (!gst_element_seek(self->pipeline, self->rate, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE,
@@ -1202,6 +1226,7 @@ syncview_video_player_play(SyncviewVideoPlayer *self, GError **error)
         return FALSE;
     }
     self->anchor_ns = -1;
+    self->snap_to_frame = FALSE;
     self->pending_seek_ns = -1;  /* da qui la posizione è quella che scorre */
 
     set_playback_state(self, SYNCVIEW_PLAYBACK_PLAYING);
@@ -1473,6 +1498,7 @@ syncview_video_player_step_frames(SyncviewVideoPlayer *self, int frame_count, GE
         self->at_end = FALSE;
     }
     self->anchor_ns = (frame_count > 0 && !busy && was_playing) ? -1 : anchor;  /* dopo seek_to_ns, che la invalida */
+    self->snap_to_frame = TRUE;
 
     char fps_text[G_ASCII_DTOSTR_BUF_SIZE];
     g_ascii_formatd(fps_text, sizeof(fps_text), "%.3f", fps);
@@ -1506,13 +1532,15 @@ syncview_video_player_set_playback_rate(SyncviewVideoPlayer *self, double rate, 
      */
     gint64 position_ns = self->anchor_ns >= 0 ? self->anchor_ns : current_position_ns(self);
     gint64 anchor = self->anchor_ns;
+    gboolean snap = self->snap_to_frame;
     double previous = self->rate;
     self->rate = rate;
     if (!seek_to_ns(self, position_ns, error)) {
         self->rate = previous;
         return FALSE;
     }
-    self->anchor_ns = anchor;  /* stesso frame: l'ancora resta valida */
+    self->anchor_ns = anchor;  /* stesso frame: l'ancora e la lettura sul frame restano valide */
+    self->snap_to_frame = snap;
 
     char rate_text[G_ASCII_DTOSTR_BUF_SIZE];
     g_ascii_formatd(rate_text, sizeof(rate_text), "%.2f", rate);

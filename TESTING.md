@@ -198,8 +198,8 @@ meson setup build-asan -Db_sanitize=address -Db_lundef=false --buildtype=debug
 ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:abort_on_error=1 meson test -C build-asan
 ```
 
-- [ ] 15/15 **OK**, zero errori ASan e **zero leak** nel codice SyncView (LeakSanitizer; per `discoverer` con le soppressioni di terze parti in `tests/lsan.supp`).
-- [ ] Stessa passata con `-Db_sanitize=address,undefined` → 15/15 OK, zero `runtime error` UBSan.
+- [ ] 16/16 **OK**, zero errori ASan e **zero leak** nel codice SyncView (LeakSanitizer; per `discoverer` con le soppressioni di terze parti in `tests/lsan.supp`).
+- [ ] Stessa passata con `-Db_sanitize=address,undefined` → 16/16 OK, zero `runtime error` UBSan.
 - Prima di fidarsi di "zero leak" verificare che LeakSanitizer sia attivo nell'ambiente (alcuni sandbox/container lo disabilitano in silenzio): un programma di prova che perde 123 byte deve produrre `SUMMARY: AddressSanitizer: 123 byte(s) leaked`.
 - ThreadSanitizer **non** è un criterio affidabile con `libglib` di sistema (non instrumentata: falsi positivi sui `GMutex`).
 
@@ -319,12 +319,27 @@ Stesso eseguibile: `syncview:video_player` → **OK** (ora ~70 s; i test di M2.7
 - [ ] **Mutazione**: portando `mute` del tema chiaro a `#9AA6B8` il controllo fallisce (1,99:1); ripristinato torna OK.
 - Fonte unica: `design/tokens.json` (solo valori di base; tinte morbide, testo sui colori e testo tenue si derivano nello script con le stesse regole del prototipo di Claude Design).
 
+### M2.8 — finestra minima
+
+`syncview:main_window` → **OK** (~7 s; richiede display e `gtk4paintablesink`, altrimenti `SKIP`). Le finestre di test si aprono brevemente: sul desktop dell'utente vanno eseguite sul «Desktop 9» (vedi la nota in fondo).
+
+- [ ] **Tema**: i due fogli di stile generati (chiaro e scuro) sono accettati da GTK senza **nessun errore di analisi**, e il cambio di tema applica quello giusto (`syncview_theme_is_dark`). Nessun avviso `Gtk-WARNING` (larghezze negative, ecc.) all'apertura della finestra.
+- [ ] **Finestra vuota**: stato `EMPTY`, scheda «Nessun video», Play/passi/barra **disattivati**, il pulsante «Carica video» attivo.
+- [ ] **Apri → carica**: `LOADING` con «Analisi del file…», poi `LOADED`; comandi attivi, tempo `00:00.000`, durata mostrata. Il percorso è nel file dei percorsi **solo ora**.
+- [ ] **Play, pausa, seek, passo**: il pulsante passa da «Play» a «Pausa» e torna; il seek sposta barra e tempo (`00:02.000`); +1 frame → `00:02.040`, −1 frame → `00:02.000` (**lettura sull'inizio del frame**, uguale avanti e indietro). Il tempo che avanza durante il play si verifica solo se il frame clock batte (su finestra non visibile il test lo segnala e salta quel solo controllo).
+- [ ] **O3**: dopo un caricamento riuscito, un file non riproducibile (testo con estensione `.mp4`) → `ERROR` «Impossibile riprodurre il video» e un file inesistente → `ERROR` «File spostato o non trovato»; **in entrambi i casi il file dei percorsi è identico byte per byte**. Un video valido successivo lo aggiorna.
+- [ ] **Ricarico all'avvio**: una nuova finestra ricarica da sola il video salvato (`LOADING` → `LOADED`); se il file non c'è più la finestra è vuota e il percorso è tolto dal file.
+- [ ] **Chiusura**: finestra chiusa a metà caricamento e in riproduzione (6 volte) → nessuno smontaggio rimasto in sospeso; ASan/UBSan 16/16 (nuove soppressioni di terze parti: cache dei font fontconfig/pango).
+- [ ] **Uscita ordinata dell'app** (manuale, o `kill -TERM` / `kill -INT` all'app in esecuzione): termina in meno di un secondo, il log riporta «Finestra principale chiusa» e «Applicazione chiusa», nessun processo `syncview` residuo.
+- [ ] **Prova visiva** (manuale): con `SYNCVIEW_THEME=light` e `=dark` la finestra mostra barra del titolo, riquadro video con chip «● A · FEED-1», fps e tempo, tempo grande, barra, pulsanti e barra delle scorciatoie come nei mockup della direzione 1b.
+- **Desktop 9** (solo sviluppo su KDE/Wayland): uno script KWin temporaneo sposta sul «Desktop 9» le finestre dei test e di `syncview`; su un desktop non attivo il compositor non invia frame callback, quindi le verifiche sul frame clock si saltano da sole.
+
 ### Riepilogo atteso
 
 ```
 meson test -C build
 ```
-deve riportare **15/15** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`, `discoverer`, `video_player`, `deps_check`, `design_tokens`); in un ambiente senza display o senza `gtk4paintablesink` `video_player` risulta `SKIP` (e `discoverer` se mancano i plugin di prova): è normale.
+deve riportare **16/16** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`, `discoverer`, `video_player`, `deps_check`, `design_tokens`, `main_window`); in un ambiente senza display o senza `gtk4paintablesink` `video_player` e `main_window` risultano `SKIP` (e `discoverer` se mancano i plugin di prova): è normale.
 
 ---
 
