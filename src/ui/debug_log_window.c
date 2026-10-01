@@ -7,7 +7,12 @@
 #define LOG_WINDOW_DATA "syncview-debug-log-window"
 #define QUEUE_MAX_LINES 20000   /* tetto della coda tra sink e vista: oltre, le righe più vecchie si scartano (contate) */
 #define DRAIN_BATCH 300         /* righe mostrate per iterazione del main loop: l'interfaccia resta reattiva */
-#define QUEUE_RELEASE_DELAY_S 1 /* vedi on_window_destroy */
+#define QUEUE_RELEASE_DELAY_S 1 /* vedi on_window_destroy *//*
+ * Priorità dello svuotamento della coda: sopra il ridisegno di GTK (G_PRIORITY_HIGH_IDLE + 20). Con la priorità degli
+ * idle normali (200) il main loop di GTK, sempre occupato (riproduzione, frame clock), non lo eseguirebbe mai e le righe
+ * comparirebbero con grande ritardo: lo si è visto sul runner macOS della CI. I blocchi sono piccoli (DRAIN_BATCH).
+ */
+#define DRAIN_PRIORITY G_PRIORITY_HIGH_IDLE
 
 /* ---- Riga di log come oggetto del modello ---- */
 
@@ -322,7 +327,7 @@ log_sink(LoggerLevel level, LoggerModule module, const char *timestamp, const ch
     g_mutex_unlock(&q->lock);
 
     if (schedule) {
-        g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, on_drain_idle, log_queue_ref(q), NULL);
+        g_idle_add_full(DRAIN_PRIORITY, on_drain_idle, log_queue_ref(q), NULL);
     }
 }
 
@@ -400,7 +405,7 @@ on_pause_toggled(GtkToggleButton *button, gpointer user_data)
     if (!lw->paused) {
         /* Alla ripresa compaiono le righe arrivate nel frattempo e si torna a seguire il fondo. */
         lw->autoscroll = TRUE;
-        g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, on_drain_idle, log_queue_ref(lw->queue), NULL);
+        g_idle_add_full(DRAIN_PRIORITY, on_drain_idle, log_queue_ref(lw->queue), NULL);
         g_mutex_lock(&lw->queue->lock);
         lw->queue->drain_scheduled = TRUE;
         g_mutex_unlock(&lw->queue->lock);
