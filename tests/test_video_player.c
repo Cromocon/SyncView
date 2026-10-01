@@ -1332,6 +1332,13 @@ frame_clock_usable(void)
 {
     static int verdict = -1;
 
+#ifdef __APPLE__
+    /* I runner macOS della CI non hanno un display attivo: durante la riproduzione il frame clock resta fermo per secondi. */
+    if (verdict < 0 && g_getenv("CI")) {
+        g_printerr("macOS in CI senza display attivo: verifiche sul frame clock saltate\n");
+        verdict = 0;
+    }
+#endif
     if (verdict < 0) {
         guint ticks = 0;
         GtkWidget *window = gtk_window_new();
