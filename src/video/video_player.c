@@ -1400,6 +1400,16 @@ syncview_video_player_step_frames(SyncviewVideoPlayer *self, int frame_count, GE
     gint64 end_ns = self->frame_info->end_ns;
     g_mutex_unlock(&self->frame_info->lock);
 
+    /*
+     * Un seek/step «in corso» la cui destinazione cade già dentro il frame mostrato è concluso, anche se nessun messaggio
+     * lo ha ancora confermato (su macOS l'ASYNC_DONE può non confermare la posizione): vale il frame, non la destinazione.
+     * Un seek davvero in volo ha invece una destinazione fuori dal frame ancora mostrato (di almeno mezzo frame).
+     */
+    if (self->pending_seek_ns >= 0 && pts_ns >= 0 && end_ns > pts_ns &&
+        self->pending_seek_ns >= end_ns - frame_ns - GST_MSECOND && self->pending_seek_ns <= end_ns + GST_MSECOND) {
+        self->pending_seek_ns = -1;
+    }
+
     gint64 anchor = self->anchor_ns;
     if (anchor < 0) {
         if (end_ns > pts_ns && pts_ns >= 0) {
