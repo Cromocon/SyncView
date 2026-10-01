@@ -332,6 +332,7 @@ Stesso eseguibile: `syncview:video_player` → **OK** (ora ~70 s; i test di M2.7
 - [ ] **Chiusura**: finestra chiusa a metà caricamento e in riproduzione (6 volte) → nessuno smontaggio rimasto in sospeso; ASan/UBSan 16/16 (nuove soppressioni di terze parti: cache dei font fontconfig/pango).
 - [ ] **Uscita ordinata dell'app** (manuale, o `kill -TERM` / `kill -INT` all'app in esecuzione): termina in meno di un secondo, il log riporta «Finestra principale chiusa» e «Applicazione chiusa», nessun processo `syncview` residuo.
 - [ ] **Prova visiva** (manuale): con `SYNCVIEW_THEME=light` e `=dark` la finestra mostra barra del titolo, riquadro video con chip «● A · FEED-1», fps e tempo, tempo grande, barra, pulsanti e barra delle scorciatoie come nei mockup della direzione 1b.
+- **macOS in CI**: il test `main_window` è saltato (`SKIP`) perché sul runner il caricamento col video nella finestra non termina: problema aperto, da provare su un Mac reale (vedi PLAN.md, M2.8).
 - **Desktop 9** (solo sviluppo su KDE/Wayland): uno script KWin temporaneo sposta sul «Desktop 9» le finestre dei test e di `syncview`; su un desktop non attivo il compositor non invia frame callback, quindi le verifiche sul frame clock si saltano da sole.
 
 ### Riepilogo atteso
