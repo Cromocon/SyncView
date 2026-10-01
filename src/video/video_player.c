@@ -1390,8 +1390,14 @@ syncview_video_player_step_frames(SyncviewVideoPlayer *self, int frame_count, GE
         return syncview_video_player_step_ms(self, (gint64)frame_count * SYNCVIEW_DEFAULT_FRAME_STEP_MS, error);
     }
 
-    if (self->playback_state == SYNCVIEW_PLAYBACK_PLAYING && !syncview_video_player_pause(self, error)) {
-        return FALSE;
+    gboolean was_playing = self->playback_state == SYNCVIEW_PLAYBACK_PLAYING;
+    if (was_playing) {
+        if (!syncview_video_player_pause(self, error)) {
+            return FALSE;
+        }
+        /* In riproduzione il frame mostrato era ancora in movimento: nessuna ancora o destinazione precedente vale più. */
+        self->anchor_ns = -1;
+        self->pending_seek_ns = -1;
     }
 
     g_mutex_lock(&self->frame_info->lock);
@@ -1408,6 +1414,11 @@ syncview_video_player_step_frames(SyncviewVideoPlayer *self, int frame_count, GE
     if (self->pending_seek_ns >= 0 && pts_ns >= 0 && end_ns > pts_ns &&
         self->pending_seek_ns >= end_ns - frame_ns - GST_MSECOND && self->pending_seek_ns <= end_ns + GST_MSECOND) {
         self->pending_seek_ns = -1;
+    }
+    /* Senza movimenti in volo l'ancora deve cadere nel frame mostrato; altrimenti è vecchia (il video si è mosso) e si ricalcola. */
+    if (self->pending_seek_ns < 0 && self->anchor_ns >= 0 && pts_ns >= 0 && end_ns > pts_ns &&
+        (self->anchor_ns < end_ns - frame_ns - GST_MSECOND || self->anchor_ns > end_ns + GST_MSECOND)) {
+        self->anchor_ns = -1;
     }
 
     gint64 anchor = self->anchor_ns;
@@ -1447,8 +1458,13 @@ syncview_video_player_step_frames(SyncviewVideoPlayer *self, int frame_count, GE
                                 "Frame-step non riuscito");
             return FALSE;
         }
-        self->pending_seek_ns = anchor;
-        self->pending_seek_us = g_get_monotonic_time();
+        if (was_playing) {
+            /* Partito da un frame in movimento: la destinazione stimata non è affidabile, si ripartirà dal frame mostrato. */
+            self->pending_seek_ns = -1;
+        } else {
+            self->pending_seek_ns = anchor;
+            self->pending_seek_us = g_get_monotonic_time();
+        }
     } else if (!seek_to_ns(self, anchor, error)) {
         /* Indietro, oppure avanti con un movimento già in corso: seek accurato al frame di destinazione (stesso frame
          * che lo step avrebbe mostrato, e si somma correttamente ai passi ancora in volo). */
@@ -1456,7 +1472,7 @@ syncview_video_player_step_frames(SyncviewVideoPlayer *self, int frame_count, GE
     } else {
         self->at_end = FALSE;
     }
-    self->anchor_ns = anchor;  /* dopo seek_to_ns, che la invalida */
+    self->anchor_ns = (frame_count > 0 && !busy && was_playing) ? -1 : anchor;  /* dopo seek_to_ns, che la invalida */
 
     char fps_text[G_ASCII_DTOSTR_BUF_SIZE];
     g_ascii_formatd(fps_text, sizeof(fps_text), "%.3f", fps);
