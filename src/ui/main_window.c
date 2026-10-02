@@ -5,6 +5,7 @@
 #include "ui/theme.h"
 #include "util/time_format.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #define MAIN_WINDOW_DATA "syncview-main-window"
@@ -588,7 +589,7 @@ make_shortcuts_bar(void)
 {
     GtkWidget *bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 16);
     const char *items[][2] = {
-        { "Spazio", "play" }, { "←/→", "frame" },  { "Shift+←/→", "±10" },
+        { "Spazio", "play" }, { "←/→", "frame" },  { "Shift+←/→", "±10 frame" },
         { "Home/Fine", "inizio/fine" }, { "Ctrl+O", "apri" },
     };
 
@@ -700,6 +701,12 @@ build_controls(MainWindow *mw)
     for (int i = 0; i < 4; i++) {
         mw->btn_step[i] = register_widget(mw, STEP_NAMES[i], gtk_button_new_with_label(STEP_LABELS[i]));
         gtk_widget_add_css_class(mw->btn_step[i], "sv-step");
+        {
+            char *tip = g_strdup_printf("%d frame %s", abs(STEP_VALUES[i]), STEP_VALUES[i] < 0 ? "indietro" : "avanti");
+
+            gtk_widget_set_tooltip_text(mw->btn_step[i], tip);
+            g_free(tip);
+        }
         g_signal_connect(mw->btn_step[i], "clicked", G_CALLBACK(on_step_clicked), mw);
     }
     mw->btn_play = register_widget(mw, "play", gtk_button_new_with_label("Play"));
