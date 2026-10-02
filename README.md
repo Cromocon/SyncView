@@ -88,10 +88,6 @@ docs/        # ARCHITECTURE.md, MIGRATION_NOTES.md
 
 La struttura viene popolata incrementalmente milestone per milestone (vedi [PLAN.md](PLAN.md#milestone-granulari)); alcuni moduli elencati sopra non esistono ancora.
 
-## Riferimento visivo
-
-Il tema/UI si ispira al linguaggio visivo di [praesidium.artysan.me](https://praesidium.artysan.me/) (palette scura "Command", tipografia editoriale/monospace, componenti come lo zoom-stepper e i pannelli informativi) — dettagli in [PLAN.md](PLAN.md#riferimento-visivo-per-loverhaul-ui).
-
 ## Come contribuire
 
 1. Leggi [PLAN.md](PLAN.md) per intero, in particolare le sezioni **Architettura** e **Milestone (granulari)**.
