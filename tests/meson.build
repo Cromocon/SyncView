@@ -190,3 +190,18 @@ test_deps_check = executable(
   dependencies: [glib_dep, gio_dep, gstreamer_dep],
 )
 test('deps_check', test_deps_check, timeout: 60)
+
+# Prova su file reali: si esegue solo con SYNCVIEW_TEST_CLIPS=<cartella con i clip> (altrimenti 77 = skip).
+test_real_clips = executable(
+  'test_real_clips',
+  'test_real_clips.c',
+  include_directories: syncview_core_inc,
+  link_with: [syncview_video_lib, syncview_core_lib],
+  dependencies: [glib_dep, gtk_dep, gstreamer_dep, gstreamer_video_dep],
+)
+test(
+  'real_clips',
+  test_real_clips,
+  timeout: 600,
+  env: {'LSAN_OPTIONS': 'suppressions=' + meson.current_source_dir() / 'lsan.supp'},
+)

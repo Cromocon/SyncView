@@ -310,6 +310,12 @@ Stesso eseguibile: `syncview:video_player` → **OK** (ora ~70 s; i test di M2.7
 - **Mutation testing M2.7** (script ad hoc): 20 mutazioni (clamp, `at_end`, pausa dello step, seek pendente, ancora dalla fine del frame, step avanti sempre con evento, velocità ignorata/non azzerata/non validata, ripiego senza fps, margine di 1 ms, reset di `frame_info`, clamp ultimo/primo frame, log…): tutte rilevate tranne due equivalenti — «velocità uguale alla corrente non evita il seek» (solo lavoro risparmiato) e «`play()` non azzera il seek pendente» (l'`ASYNC_DONE` lo azzera comunque). Le lacune emerse (clamp superiore, margine, reset, ultimo frame) sono diventate test.
 - **Scoperte verificate**: (1) dopo un seek accurato il pts del buffer arrivato al sink è il punto di arrivo, non l'inizio del frame; (2) più `GST_EVENT_STEP` ravvicinati si sostituiscono (3 passi su 4 persi); (3) `INSTANT_RATE_CHANGE` con `matroskademux` dà un CRITICAL di GStreamer; (4) `step_ms` subito dopo un `seek` leggeva la posizione vecchia.
 
+### M2.7 su file reali — `real_clips`
+
+`tests/test_real_clips.c` prova ogni file di una cartella (`SYNCVIEW_TEST_CLIPS=<cartella>`, senza la variabile è `SKIP`): fps e durata, 8 passi +1 e 8 passi −1 (delta = 1/fps, ritorno al primo frame), seek accurato a 4 punti, −1 dopo un seek, ±10, play e velocità 2× (misurata dopo l'assestamento: il cambio di velocità è un seek).
+Esito sui 12 clip di prova (Big Buck Bunny 10 s: H.264 30 fps e 60 fps, AV1, VP9, in MP4/WebM, e file `.mkv` che in realtà sono MP4): **tutto esatto**, anche a 60 fps; decoder hardware usati: `nvh264dec`, `nvav1dec`, `vavp9dec`. Non coperti: decoder software, framerate variabile, MKV/MOV veri.
+Uso: `SYNCVIEW_TEST_CLIPS=~/Downloads/Videos tools/on-desktop9.sh meson test -C build real_clips`. Sui Mac/Windows: stessa cosa con la propria cartella (vedi i file `TEST_*.md`).
+
 ### Design system — token (`design/`)
 
 `syncview:design_tokens` (`design/tokens_tool.py check`) → **OK**.
