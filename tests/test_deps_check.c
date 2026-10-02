@@ -357,7 +357,7 @@ test_ffmpeg(void)
     deps_report_free(r);
     f->run_fails = FALSE;
 
-    /* Assente: Linux -> istruzioni; Windows/macOS -> scaricabile. */
+    /* Assente: istruzioni su ogni piattaforma (su Windows/macOS non c'è ancora un artefatto nel manifest incorporato). */
     g_hash_table_remove(f->programs, "ffmpeg");
     r = deps_check_run(&probes, "/deps");
     it = item(r, "ffmpeg");
@@ -368,11 +368,13 @@ test_ffmpeg(void)
 
     probes.platform = DEPS_PLATFORM_WINDOWS;
     r = deps_check_run(&probes, "/deps");
-    assert(item(r, "ffmpeg")->resolution == DEPS_RESOLUTION_DOWNLOADABLE);
+    assert(item(r, "ffmpeg")->resolution == DEPS_RESOLUTION_INSTRUCTIONS);
+    assert(HAS(item(r, "ffmpeg")->instructions, "deps/bin") && HAS(item(r, "ffmpeg")->instructions, "ffmpeg.exe"));
     deps_report_free(r);
     probes.platform = DEPS_PLATFORM_MACOS;
     r = deps_check_run(&probes, "/deps");
-    assert(item(r, "ffmpeg")->resolution == DEPS_RESOLUTION_DOWNLOADABLE);
+    assert(item(r, "ffmpeg")->resolution == DEPS_RESOLUTION_INSTRUCTIONS);
+    assert(HAS(item(r, "ffmpeg")->instructions, "brew install ffmpeg"));
     deps_report_free(r);
 
     fake_free(f);
@@ -519,7 +521,10 @@ test_system_packages_plan(void)
     fake_remove(f, "gtk4paintablesink");
     r = deps_check_run(&probes, "/deps");
     assert_not_auto(item(r, "gst-gtk4sink"));
-    assert(HAS(item(r, "gst-gtk4sink")->instructions, "Reinstalla SyncView") && HAS(item(r, "gst-gtk4sink")->instructions, "gst-plugins-rs"));
+    /* Windows: l'app scarica e lancia l'installer ufficiale (UAC); a mano restano il sito e i pacchetti MSYS2. */
+    assert(item(r, "gst-gtk4sink")->resolution == DEPS_RESOLUTION_PLATFORM_INSTALLER);
+    assert(HAS(item(r, "gst-gtk4sink")->instructions, "installer ufficiale di GStreamer") && HAS(item(r, "gst-gtk4sink")->instructions, "UAC"));
+    assert(HAS(item(r, "gst-gtk4sink")->instructions, "gst-plugins-rs"));
     assert(!HAS(item(r, "gst-gtk4sink")->instructions, "sudo"));
     deps_report_free(r);
     fake_free(f);
@@ -528,7 +533,9 @@ test_system_packages_plan(void)
     fake_remove(f, "gtk4paintablesink");
     r = deps_check_run(&probes, "/deps");
     assert_not_auto(item(r, "gst-gtk4sink"));
-    assert(HAS(item(r, "gst-gtk4sink")->instructions, "GStreamer 1.28") && !HAS(item(r, "gst-gtk4sink")->instructions, "sudo"));
+    assert(item(r, "gst-gtk4sink")->resolution == DEPS_RESOLUTION_PLATFORM_INSTALLER);
+    assert(HAS(item(r, "gst-gtk4sink")->instructions, "installer ufficiale di GStreamer") && !HAS(item(r, "gst-gtk4sink")->instructions, "sudo"));
+    assert(HAS(item(r, "gst-gtk4sink")->instructions, "Installer di macOS") && HAS(item(r, "gst-gtk4sink")->instructions, "gtk4paintablesink"));
     deps_report_free(r);
     fake_free(f);
 }

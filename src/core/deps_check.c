@@ -1,5 +1,7 @@
 #include "core/deps_check.h"
 
+#include "core/dep_manifest.h"
+
 #include "core/logger.h"
 
 #include <gio/gio.h>
@@ -340,6 +342,9 @@ deps_report_to_text(const DepsReport *report)
                 g_free(packages);
             } else if (item->resolution == DEPS_RESOLUTION_DOWNLOADABLE) {
                 g_string_append(text, "    -> SyncView può scaricarlo\n");
+            } else if (item->resolution == DEPS_RESOLUTION_PLATFORM_INSTALLER) {
+                g_string_append(text, "    -> SyncView può scaricare e lanciare l'installer ufficiale di GStreamer; "
+                                      "il sistema chiederà l'autorizzazione\n");
             }
             if (*item->instructions) {
                 g_string_append_printf(text, "    %s %s\n",
@@ -496,6 +501,30 @@ package_manager_program(PackageManager pm)
     return pm == PM_PACMAN ? "pacman" : pm == PM_APT ? "apt-get" : pm == PM_DNF ? "dnf" : "zypper";
 }
 
+gboolean
+deps_package_is_known(const char *package_manager, const char *package)
+{
+    const PackageSet *all[] = { &PKG_BASE, &PKG_GOOD, &PKG_BAD, &PKG_LIBAV, &PKG_GTK4, &PKG_FFMPEG };
+    PackageManager managers[] = { PM_PACMAN, PM_APT, PM_DNF, PM_ZYPPER };
+
+    if (!package_manager || !package) {
+        return FALSE;
+    }
+    for (size_t m = 0; m < G_N_ELEMENTS(managers); m++) {
+        if (strcmp(package_manager, package_manager_program(managers[m])) != 0) {
+            continue;
+        }
+        for (size_t i = 0; i < G_N_ELEMENTS(all); i++) {
+            const char *name = package_name_for(managers[m], all[i]);
+
+            if (name && strcmp(name, package) == 0) {
+                return TRUE;
+            }
+        }
+    }
+    return FALSE;
+}
+
 static const char *
 manual_install_verb(PackageManager pm)
 {
@@ -549,6 +578,15 @@ build_plan(const DepsProbes *probes, const PackageSet *const *sets, size_t n, co
         return plan_text(DEPS_RESOLUTION_INSTRUCTIONS, g_string_free(text, FALSE));
     }
     case DEPS_PLATFORM_WINDOWS:
+        if (dep_manifest_gstreamer_installer(DEPS_PLATFORM_WINDOWS)) {
+            return plan_text(DEPS_RESOLUTION_PLATFORM_INSTALLER,
+                             g_strdup_printf("Installa %s con l'installer ufficiale di GStreamer: SyncView lo scarica, ne verifica "
+                                   "l'SHA-256 e lo lancia chiedendo i permessi di amministratore a Windows (UAC). "
+                                   "A mano: gstreamer.freedesktop.org, sezione Download. In una build da sorgente con MSYS2: "
+                                   "pacman -S mingw-w64-ucrt-x86_64-gst-plugins-base mingw-w64-ucrt-x86_64-gst-plugins-good "
+                                   "mingw-w64-ucrt-x86_64-gst-plugins-bad mingw-w64-ucrt-x86_64-gst-libav "
+                                   "mingw-w64-ucrt-x86_64-gst-plugins-rs", what));
+        }
         return plan_text(DEPS_RESOLUTION_INSTRUCTIONS,
                          g_strdup_printf("Reinstalla SyncView: il pacchetto per Windows include %s. "
                                "In una build da sorgente con MSYS2: pacman -S mingw-w64-ucrt-x86_64-gst-plugins-base "
@@ -556,6 +594,13 @@ build_plan(const DepsProbes *probes, const PackageSet *const *sets, size_t n, co
                                "mingw-w64-ucrt-x86_64-gst-libav mingw-w64-ucrt-x86_64-gst-plugins-rs", what));
     case DEPS_PLATFORM_MACOS:
     default:
+        if (dep_manifest_gstreamer_installer(DEPS_PLATFORM_MACOS)) {
+            return plan_text(DEPS_RESOLUTION_PLATFORM_INSTALLER,
+                             g_strdup_printf("Installa %s con l'installer ufficiale di GStreamer: SyncView lo scarica, ne verifica "
+                                   "l'SHA-256 e lo apre nell'Installer di macOS, che chiede lui l'autorizzazione. "
+                                   "A mano: gstreamer.freedesktop.org, sezione Download (il runtime include gtk4paintablesink). "
+                                   "Verifica con: gst-inspect-1.0 <elemento>", what));
+        }
         return plan_text(DEPS_RESOLUTION_INSTRUCTIONS,
                          g_strdup_printf("Reinstalla SyncView (il bundle per macOS include %s) oppure installa GStreamer 1.28 o "
                                "successivo dal sito ufficiale (il suo installer include gtk4paintablesink); "
@@ -766,19 +811,25 @@ find_h264_encoder(const char *encoders_output)
 }
 
 /*
- * Come ottenere ffmpeg: su Windows/macOS l'app lo scarica in ~/.syncview/deps (senza privilegi); su Linux si
- * installa dai pacchetti della distribuzione (con elevazione gestita dal sistema) se il nome è verificato,
- * altrimenti istruzioni.
+ * Come ottenere ffmpeg: su Linux si installa dai pacchetti della distribuzione (con elevazione gestita dal sistema) se
+ * il nome è verificato, altrimenti istruzioni. Su Windows/macOS NON c'è ancora un artefatto nel manifest incorporato
+ * (dove ospitare gli artefatti non ufficiali è una decisione aperta, vedi PLAN.md): per ora solo istruzioni; l'installer
+ * di GStreamer non contiene ffmpeg.
  */
 static InstallPlan
 ffmpeg_plan(const DepsProbes *probes, const PackageSet *const *sets, const char *what)
 {
-    InstallPlan plan = build_plan(probes, sets, 1, what);
-
-    if (probes->platform != DEPS_PLATFORM_LINUX) {
-        plan.resolution = DEPS_RESOLUTION_DOWNLOADABLE;
+    if (probes->platform == DEPS_PLATFORM_WINDOWS) {
+        return plan_text(DEPS_RESOLUTION_INSTRUCTIONS,
+                         g_strdup_printf("Installa %s: scarica un build di ffmpeg (per esempio da gyan.dev/ffmpeg/builds) e copia "
+                               "ffmpeg.exe nella cartella ~/.syncview/deps/bin (oppure mettilo nel PATH)", what));
     }
-    return plan;
+    if (probes->platform == DEPS_PLATFORM_MACOS) {
+        return plan_text(DEPS_RESOLUTION_INSTRUCTIONS,
+                         g_strdup_printf("Installa %s con Homebrew (brew install ffmpeg) oppure copia ffmpeg nella cartella "
+                               "~/.syncview/deps/bin", what));
+    }
+    return build_plan(probes, sets, 1, what);
 }
 
 static void

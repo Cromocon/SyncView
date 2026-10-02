@@ -55,6 +55,9 @@ typedef enum {
                                          di pacchetti con elevazione dei privilegi gestita dal sistema (la
                                          password la chiede il sistema, mai l'app): vedi package_manager/packages */
     DEPS_RESOLUTION_DOWNLOADABLE,     /* artefatto scaricato dall'app in ~/.syncview/deps, senza privilegi */
+    DEPS_RESOLUTION_PLATFORM_INSTALLER, /* Windows/macOS: l'app scarica e verifica (SHA-256 del manifest incorporato) l'installer
+                                         ufficiale di GStreamer e lo lancia con l'elevazione del sistema (UAC / prompt di
+                                         macOS): la password la gestisce il sistema, mai l'app. Vedi core/dep_manifest.h */
     DEPS_RESOLUTION_INSTRUCTIONS,     /* nessun modo automatico verificato: va installato a mano (vedi `instructions`) */
 } DepsResolution;
 
@@ -128,6 +131,12 @@ gboolean deps_report_is_complete(const DepsReport *report);
  * del gestore (g_free), o NULL. Tutti i componenti di un report usano lo stesso gestore.
  */
 char **deps_report_collect_packages(const DepsReport *report, gboolean include_optional, char **package_manager);
+
+/*
+ * TRUE se `package` è un nome della tabella interna dei pacchetti per quel gestore ("pacman", "apt-get", "dnf",
+ * "zypper"). L'installer accetta SOLO questi nomi (mai testo preso da input esterno).
+ */
+gboolean deps_package_is_known(const char *package_manager, const char *package);
 
 /* Report leggibile, una riga per componente + istruzioni per i mancanti. Da liberare con g_free. */
 char *deps_report_to_text(const DepsReport *report);

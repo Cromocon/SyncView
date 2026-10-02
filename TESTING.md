@@ -198,8 +198,8 @@ meson setup build-asan -Db_sanitize=address -Db_lundef=false --buildtype=debug
 ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:abort_on_error=1 meson test -C build-asan
 ```
 
-- [ ] 17/17 **OK**, zero errori ASan e **zero leak** nel codice SyncView (LeakSanitizer; per `discoverer` con le soppressioni di terze parti in `tests/lsan.supp`).
-- [ ] Stessa passata con `-Db_sanitize=address,undefined` → 17/17 OK, zero `runtime error` UBSan.
+- [ ] 19/19 **OK**, zero errori ASan e **zero leak** nel codice SyncView (LeakSanitizer; per `discoverer` con le soppressioni di terze parti in `tests/lsan.supp`).
+- [ ] Stessa passata con `-Db_sanitize=address,undefined` → 19/19 OK, zero `runtime error` UBSan.
 - Prima di fidarsi di "zero leak" verificare che LeakSanitizer sia attivo nell'ambiente (alcuni sandbox/container lo disabilitano in silenzio): un programma di prova che perde 123 byte deve produrre `SUMMARY: AddressSanitizer: 123 byte(s) leaked`.
 - ThreadSanitizer **non** è un criterio affidabile con `libglib` di sistema (non instrumentata: falsi positivi sui `GMutex`).
 
@@ -350,12 +350,32 @@ Stesso eseguibile: `syncview:video_player` → **OK** (ora ~70 s; i test di M2.7
 - [ ] **Chiusura**: chiudere la principale chiude Log e Moduli (anche se una è già chiusa a mano); log emessi da altri thread mentre la finestra viene chiusa e dopo la chiusura non toccano memoria liberata (ASan 17/17).
 - [ ] **Prova visiva** (manuale): con `SYNCVIEW_THEME=light|dark` e `--debug` le finestre sono leggibili (testo scuro su chiaro e viceversa, livelli con simbolo, interruttori, chip) come nella direzione 1b; nessun `Gtk-WARNING` all'apertura.
 
+### M2.11 — installazione delle dipendenze
+
+`syncview:dep_archive` e `syncview:dep_installer` → **OK** (senza display, senza GStreamer, senza rete esterna: `pkexec` è uno script finto, i download vanno a un server HTTP locale).
+
+- [ ] **Manifest**: ogni voce è ben formata (https, SHA-256 di 64 cifre minuscole, nome file semplice, dimensione > 0); Windows x86_64/ARM64 e macOS hanno l'installer, Linux no; voci malformate riconosciute.
+- [ ] **argv esatti** (senza shell): `pacman -S --noconfirm --needed`, `apt-get install -y`, `dnf install -y`, `zypper --non-interactive install` + pacchetti nell'ordine dato; rifiutati: gestore sconosciuto o con percorso, lista vuota, nomi non in tabella o per un'altra distribuzione, e 15 nomi sospetti (`;`, `$()`, backtick, `-S`, `--root=`, maiuscole, spazi, a capo, `../`, `|`, `&&`…).
+- [ ] **Piano da un report**: Linux/pacman con `gtk4paintablesink` mancante → un passo con argv `pacman … gst-plugin-gtk4`, elevazione richiesta, descrizione con pacchetti e avviso password; sistema completo o gestore sconosciuto → «nulla da installare»; Windows/macOS → **un solo passo** (l'installer ufficiale) anche con due componenti mancanti, con URL, SHA-256 e dimensione nella descrizione; ffmpeg mancante su Windows → solo istruzioni.
+- [ ] **Terze parti (solo Fedora)**: senza consenso nessun passo; con consenso: repository RPM Fusion (URL con la versione di `os-release`) + `gstreamer1-libav`, entrambi marcati di terze parti, con l'avviso «funzionamento non garantito»; openSUSE, `VERSION_ID` sospetto (`40; rm -rf /`) e `os-release` assente → nessun passo.
+- [ ] **Esecuzione con `pkexec` finto**: successo (argv registrato esatto, righe di output in tempo reale nell'ordine, eventi inizio/fine); errore del gestore (codice e ultime righe nel messaggio); 126 e 127 → `DENIED` e il comando parte **una volta sola**; senza `pkexec` → `NO_ELEVATION` senza processi; percorso di elevazione sbagliato → errore pulito.
+- [ ] **Annullamento e timeout**: annullato a metà il processo viene terminato (nessun processo residuo, esito `CANCELLED`, il passo non risulta concluso, ben prima dei 30 s del processo finto); già annullato → nessun processo; timeout di 1 s → `TIMEOUT` con processo terminato.
+- [ ] **Consenso applicato anche in esecuzione**: un piano con passi di terze parti senza `consent_third_party` non lancia NULLA; con il consenso i due comandi partono nell'ordine (repository, poi pacchetti); se il primo fallisce il secondo non parte.
+- [ ] **Ricontrollo finale**: dopo un'installazione riuscita `deps_check` sul sistema che «guarisce» dice riproduzione possibile e sistema completo.
+- [ ] **Download** (server locale): corretto con e senza `Content-Length` (chunked), progressi e verifica; già scaricato e corretto → **nessuna nuova richiesta**; file presente ma corrotto → riscaricato. Rifiutati senza lasciare né file né `.part`: SHA-256 diverso, dimensione dichiarata diversa, `Content-Length` diverso, file troncato (messaggio «troncato»), più dati del previsto (la lettura si ferma subito oltre la dimensione attesa), HTTP 404, URL non https (`http`, `ftp`, `file`, `gopher`, `javascript`) senza alcuna richiesta di rete, server irraggiungibile, annullamento prima e a metà (a 512 KB).
+- [ ] **Installer di piattaforma** (con funzione finta): scaricato, verificato, **poi** lanciato; il file scaricato viene tolto; autorizzazione negata → `DENIED` senza nuovo tentativo; SHA-256 sbagliato → l'installer **non viene mai lanciato**; voce con nome file `../fuori.exe` o NULL rifiutata.
+- [ ] **Archivio**: estratto in `<deps>/bin` con `strip_components`, bit di esecuzione rispettato, nessuna cartella `.staging`/`.old` residua, archivio scaricato rimosso; archivio malevolo con SHA-256 corretto (zip-slip) → `EXTRACT`, installazione precedente **intatta**, nessun file fuori dalla cartella; reinstallazione sostituisce in modo atomico.
+- [ ] **ZIP** (`dep_archive`): valido (cartelle, deflate, stored, file vuoto, strip, bit di esecuzione); rifiutati 8 percorsi pericolosi (`../`, `a/../../`, assoluto, `C:/`, backslash, `//`, `./`, `..`), `..` nascosto da strip, duplicati, collegamento simbolico, file speciale, voce cifrata, metodo non supportato, dimensione dichiarata oltre il tetto, tetto totale, zip bomb (dichiara 10 byte, ne produce 100000), CRC sbagliato, dimensione bugiarda, file non ZIP, ZIP troncato, file inesistente; CRC-32 di «123456789» = 0xCBF43926.
+- [ ] **Mutation testing** (28 mutazioni): ogni protezione tolta viene rilevata da almeno un test (tetti, `..`, assoluti, backslash, duplicati, symlink, CRC, cifrati, strip, pacchetti fuori tabella, SHA-256, dimensione, troncamento, URL non https, `.part`, consenso, 126/127, annullamento, timeout, rimozione dell'installer, `VERSION_ID`, riuso del file, staging, atomicità). Unica equivalente: il controllo dei caratteri del nome pacchetto, perché la tabella dei pacchetti rifiuta comunque quei nomi (difesa in profondità).
+- [ ] **ASan/UBSan** puliti su entrambi i test.
+- **Non verificato qui, da fare a mano su un sistema vero**: polkit reale su Linux (installare un pacchetto piccolo mancante vedendo la finestra del sistema), lancio dell'installer su Windows (UAC) e macOS (Installer), rifiuto dell'autorizzazione su quei sistemi, installazione di GStreamer e riconoscimento dei plugin da parte dell'app subito dopo. Vedi `docs/TEST_WINDOWS.md` e `docs/TEST_MACOS.md`.
+
 ### Riepilogo atteso
 
 ```
 meson test -C build
 ```
-deve riportare **17/17** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`, `discoverer`, `video_player`, `deps_check`, `design_tokens`, `main_window`, `debug_windows`); in un ambiente senza display o senza `gtk4paintablesink` `video_player` e `main_window` risultano `SKIP` (e `debug_windows` senza display) (e `discoverer` se mancano i plugin di prova): è normale.
+deve riportare **19/19** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`, `discoverer`, `video_player`, `deps_check`, `design_tokens`, `main_window`, `debug_windows`, `dep_archive`, `dep_installer`); in un ambiente senza display o senza `gtk4paintablesink` `video_player` e `main_window` risultano `SKIP` (e `debug_windows` senza display) (e `discoverer` se mancano i plugin di prova): è normale.
 
 ---
 

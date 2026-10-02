@@ -16,7 +16,8 @@ Chi prova: segni ogni voce con ✅ / ❌ e, per ogni ❌, allega l'output richie
 | M2.8 finestra minima | `main_window` saltato | il video si carica nella finestra; dialogo «Apri» **nativo di Windows** (i filtri sono per estensione proprio per questo); tema chiaro/scuro che segue Windows; barra del titolo e pulsanti della finestra; scala dello schermo 125%/150%; chiusura pulita (nessun `syncview.exe` rimasto) |
 | M2.9 finestre di debug | test in CI (`debug_windows` OK) | aspetto, Pausa/Copia/filtri, interruttori dei moduli, chiusura insieme alla principale |
 | M2.10 verifica dipendenze | test con sonde simulate | cosa trova davvero su Windows; il nome del pacchetto MSYS2 della tabella (`mingw-w64-ucrt-x86_64-gst-plugins-rs`) e il comportamento con l'installer ufficiale |
-| M2.11–M2.12 installazione guidata | (da fare) | scaricare e lanciare l'installer ufficiale di GStreamer con la richiesta UAC |
+| M2.11 installazione delle dipendenze | download con SHA-256, ZIP, piani e consenso verificati con server locale e funzioni finte; **il lancio vero dell'installer non è mai stato eseguito** | `gst-plugins-rs` nella CI di Windows ora c'è; sul PC vero: l'app scarica l'installer ufficiale (527 MB) e lo lancia con UAC; rifiutando UAC non cambia nulla; dopo l'installazione l'app trova i plugin (il registro/percorso di GStreamer) |
+| M2.12 interfaccia del primo avvio | (da fare) | tutto |
 
 **Priorità** (se il tempo di chi prova è poco): 1) `gtk4paintablesink` esiste? 2) `main_window` e `video_player` passano? 3) un video reale si apre, scorre e si avanza di un frame? 4) il dialogo «Apri» è quello di Windows? 5) il tema segue Windows?
 
@@ -70,6 +71,8 @@ Avvio dalla shell MSYS2: `build/src/syncview.exe` (con `--debug` per i log).
 - [ ] **Video su altro disco o rete**: un file su un disco USB o su una cartella di rete (`\\server\cartella\video.mp4`) si apre e scorre.
 - [ ] **Finestre di debug** (M2.9): `build/src/syncview.exe --debug` apre 3 finestre (principale, Log, Moduli); senza `--debug` solo la principale. Pausa/Riprendi, Svuota, Copia, filtri per modulo e livello funzionano; spegnere VIDEO e fare play/seek toglie le righe VIDEO dalla finestra **e** dal terminale (gli errori restano); chiudere la principale chiude anche le altre.
 - [ ] **Controllo dipendenze**: `build/src/syncview.exe --check-deps` stampa il report e non si blocca. Incolla l'output intero.
+
+- [ ] **Installazione delle dipendenze (M2.11)**: simula la mancanza e lascia che l'app installi. Su una macchina di prova (o dopo aver disinstallato GStreamer) avvia l'app e, quando sarà disponibile l'interfaccia (M2.12), accetta l'installazione: devono comparire l'elenco esatto (URL, dimensione, SHA-256) e l'avviso sulla UAC. Annullando la richiesta di autorizzazione non deve cambiare nulla e l'app non deve riprovare da sola. Dopo l'installazione l'app deve trovare i plugin (`syncview --check-deps`).
 
 ## 3. Cosa raccogliere se qualcosa fallisce
 

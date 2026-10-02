@@ -162,6 +162,26 @@ test(
   env: {'LSAN_OPTIONS': 'suppressions=' + meson.current_source_dir() / 'lsan.supp'},
 )
 
+# Estrazione sicura di archivi ZIP (M2.11), con archivi malevoli costruiti in memoria.
+test_dep_archive = executable(
+  'test_dep_archive',
+  'test_dep_archive.c',
+  include_directories: syncview_core_inc,
+  link_with: syncview_core_lib,
+  dependencies: [glib_dep, gio_dep],
+)
+test('dep_archive', test_dep_archive, timeout: 60)
+
+# Installazione delle dipendenze (M2.11): pkexec finto, server HTTP locale, nessun accesso al sistema né alla rete esterna.
+test_dep_installer = executable(
+  'test_dep_installer',
+  'test_dep_installer.c',
+  include_directories: syncview_core_inc,
+  link_with: syncview_core_lib,
+  dependencies: [glib_dep, gio_dep, gstreamer_dep, soup_dep],
+)
+test('dep_installer', test_dep_installer, timeout: 120)
+
 test_deps_check = executable(
   'test_deps_check',
   'test_deps_check.c',

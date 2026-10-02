@@ -9,6 +9,8 @@ sqlite_dep = dependency('sqlite3')
 glib_dep = dependency('glib-2.0')
 gio_dep = dependency('gio-2.0')
 json_glib_dep = dependency('json-glib-1.0')
+# libsoup 3: download degli artefatti (installer ufficiali di GStreamer, archivi) in core/dep_installer.c
+soup_dep = dependency('libsoup-3.0')
 
 syncview_core_sources = [
   'util/time_format.c',
@@ -20,13 +22,16 @@ syncview_core_sources = [
   'core/logger.c',
   'core/discoverer.c',
   'core/deps_check.c',
+  'core/dep_manifest.c',
+  'core/dep_archive.c',
+  'core/dep_installer.c',
 ]
 
 syncview_core_lib = static_library(
   'syncview_core',
   syncview_core_sources,
   include_directories: syncview_core_inc,
-  dependencies: [glib_dep, gio_dep, sqlite_dep, json_glib_dep, gstreamer_dep, gstreamer_pbutils_dep],
+  dependencies: [glib_dep, gio_dep, sqlite_dep, json_glib_dep, gstreamer_dep, gstreamer_pbutils_dep, soup_dep],
 )
 
 # Parte video: dipende da GTK/GDK, quindi separata da libsyncview_core (che resta senza GTK).
@@ -68,6 +73,7 @@ syncview_deps = [
   glib_dep,
   gio_dep,
   json_glib_dep,
+  soup_dep,
 ]
 
 executable(

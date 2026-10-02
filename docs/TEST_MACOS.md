@@ -17,7 +17,8 @@ Chi prova: segni ogni voce con ✅ / ❌ e, per ogni ❌, allega l'output richie
 | M2.8 finestra minima | test `main_window` **saltato** su macOS in CI | **il video si carica nella finestra** (problema aperto: in CI la pipeline resta ferma dopo `READY → PAUSED`), dialogo «Apri» nativo, tema chiaro/scuro che segue macOS, scorciatoie (Ctrl o Cmd?), chiusura pulita, aspetto della barra del titolo |
 | M2.9 finestre di debug | test in CI (macOS incluso) | aspetto, Pausa/Copia/filtri, interruttori dei moduli, chiusura insieme alla principale |
 | M2.10 verifica dipendenze | test con sonde simulate | **cosa trova davvero su un Mac**: `gtk4paintablesink` esiste su Homebrew? i nomi dei pacchetti Homebrew nella tabella sono giusti? (marcati «non confermati» in `src/core/deps_check.c`) |
-| M2.11–M2.12 installazione guidata | (da fare) | scaricare e lanciare l'installer ufficiale di GStreamer con la password di sistema |
+| M2.11 installazione delle dipendenze | download con SHA-256, piani e consenso verificati con server locale e funzioni finte; **il lancio vero dell'installer non è mai stato eseguito** | l'app scarica il `.pkg` ufficiale (154 MB) e lo apre con `open -W`: si apre l'Installer di macOS e chiede lui la password; annullando non cambia nulla; dopo l'installazione l'app trova i plugin (percorso del framework GStreamer) |
+| M2.12 interfaccia del primo avvio | (da fare) | tutto |
 
 **Priorità** (se il tempo del collega è poco): 1) `gtk4paintablesink` esiste? 2) `main_window` passa? 3) un video reale si apre, scorre e si può avanzare di un frame? 4) il tema segue macOS?
 
@@ -66,6 +67,8 @@ Avvio: `build/src/syncview` (con `--debug` per i log; vedi M2.9).
 - [ ] **Interruttori dei moduli**: spegnere VIDEO e fare play/seek → le righe VIDEO non compaiono più né nella finestra né nel terminale (stderr); gli errori sì. Riaccendere con «Tutti».
 - [ ] **Chiusura insieme**: chiudere la finestra principale chiude anche Log e Moduli, e l'app termina.
 - [ ] **Controllo dipendenze**: `build/src/syncview --check-deps` stampa il report e non si blocca. Incolla l'output intero: serve a verificare i nomi dei pacchetti Homebrew della tabella.
+
+- [ ] **Installazione delle dipendenze (M2.11)**: simula la mancanza e lascia che l'app installi. Su una macchina di prova (o dopo aver disinstallato GStreamer) avvia l'app e, quando sarà disponibile l'interfaccia (M2.12), accetta l'installazione: devono comparire l'elenco esatto (URL, dimensione, SHA-256) e l'avviso sulla password di sistema. Annullando la richiesta di autorizzazione non deve cambiare nulla e l'app non deve riprovare da sola. Dopo l'installazione l'app deve trovare i plugin (`syncview --check-deps`).
 
 ## 3. Cosa raccogliere se qualcosa fallisce
 
