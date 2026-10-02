@@ -71,10 +71,26 @@ count_lines_containing(GtkWidget *log_window, const char *needle)
     return found;
 }
 
+/* Attende (al più `timeout_ms`) che la riga di stato contenga `needle`: l'aggiornamento arriva da un idle, su runner carichi può tardare. */
+static gboolean
+wait_footer_contains(GtkWidget *log_window, const char *needle, int timeout_ms);
+
 static const char *
 footer_text(GtkWidget *log_window)
 {
     return gtk_label_get_text(GTK_LABEL(syncview_debug_log_window_get_widget(log_window, "footer")));
+}
+
+static gboolean
+wait_footer_contains(GtkWidget *log_window, const char *needle, int timeout_ms)
+{
+    gint64 deadline = g_get_monotonic_time() + (gint64)timeout_ms * 1000;
+
+    while (!strstr(footer_text(log_window), needle) && g_get_monotonic_time() < deadline) {
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
+    return strstr(footer_text(log_window), needle) != NULL;
 }
 
 typedef struct {
@@ -180,8 +196,8 @@ test_opens_two_windows_and_shows_lines(void)
     }
 
     /* Riga di stato: righe e moduli attivi (tutti e 8). */
-    assert(strstr(footer_text(d.log), "righe") != NULL);
-    assert(strstr(footer_text(d.log), "8 moduli attivi") != NULL);
+    assert(wait_footer_contains(d.log, "righe", 5000));
+    assert(wait_footer_contains(d.log, "8 moduli attivi", 5000));
     assert(strstr(gtk_label_get_text(GTK_LABEL(syncview_debug_log_window_get_widget(d.log, "live"))), "In diretta"));
     assert(strstr(gtk_label_get_text(GTK_LABEL(syncview_debug_log_window_get_widget(d.log, "autoscroll"))), "ON"));
     close_debug(&d);
@@ -215,7 +231,7 @@ test_module_switches_control_the_logger(void)
     settle(d.log);
     assert(count_lines_containing(d.log, "ui-spento") == 0);
     assert(count_lines_containing(d.log, "errore-sempre") == 1);
-    assert(strstr(footer_text(d.log), "6 moduli attivi") != NULL);
+    assert(wait_footer_contains(d.log, "6 moduli attivi", 5000));
 
     /* Riacceso: le righe tornano. */
     gtk_switch_set_active(GTK_SWITCH(sync_switch), TRUE);
@@ -301,7 +317,7 @@ test_pause_resume_and_clear(void)
     spin_for(150);
     assert(syncview_debug_log_window_get_line_count(d.log) == 1);
     assert(syncview_debug_log_window_get_pending_count(d.log) == 5);
-    assert(strstr(footer_text(d.log), "5 in attesa") != NULL);
+    assert(wait_footer_contains(d.log, "5 in attesa", 5000));
     assert(strstr(gtk_label_get_text(GTK_LABEL(syncview_debug_log_window_get_widget(d.log, "autoscroll"))), "OFF"));
 
     /* Alla ripresa compaiono, nell'ordine di arrivo. */
