@@ -2303,9 +2303,17 @@ test_playback_rate(const char *dir)
 
     /* In riproduzione cambia senza interrompere né spostare il video. */
     gint64 before = syncview_video_player_get_position(player);
+    gint64 t0 = g_get_monotonic_time();
+
     assert(syncview_video_player_set_playback_rate(player, 0.5, NULL));
     gint64 after = syncview_video_player_get_position(player);
-    assert(after >= before - 100 && after - before < 1000);  /* nessun salto (al più un frame indietro; il margine in avanti copre i runner lenti) */
+    gint64 elapsed_ms = (g_get_monotonic_time() - t0) / 1000;
+
+    /*
+     * Nessun salto: al più un frame indietro, e in avanti non più di quanto il video avanza in quel tempo REALE alla velocità
+     * di prima (2x) più un margine. Un tetto fisso era troppo stretto sui runner lenti, dove il seek può durare oltre un secondo.
+     */
+    assert(after >= before - 100 && after - before <= elapsed_ms * 2 + 300);
     spin_for(300);
     speed = measured_speed(player, 1000);
     assert(speed > 0.3 && speed < 0.75);
