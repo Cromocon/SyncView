@@ -78,7 +78,7 @@ settled_after(SyncviewVideoPlayer *p, gint64 before)
 static void
 check_clip(const char *path)
 {
-    g_print("== %s\n", g_path_get_basename(path));
+    g_print("== %s\n", path);
     SyncviewVideoPlayer *p = syncview_video_player_new(0, NULL);
     GError *error = NULL;
 
@@ -163,6 +163,26 @@ check_clip(const char *path)
     g_object_unref(p);
 }
 
+/* Raccoglie ricorsivamente i file (i clip possono stare in sottocartelle per formato). */
+static void
+collect_files(const char *dir, GPtrArray *out)
+{
+    GDir *d = g_dir_open(dir, 0, NULL);
+
+    for (const char *n; d && (n = g_dir_read_name(d));) {
+        char *path = g_build_filename(dir, n, NULL);
+        if (g_file_test(path, G_FILE_TEST_IS_DIR)) {
+            collect_files(path, out);
+            g_free(path);
+        } else {
+            g_ptr_array_add(out, path);
+        }
+    }
+    if (d) {
+        g_dir_close(d);
+    }
+}
+
 int
 main(int argc, char **argv)
 {
@@ -182,22 +202,16 @@ main(int argc, char **argv)
         return SKIP_EXIT;
     }
 
-    GDir *d = g_dir_open(dir, 0, NULL);
-    if (!d) {
-        g_printerr("cartella non leggibile: %s\n", dir);
+    GPtrArray *names = g_ptr_array_new_with_free_func(g_free);
+    collect_files(dir, names);
+    if (names->len == 0) {
+        g_printerr("nessun file in %s\n", dir);
         return 1;
     }
-    GPtrArray *names = g_ptr_array_new_with_free_func(g_free);
-    for (const char *n; (n = g_dir_read_name(d));) {
-        g_ptr_array_add(names, g_strdup(n));
-    }
-    g_dir_close(d);
     g_ptr_array_sort_values(names, (GCompareFunc)g_strcmp0);
 
     for (guint i = 0; i < names->len; i++) {
-        char *path = g_build_filename(dir, g_ptr_array_index(names, i), NULL);
-        check_clip(path);
-        g_free(path);
+        check_clip(g_ptr_array_index(names, i));
     }
     g_ptr_array_free(names, TRUE);
     g_print("%s (%d verifiche fallite)\n", failures ? "ESITO: FALLITO" : "ESITO: OK", failures);
