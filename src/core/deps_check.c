@@ -532,6 +532,99 @@ manual_install_verb(PackageManager pm)
            : pm == PM_DNF ? "sudo dnf install" : "sudo zypper install";
 }
 
+/* Pacchetti che forniscono ciascun componente (le stesse tabelle usate per i piani d'installazione). */
+static size_t
+sets_for_component(const char *id, const PackageSet **out)
+{
+    if (strcmp(id, "gst-playbin3") == 0) {
+        out[0] = &PKG_BASE;
+        return 1;
+    }
+    if (strcmp(id, "gst-gtk4sink") == 0) {
+        out[0] = &PKG_GTK4;
+        return 1;
+    }
+    if (strcmp(id, "gst-demuxers") == 0 || strcmp(id, "gst-decoder-vp9") == 0 || strcmp(id, "gst-decoder-av1") == 0) {
+        out[0] = &PKG_GOOD;
+        out[1] = &PKG_LIBAV;
+        return 2;
+    }
+    if (strcmp(id, "gst-decoder-h264") == 0 || strcmp(id, "gst-decoder-hevc") == 0) {
+        out[0] = &PKG_LIBAV;
+        return 1;
+    }
+    if (strcmp(id, "gst-hw-decoders") == 0) {
+        out[0] = &PKG_BAD;
+        return 1;
+    }
+    if (strcmp(id, "ffmpeg") == 0) {
+        out[0] = &PKG_FFMPEG;
+        return 1;
+    }
+    return 0;
+}
+
+char *
+deps_report_manual_command(const DepsReport *report, const char *package_manager, gboolean include_optional,
+                           char **note)
+{
+    PackageManager managers[] = { PM_PACMAN, PM_APT, PM_DNF, PM_ZYPPER };
+    PackageManager pm = PM_NONE;
+    GPtrArray *names = g_ptr_array_new();
+    GPtrArray *notes = g_ptr_array_new();
+
+    if (note) {
+        *note = NULL;
+    }
+    for (size_t m = 0; package_manager && m < G_N_ELEMENTS(managers); m++) {
+        if (strcmp(package_manager, package_manager_program(managers[m])) == 0) {
+            pm = managers[m];
+        }
+    }
+
+    for (size_t i = 0; pm != PM_NONE && i < deps_report_count(report); i++) {
+        const DepsItem *it = deps_report_get(report, i);
+
+        if (it->status == DEPS_STATUS_OK || (it->status == DEPS_STATUS_OPTIONAL_MISSING && !include_optional)) {
+            continue;
+        }
+
+        const PackageSet *sets[2];
+        size_t n = sets_for_component(it->id, sets);
+
+        for (size_t s = 0; s < n; s++) {
+            const char *name = package_name_for(pm, sets[s]);
+            GPtrArray *target = name ? names : notes;
+            const char *value = name ? name : sets[s]->manual_note;
+            gboolean seen = FALSE;
+
+            for (guint k = 0; value && k < target->len; k++) {
+                seen |= strcmp(g_ptr_array_index(target, k), value) == 0;
+            }
+            if (value && !seen) {
+                g_ptr_array_add(target, (gpointer)value);
+            }
+        }
+    }
+
+    char *command = NULL;
+
+    if (names->len > 0) {
+        g_ptr_array_add(names, NULL);
+        char *joined = g_strjoinv(" ", (char **)names->pdata);
+
+        command = g_strdup_printf("%s %s", manual_install_verb(pm), joined);
+        g_free(joined);
+    }
+    if (note && notes->len > 0) {
+        g_ptr_array_add(notes, NULL);
+        *note = g_strjoinv("; ", (char **)notes->pdata);
+    }
+    g_ptr_array_free(names, TRUE);
+    g_ptr_array_free(notes, TRUE);
+    return command;
+}
+
 /* Piano per installare `sets` (i pacchetti che forniscono il componente) sulla piattaforma corrente. */
 static InstallPlan
 build_plan(const DepsProbes *probes, const PackageSet *const *sets, size_t n, const char *what)
@@ -881,6 +974,70 @@ check_ffmpeg(DepsReport *report, const DepsProbes *probes, const char *deps_dir)
 }
 
 /* ------------------------------------------------------------------ */
+/* Simulazione di mancanze (debug/test): SYNCVIEW_DEPS_FAKE_MISSING      */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+    DepsProbes base;
+} FakeCtx;
+
+static gboolean
+fake_has_no_element(const char *name, gpointer user_data)
+{
+    (void)name;
+    (void)user_data;
+    return FALSE;
+}
+
+static char *
+fake_find_program(const char *name, const char *extra_dir, gpointer user_data)
+{
+    FakeCtx *ctx = user_data;
+
+    if (strcmp(name, "ffmpeg") == 0) {
+        return NULL;
+    }
+    return ctx->base.find_program(name, extra_dir, ctx->base.user_data);
+}
+
+/* TRUE se `id` compare nella lista `fake` (separata da virgole; "all" = tutti). */
+static gboolean
+fake_lists(const char *fake, const char *id)
+{
+    if (!fake || !*fake) {
+        return FALSE;
+    }
+
+    gboolean found = FALSE;
+    char **ids = g_strsplit(fake, ",", -1);
+
+    for (int i = 0; ids[i]; i++) {
+        g_strstrip(ids[i]);
+        found |= strcmp(ids[i], id) == 0 || strcmp(ids[i], "all") == 0;
+    }
+    g_strfreev(ids);
+    return found;
+}
+
+/*
+ * Sonde per il componente `id`: se è nella lista delle mancanze simulate, il registry non conosce nessun elemento
+ * (e ffmpeg non si trova); il resto del controllo gira normalmente, così anche i piani d'installazione sono quelli veri.
+ */
+static DepsProbes
+probes_for(const DepsProbes *base, FakeCtx *ctx, const char *fake, const char *id)
+{
+    DepsProbes probes = *base;
+
+    if (fake_lists(fake, id)) {
+        ctx->base = *base;
+        probes.has_gst_element = fake_has_no_element;
+        probes.find_program = fake_find_program;
+        probes.user_data = ctx;
+    }
+    return probes;
+}
+
+/* ------------------------------------------------------------------ */
 /* Esecuzione                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -902,41 +1059,64 @@ deps_check_run(const DepsProbes *probes_in, const char *deps_dir_in)
     report->platform = probes.platform;
     report->items = g_ptr_array_new_with_free_func((GDestroyNotify)item_free);
 
+    /* Solo debug/test: componenti da dichiarare mancanti (vedi probes_for). */
+    const char *fake = g_getenv("SYNCVIEW_DEPS_FAKE_MISSING");
+    FakeCtx fake_ctx;
+
+    if (fake && *fake) {
+        log_user_action("Mancanze simulate (SYNCVIEW_DEPS_FAKE_MISSING)", fake);
+    }
+
     /* Riproduzione: core di GStreamer e sink GTK. */
     {
         const char *const names[] = { "playbin3", NULL };
         const PackageSet *sets[] = { &PKG_BASE };
-        check_any_of(report, &probes, "gst-playbin3", "Pipeline di riproduzione (playbin3)", DEPS_FEATURE_PLAYBACK,
+        DepsProbes p = probes_for(&probes, &fake_ctx, fake, "gst-playbin3");
+        check_any_of(report, &p, "gst-playbin3", "Pipeline di riproduzione (playbin3)", DEPS_FEATURE_PLAYBACK,
                      names, "playbin3 non trovato", sets, 1, "GStreamer base");
     }
     {
         const char *const names[] = { "gtk4paintablesink", NULL };
         const PackageSet *sets[] = { &PKG_GTK4 };
-        check_any_of(report, &probes, "gst-gtk4sink", "Sink video per GTK4 (gtk4paintablesink)", DEPS_FEATURE_PLAYBACK,
+        DepsProbes p = probes_for(&probes, &fake_ctx, fake, "gst-gtk4sink");
+        check_any_of(report, &p, "gst-gtk4sink", "Sink video per GTK4 (gtk4paintablesink)", DEPS_FEATURE_PLAYBACK,
                      names, "gtk4paintablesink non trovato", sets, 1, "il plugin GStreamer gtk4 (gst-plugins-rs)");
     }
 
-    check_demuxers(report, &probes);
+    {
+        DepsProbes p = probes_for(&probes, &fake_ctx, fake, "gst-demuxers");
+        check_demuxers(report, &p);
+    }
 
     /* Decoder: H.264 richiesto, gli altri codec opzionali. */
     {
         const PackageSet *sets[] = { &PKG_LIBAV };
-        check_any_of(report, &probes, "gst-decoder-h264", "Decoder H.264", DEPS_FEATURE_PLAYBACK, DECODERS_H264,
+        DepsProbes p = probes_for(&probes, &fake_ctx, fake, "gst-decoder-h264");
+        check_any_of(report, &p, "gst-decoder-h264", "Decoder H.264", DEPS_FEATURE_PLAYBACK, DECODERS_H264,
                      "Nessun decoder H.264", sets, 1, "i plugin GStreamer libav");
-        check_any_of(report, &probes, "gst-decoder-hevc", "Decoder H.265 / HEVC", DEPS_FEATURE_OPTIONAL, DECODERS_HEVC,
+        p = probes_for(&probes, &fake_ctx, fake, "gst-decoder-hevc");
+        check_any_of(report, &p, "gst-decoder-hevc", "Decoder H.265 / HEVC", DEPS_FEATURE_OPTIONAL, DECODERS_HEVC,
                      "Nessun decoder HEVC: i video H.265 (es. da iPhone) non saranno riproducibili", sets, 1,
                      "i plugin GStreamer libav");
     }
     {
         const PackageSet *sets[] = { &PKG_GOOD, &PKG_LIBAV };
-        check_any_of(report, &probes, "gst-decoder-vp9", "Decoder VP9", DEPS_FEATURE_OPTIONAL, DECODERS_VP9,
+        DepsProbes p = probes_for(&probes, &fake_ctx, fake, "gst-decoder-vp9");
+        check_any_of(report, &p, "gst-decoder-vp9", "Decoder VP9", DEPS_FEATURE_OPTIONAL, DECODERS_VP9,
                      "Nessun decoder VP9", sets, 2, "i plugin GStreamer good e libav");
-        check_any_of(report, &probes, "gst-decoder-av1", "Decoder AV1", DEPS_FEATURE_OPTIONAL, DECODERS_AV1,
+        p = probes_for(&probes, &fake_ctx, fake, "gst-decoder-av1");
+        check_any_of(report, &p, "gst-decoder-av1", "Decoder AV1", DEPS_FEATURE_OPTIONAL, DECODERS_AV1,
                      "Nessun decoder AV1", sets, 2, "i plugin GStreamer good e libav");
     }
 
-    check_hw_decoders(report, &probes);
-    check_ffmpeg(report, &probes, deps_dir);
+    {
+        DepsProbes p = probes_for(&probes, &fake_ctx, fake, "gst-hw-decoders");
+        check_hw_decoders(report, &p);
+    }
+    {
+        DepsProbes p = probes_for(&probes, &fake_ctx, fake, "ffmpeg");
+        check_ffmpeg(report, &p, deps_dir);
+    }
 
     g_free(default_dir);
     return report;

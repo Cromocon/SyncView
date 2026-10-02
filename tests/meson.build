@@ -191,6 +191,16 @@ test_deps_check = executable(
 )
 test('deps_check', test_deps_check, timeout: 60)
 
+# Stato delle dipendenze tra un avvio e l'altro (M2.12): scelte dell'utente e firma dei componenti mancanti.
+test_deps_state = executable(
+  'test_deps_state',
+  'test_deps_state.c',
+  include_directories: syncview_core_inc,
+  link_with: syncview_core_lib,
+  dependencies: [glib_dep, gio_dep, gstreamer_dep, json_glib_dep],
+)
+test('deps_state', test_deps_state, timeout: 60)
+
 # Prova su file reali: si esegue solo con SYNCVIEW_TEST_CLIPS=<cartella con i clip> (altrimenti 77 = skip).
 test_real_clips = executable(
   'test_real_clips',
@@ -203,5 +213,20 @@ test(
   'real_clips',
   test_real_clips,
   timeout: 600,
+  env: {'LSAN_OPTIONS': 'suppressions=' + meson.current_source_dir() / 'lsan.supp'},
+)
+
+# Finestra delle dipendenze (M2.12). Richiede un display GTK: senza, esce con 77 (skip). L'installatore è un pkexec finto.
+test_deps_dialog = executable(
+  'test_deps_dialog',
+  'test_deps_dialog.c',
+  include_directories: syncview_core_inc,
+  link_with: [syncview_ui_lib, syncview_video_lib, syncview_core_lib],
+  dependencies: [glib_dep, gio_dep, gtk_dep, gstreamer_dep, json_glib_dep],
+)
+test(
+  'deps_dialog',
+  test_deps_dialog,
+  timeout: 240,
   env: {'LSAN_OPTIONS': 'suppressions=' + meson.current_source_dir() / 'lsan.supp'},
 )

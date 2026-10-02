@@ -6,7 +6,7 @@ Riscrittura in **C puro (C11)** di SyncView — applicazione desktop per l'anali
 
 ## Stato del progetto
 
-🚧 **In sviluppo — M0 (scaffolding) completa, M1 (core logic) completa (M1.1-M1.16), M2 in corso (M2.1-M2.11 fatte (manca M2.12)).** Dettaglio moduli implementati in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), checklist di test in [TESTING.md](TESTING.md).
+🚧 **In sviluppo — M0 (scaffolding) completa, M1 (core logic) completa (M1.1-M1.16), M2 completa nel codice (M2.1-M2.12; restano le prove su Windows/macOS reali).** Dettaglio moduli implementati in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), checklist di test in [TESTING.md](TESTING.md).
 
 Il piano completo (contesto, analisi del codice originale, architettura, decisioni tecniche, milestone granulari e rischi noti) è in [PLAN.md](PLAN.md). Consultalo prima di contribuire: definisce la struttura del progetto, le librerie da usare e l'ordine di implementazione.
 

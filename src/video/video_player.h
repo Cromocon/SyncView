@@ -202,6 +202,12 @@ const char *syncview_video_player_get_path(SyncviewVideoPlayer *self);
 char *syncview_video_player_get_decoder_description(SyncviewVideoPlayer *self);
 
 /*
+ * TRUE se l'ultimo errore (segnale "error") è stato causato da un decoder o plugin GStreamer mancante (e non da un file
+ * rotto): chi riceve il segnale può proporre la verifica delle dipendenze (M2.12). Si azzera a ogni load().
+ */
+gboolean syncview_video_player_last_error_is_missing_plugin(SyncviewVideoPlayer *self);
+
+/*
  * Smontaggi di pipeline rimandati e ancora in corso, in tutto il processo. Scendere a NULL mentre la pipeline sta ancora
  * salendo a PAUSED può bloccare il thread principale (il sink ha bisogno del main loop mentre set_state() aspetta i thread
  * di streaming): in quel caso dispose(), la sostituzione di un video con load() e la gestione degli errori ATTENDONO,

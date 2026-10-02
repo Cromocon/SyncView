@@ -18,7 +18,7 @@ Chi prova: segni ogni voce con ✅ / ❌ e, per ogni ❌, allega l'output richie
 | M2.9 finestre di debug | test in CI (macOS incluso) | aspetto, Pausa/Copia/filtri, interruttori dei moduli, chiusura insieme alla principale |
 | M2.10 verifica dipendenze | test con sonde simulate | **cosa trova davvero su un Mac**: `gtk4paintablesink` esiste su Homebrew? i nomi dei pacchetti Homebrew nella tabella sono giusti? (marcati «non confermati» in `src/core/deps_check.c`) |
 | M2.11 installazione delle dipendenze | download con SHA-256, piani e consenso verificati con server locale e funzioni finte; **il lancio vero dell'installer non è mai stato eseguito** | l'app scarica il `.pkg` ufficiale (154 MB) e lo apre con `open -W`: si apre l'Installer di macOS e chiede lui la password; annullando non cambia nulla; dopo l'installazione l'app trova i plugin (percorso del framework GStreamer) |
-| M2.12 interfaccia del primo avvio | (da fare) | tutto |
+| M2.12 interfaccia del primo avvio | `deps_dialog`, `deps_state`, menu e riapertura dopo un plugin mancante in test su Linux (installatore finto) | **tutto sul sistema reale**: la finestra «Preparazione di SyncView» (aspetto, tema, scala dello schermo), l'installazione vera con l'avviso sulla password di sistema, «Continua senza» ricordato dopo il riavvio, Menu → «Verifica dipendenze…» |
 
 **Priorità** (se il tempo del collega è poco): 1) `gtk4paintablesink` esiste? 2) `main_window` passa? 3) un video reale si apre, scorre e si può avanzare di un frame? 4) il tema segue macOS?
 
@@ -42,7 +42,7 @@ unset CI
 meson test -C build --print-errorlogs
 ```
 
-- [ ] Esito atteso: **tutti OK** (17 a oggi), nessun `SKIP` su `video_player` e `main_window`.
+- [ ] Esito atteso: **tutti OK** (22 a oggi; `real_clips` risulta `SKIP` se non gli dai `SYNCVIEW_TEST_CLIPS`), nessun `SKIP` su `video_player` e `main_window`.
 - [ ] **`main_window`** (problema aperto, il più importante): sul runner CI il caricamento di un video agganciato alla finestra non termina (la pipeline resta ferma dopo `READY → PAUSED`). Se qui passa, il problema è solo del runner; se fallisce, allega il log (la riga `attesa dello stato … scaduta` e i messaggi `[GST]`).
 - [ ] **`video_player`**: con un display reale girano anche le verifiche sul frame clock (polling della posizione, ticker, tempo che avanza). In CI sono saltate. Messaggi «frame clock irregolare/assente» = il frame clock non batte: segnalalo.
 - [ ] Ripeti `meson test -C build video_player` altre 2 volte: nessun test intermittente.
@@ -67,6 +67,7 @@ Avvio: `build/src/syncview` (con `--debug` per i log; vedi M2.9).
 - [ ] **Log in tempo reale** (con `--debug`): la finestra Log mostra le righe mentre avvengono (apri un video, play, seek); Pausa/Riprendi, Svuota e Copia (incolla altrove per controllare) funzionano; i filtri per modulo e livello nascondono righe.
 - [ ] **Interruttori dei moduli**: spegnere VIDEO e fare play/seek → le righe VIDEO non compaiono più né nella finestra né nel terminale (stderr); gli errori sì. Riaccendere con «Tutti».
 - [ ] **Chiusura insieme**: chiudere la finestra principale chiude anche Log e Moduli, e l'app termina.
+- [ ] **Finestra «Preparazione di SyncView» (M2.12)**: avvia l'app con `SYNCVIEW_DEPS_FAKE_MISSING=gst-decoder-hevc,ffmpeg` (variabile d'ambiente; `all` per simulare tutto): all'avvio compare la finestra con le righe dei componenti, l'**elenco esatto** di ciò che verrà installato (URL, dimensione, SHA-256 dove c'è un download) e l'avviso sulla password di sistema. Controlla: aspetto leggibile in tema chiaro e scuro; **nulla parte finché non premi «Installa»**; «Annulla» chiude senza cambiare nulla; «Continua senza» e riavvio con la stessa variabile → **nessuna finestra**; Menu → «Verifica dipendenze…» → la finestra compare sempre (con tutto a posto dice «Tutte le dipendenze sono a posto»). Con la variabile e «Installa» su una macchina di prova: compare la richiesta di autorizzazione di macOS; **rifiutandola** la finestra dice che non è stato modificato nulla e **non riprova da sola**; dopo un'installazione vera il ricontrollo finale mostra le righe verdi (o dice che serve riavviare SyncView). Allega una schermata di ogni passaggio.
 - [ ] **Controllo dipendenze**: `build/src/syncview --check-deps` stampa il report e non si blocca. Incolla l'output intero: serve a verificare i nomi dei pacchetti Homebrew della tabella.
 
 - [ ] **Installazione delle dipendenze (M2.11)**: simula la mancanza e lascia che l'app installi. Su una macchina di prova (o dopo aver disinstallato GStreamer) avvia l'app e, quando sarà disponibile l'interfaccia (M2.12), accetta l'installazione: devono comparire l'elenco esatto (URL, dimensione, SHA-256) e l'avviso sulla password di sistema. Annullando la richiesta di autorizzazione non deve cambiare nulla e l'app non deve riprovare da sola. Dopo l'installazione l'app deve trovare i plugin (`syncview --check-deps`).
@@ -83,6 +84,6 @@ Allega i file, il modello di Mac e la versione di macOS (`sw_vers`). Per un bloc
 
 ## Da aggiungere nelle prossime milestone
 
-- M2.11/M2.12: installazione delle dipendenze con l'installer ufficiale di GStreamer (richiede la password di sistema, gestita da macOS).
+- (M2.11/M2.12 fatte: vedi le prove sopra) installazione delle dipendenze con l'installer ufficiale di GStreamer (richiede la password di sistema, gestita da macOS).
 - M3: più video, sincronizzazione, zoom/pan, drag&drop di file dal Finder.
 - Scorciatoie: quali tasti vanno adattati a macOS (Cmd al posto di Ctrl).

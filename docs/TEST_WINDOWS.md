@@ -17,7 +17,7 @@ Chi prova: segni ogni voce con ✅ / ❌ e, per ogni ❌, allega l'output richie
 | M2.9 finestre di debug | test in CI (`debug_windows` OK) | aspetto, Pausa/Copia/filtri, interruttori dei moduli, chiusura insieme alla principale |
 | M2.10 verifica dipendenze | test con sonde simulate | cosa trova davvero su Windows; il nome del pacchetto MSYS2 della tabella (`mingw-w64-ucrt-x86_64-gst-plugins-rs`) e il comportamento con l'installer ufficiale |
 | M2.11 installazione delle dipendenze | download con SHA-256, ZIP, piani e consenso verificati con server locale e funzioni finte; **il lancio vero dell'installer non è mai stato eseguito** | `gst-plugins-rs` nella CI di Windows ora c'è; sul PC vero: l'app scarica l'installer ufficiale (527 MB) e lo lancia con UAC; rifiutando UAC non cambia nulla; dopo l'installazione l'app trova i plugin (il registro/percorso di GStreamer) |
-| M2.12 interfaccia del primo avvio | (da fare) | tutto |
+| M2.12 interfaccia del primo avvio | `deps_dialog`, `deps_state`, menu e riapertura dopo un plugin mancante in test su Linux (installatore finto) | **tutto sul sistema reale**: la finestra «Preparazione di SyncView» (aspetto, tema, scala dello schermo), l'installazione vera con l'avviso sulla UAC, «Continua senza» ricordato dopo il riavvio, Menu → «Verifica dipendenze…» |
 
 **Priorità** (se il tempo di chi prova è poco): 1) `gtk4paintablesink` esiste? 2) `main_window` e `video_player` passano? 3) un video reale si apre, scorre e si avanza di un frame? 4) il dialogo «Apri» è quello di Windows? 5) il tema segue Windows?
 
@@ -48,7 +48,7 @@ for e in gtk4paintablesink playbin3 videotestsrc videoconvert vp8enc webmmux fil
 meson test -C build --print-errorlogs
 ```
 
-- [ ] Esito atteso: **tutti OK** (17 a oggi), nessun `SKIP` su `video_player` e `main_window` (in CI sono saltati solo perché manca il plugin).
+- [ ] Esito atteso: **tutti OK** (22 a oggi; `real_clips` risulta `SKIP` se non gli dai `SYNCVIEW_TEST_CLIPS`), nessun `SKIP` su `video_player` e `main_window` (in CI sono saltati solo perché manca il plugin).
 - [ ] **`main_window`** e **`video_player`** sono i test più importanti: sono la prima esecuzione su Windows. Se falliscono, allega il log (righe `attesa dello stato … scaduta`, messaggi `[GST]`, asserzioni).
 - [ ] Ripeti `meson test -C build video_player main_window` altre 2 volte: nessun test intermittente.
 
@@ -71,6 +71,7 @@ Avvio dalla shell MSYS2: `build/src/syncview.exe` (con `--debug` per i log).
 - [ ] **Chiusura**: chiudi con la X della finestra: l'app esce in meno di un secondo e in **Gestione attività** non resta nessun `syncview.exe` né `gst-*`. (Ctrl+C e `kill -TERM` da shell sono previsti solo su Linux/macOS: su Windows non esiste ancora l'uscita da segnale: annota cosa succede con Ctrl+C.)
 - [ ] **Video su altro disco o rete**: un file su un disco USB o su una cartella di rete (`\\server\cartella\video.mp4`) si apre e scorre.
 - [ ] **Finestre di debug** (M2.9): `build/src/syncview.exe --debug` apre 3 finestre (principale, Log, Moduli); senza `--debug` solo la principale. Pausa/Riprendi, Svuota, Copia, filtri per modulo e livello funzionano; spegnere VIDEO e fare play/seek toglie le righe VIDEO dalla finestra **e** dal terminale (gli errori restano); chiudere la principale chiude anche le altre.
+- [ ] **Finestra «Preparazione di SyncView» (M2.12)**: avvia l'app con `SYNCVIEW_DEPS_FAKE_MISSING=gst-decoder-hevc,ffmpeg` (variabile d'ambiente; `all` per simulare tutto): all'avvio compare la finestra con le righe dei componenti, l'**elenco esatto** di ciò che verrà installato (URL, dimensione, SHA-256 dove c'è un download) e l'avviso sulla UAC. Controlla: aspetto leggibile in tema chiaro e scuro; **nulla parte finché non premi «Installa»**; «Annulla» chiude senza cambiare nulla; «Continua senza» e riavvio con la stessa variabile → **nessuna finestra**; Menu → «Verifica dipendenze…» → la finestra compare sempre (con tutto a posto dice «Tutte le dipendenze sono a posto»). Con la variabile e «Installa» su una macchina di prova: compare la richiesta di autorizzazione di Windows; **rifiutandola** la finestra dice che non è stato modificato nulla e **non riprova da sola**; dopo un'installazione vera il ricontrollo finale mostra le righe verdi (o dice che serve riavviare SyncView). Allega una schermata di ogni passaggio.
 - [ ] **Controllo dipendenze**: `build/src/syncview.exe --check-deps` stampa il report e non si blocca. Incolla l'output intero.
 
 - [ ] **Installazione delle dipendenze (M2.11)**: simula la mancanza e lascia che l'app installi. Su una macchina di prova (o dopo aver disinstallato GStreamer) avvia l'app e, quando sarà disponibile l'interfaccia (M2.12), accetta l'installazione: devono comparire l'elenco esatto (URL, dimensione, SHA-256) e l'avviso sulla UAC. Annullando la richiesta di autorizzazione non deve cambiare nulla e l'app non deve riprovare da sola. Dopo l'installazione l'app deve trovare i plugin (`syncview --check-deps`).
@@ -89,6 +90,6 @@ Allega i file, `winver`, la scheda video e il file `%USERPROFILE%\.syncview\sync
 
 ## Da aggiungere nelle prossime milestone
 
-- M2.11/M2.12: installazione delle dipendenze con l'installer ufficiale di GStreamer (richiesta UAC gestita da Windows) e confronto con MSYS2.
+- (M2.11/M2.12 fatte: vedi le prove sopra) installazione delle dipendenze con l'installer ufficiale di GStreamer (richiesta UAC gestita da Windows) e confronto con MSYS2.
 - M3: più video, sincronizzazione, zoom/pan, drag&drop di file da Esplora risorse.
 - Uscita ordinata da segnale/Ctrl+C su Windows (oggi solo Unix).

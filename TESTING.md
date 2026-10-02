@@ -376,12 +376,24 @@ Uso: `SYNCVIEW_TEST_CLIPS=~/Downloads/Videos tools/on-desktop9.sh meson test -C 
 - [ ] **ASan/UBSan** puliti su entrambi i test.
 - **Non verificato qui, da fare a mano su un sistema vero**: polkit reale su Linux (installare un pacchetto piccolo mancante vedendo la finestra del sistema), lancio dell'installer su Windows (UAC) e macOS (Installer), rifiuto dell'autorizzazione su quei sistemi, installazione di GStreamer e riconoscimento dei plugin da parte dell'app subito dopo. Vedi `docs/TEST_WINDOWS.md` e `docs/TEST_MACOS.md`.
 
+### M2.12 — finestra delle dipendenze (primo avvio)
+
+`syncview:deps_state` (senza display), `syncview:deps_dialog` e `syncview:main_window` (con display; l'installatore è un `pkexec` finto, il sistema è finto: nessun pacchetto viene installato e nessuna password viene chiesta) → **OK**.
+
+- [ ] `deps_dialog`: elenco esatto del piano (gestore e pacchetti) e avviso sulla password **senza** che parta nulla (`fake-pkexec.log` assente dopo 400 ms); Annulla non ricorda nulla; installazione riuscita con output in streaming, ricontrollo finale e esito `INSTALLED`; autorizzazione negata → una sola invocazione anche dopo un'attesa, righe «Non installato» (non «fallita»), si riprova solo con «Riprova installazione»; errore del gestore → banner col motivo, «✕ Installazione fallita» sulle righe, tabella per 6 sistemi con il sistema in uso preselezionato; chiusura della finestra durante l'installazione → resta aperta, «Annullamento richiesto», poi «annullata» senza toccare le righe; percorso manuale + «Ricontrolla» (resta dov'è finché manca qualcosa, ALL_OK quando c'è tutto); «Continua senza» ricordato tra due avvii, non ripropone con lo stesso insieme, ripropone se cambia, dimenticato quando tutto è a posto; «Verifica dipendenze» con tutto a posto mostra ALL_OK.
+- [ ] `deps_state`: firma ordinata, file assente/corrotto = nessuna scelta, round-trip su disco, cartella creata, percorso non scrivibile = errore senza crash.
+- [ ] `deps_check`: `SYNCVIEW_DEPS_FAKE_MISSING` (lista, spazi, `all`, id sconosciuti) e comando manuale per `apt-get`/`pacman`/`dnf` (con nota RPM Fusion)/gestore sconosciuto.
+- [ ] `main_window`: voce di menu → finestra delle dipendenze con la finestra principale come genitore; un decoder VP8 retrocesso a rango NONE → scheda «Manca un decoder per questo video» **e** riapertura automatica della verifica; un file rotto → «Impossibile riprodurre il video» e nessuna finestra.
+- [ ] Sanitizer: `meson test -C <dir-asan> deps_dialog main_window` e UBSan puliti.
+- [ ] Immagini per la revisione del design: `SYNCVIEW_TEST_SCREENSHOTS=<cartella> tools/on-desktop9.sh build/tests/test_deps_dialog` salva 5 schermate × (chiaro, scuro).
+- [ ] Prova a mano (Linux): `SYNCVIEW_DEPS_FAKE_MISSING=gst-decoder-hevc,ffmpeg build/src/syncview` apre la finestra all'avvio; «Continua senza» e riavvio con la stessa variabile → nessuna finestra; Menu → «Verifica dipendenze…» → sempre. Con la variabile `all` e «Installa» il sistema chiede la password con polkit (prova reale ancora da fare).
+
 ### Riepilogo atteso
 
 ```
 meson test -C build
 ```
-deve riportare **19/19** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`, `discoverer`, `video_player`, `deps_check`, `design_tokens`, `main_window`, `debug_windows`, `dep_archive`, `dep_installer`); in un ambiente senza display o senza `gtk4paintablesink` `video_player` e `main_window` risultano `SKIP` (e `debug_windows` senza display) (e `discoverer` se mancano i plugin di prova): è normale.
+deve riportare **22/22** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`, `discoverer`, `video_player`, `deps_check`, `design_tokens`, `main_window`, `debug_windows`, `dep_archive`, `dep_installer`, `real_clips`, `deps_state`, `deps_dialog`); `real_clips` è `SKIP` senza `SYNCVIEW_TEST_CLIPS`; in un ambiente senza display o senza `gtk4paintablesink` `video_player` e `main_window` risultano `SKIP` (e `debug_windows` senza display) (e `discoverer` se mancano i plugin di prova): è normale.
 
 ---
 

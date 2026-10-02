@@ -728,6 +728,70 @@ test_real_probes_with_scripts(const char *dir)
 }
 #endif
 
+/* M2.12: SYNCVIEW_DEPS_FAKE_MISSING dichiara mancanti i componenti elencati; il resto del controllo resta vero. */
+static void
+test_fake_missing(void)
+{
+    DepsProbes probes;
+    Fake *f = fake_new(DEPS_PLATFORM_LINUX, &probes);
+    g_hash_table_insert(f->programs, g_strdup("pacman"), g_strdup("/usr/bin/pacman"));
+
+    g_unsetenv("SYNCVIEW_DEPS_FAKE_MISSING");
+    DepsReport *r = deps_check_run(&probes, "/deps");
+    assert(deps_report_is_complete(r));
+    deps_report_free(r);
+
+    g_setenv("SYNCVIEW_DEPS_FAKE_MISSING", "gst-gtk4sink, ffmpeg,gst-decoder-hevc", TRUE);
+    r = deps_check_run(&probes, "/deps");
+    assert(item(r, "gst-gtk4sink")->status == DEPS_STATUS_MISSING);
+    assert(item(r, "gst-gtk4sink")->resolution == DEPS_RESOLUTION_SYSTEM_PACKAGES);  /* piano vero, non finto */
+    assert(item(r, "gst-gtk4sink")->packages && strcmp(item(r, "gst-gtk4sink")->packages[0], "gst-plugin-gtk4") == 0);
+    assert(item(r, "ffmpeg")->status == DEPS_STATUS_MISSING);
+    assert(item(r, "gst-decoder-hevc")->status == DEPS_STATUS_OPTIONAL_MISSING);
+    assert(item(r, "gst-playbin3")->status == DEPS_STATUS_OK && item(r, "gst-decoder-h264")->status == DEPS_STATUS_OK);
+    assert(!deps_report_can_play(r) && !deps_report_can_export(r));
+    deps_report_free(r);
+
+    /* «all» e id sconosciuti. */
+    g_setenv("SYNCVIEW_DEPS_FAKE_MISSING", "all", TRUE);
+    r = deps_check_run(&probes, "/deps");
+    for (size_t i = 0; i < deps_report_count(r); i++) {
+        assert(deps_report_get(r, i)->status != DEPS_STATUS_OK);
+    }
+    deps_report_free(r);
+    g_setenv("SYNCVIEW_DEPS_FAKE_MISSING", "inesistente,,", TRUE);
+    r = deps_check_run(&probes, "/deps");
+    assert(deps_report_is_complete(r));
+    deps_report_free(r);
+
+    /* Comando per l'installazione a mano, per qualunque gestore (anche diverso da quello del sistema). */
+    g_setenv("SYNCVIEW_DEPS_FAKE_MISSING", "gst-gtk4sink,gst-decoder-h264,ffmpeg,gst-decoder-vp9", TRUE);
+    r = deps_check_run(&probes, "/deps");
+    char *note = NULL;
+    char *cmd = deps_report_manual_command(r, "apt-get", FALSE, &note);
+    assert(cmd && strcmp(cmd, "sudo apt install gstreamer1.0-gtk4 gstreamer1.0-libav ffmpeg") == 0 && note == NULL);
+    g_free(cmd);
+    cmd = deps_report_manual_command(r, "apt-get", TRUE, NULL);  /* con gli opzionali: + good (per VP9) */
+    assert(cmd && strstr(cmd, "gstreamer1.0-plugins-good") != NULL);
+    g_free(cmd);
+    cmd = deps_report_manual_command(r, "pacman", FALSE, NULL);
+    assert(cmd && strcmp(cmd, "sudo pacman -S gst-plugin-gtk4 gst-libav ffmpeg") == 0);
+    g_free(cmd);
+    cmd = deps_report_manual_command(r, "dnf", FALSE, &note);  /* libav e ffmpeg non sono nei repository predefiniti */
+    assert(cmd && strcmp(cmd, "sudo dnf install gstreamer1-plugin-gtk4") == 0);
+    assert(note && strstr(note, "RPM Fusion") != NULL);
+    g_free(cmd);
+    g_free(note);
+    assert(deps_report_manual_command(r, "brew", FALSE, NULL) == NULL && deps_report_manual_command(r, NULL, FALSE, NULL) == NULL);
+    deps_report_free(r);
+
+    g_unsetenv("SYNCVIEW_DEPS_FAKE_MISSING");
+    r = deps_check_run(&probes, "/deps");
+    assert(deps_report_manual_command(r, "apt-get", TRUE, &note) == NULL && note == NULL);
+    deps_report_free(r);
+    fake_free(f);
+}
+
 int
 main(void)
 {
@@ -745,6 +809,7 @@ main(void)
     test_system_packages_plan();
     test_collect_packages();
     test_text_and_log(dir);
+    test_fake_missing();
     test_real_probes_invariants();
 #ifndef G_OS_WIN32
     test_real_probes_with_scripts(dir);

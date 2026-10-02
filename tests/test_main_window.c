@@ -3,6 +3,7 @@
  * termina con 77 (skip Meson). Controlla il tema (nessun errore CSS in entrambi i temi), gli stati della finestra, il
  * flusso apri → play → pausa → passo → chiudi e l'ottimizzazione O3 (il percorso si salva solo a caricamento riuscito).
  */
+#include "core/deps_check.h"
 #include "core/logger.h"
 #include "core/user_paths.h"
 #include "ui/main_window.h"
@@ -406,6 +407,146 @@ test_close_while_loading_and_playing(void)
     g_free(video);
 }
 
+/* ---- M2.12: voce di menu e riapertura automatica dopo un decoder mancante ---- */
+
+static gboolean
+only_playbin(const char *name, gpointer user_data)
+{
+    (void)user_data;
+    return strcmp(name, "playbin3") == 0;
+}
+
+static char *
+no_program(const char *name, const char *extra_dir, gpointer user_data)
+{
+    (void)name;
+    (void)extra_dir;
+    (void)user_data;
+    return NULL;
+}
+
+static char *
+no_output(const char *path, const char *const *args, gpointer user_data)
+{
+    (void)path;
+    (void)args;
+    (void)user_data;
+    return NULL;
+}
+
+/* Sistema finto in cui manca quasi tutto: il controllo trova sempre qualcosa da installare. */
+static DepsReport *
+missing_check(gpointer user_data)
+{
+    DepsProbes probes = { only_playbin, no_program, no_output, DEPS_PLATFORM_LINUX, user_data };
+
+    return deps_check_run(&probes, "/deps");
+}
+
+static GtkWidget *
+wait_for_deps_dialog(GtkWidget *window, int timeout_ms)
+{
+    gint64 end = g_get_monotonic_time() + (gint64)timeout_ms * 1000;
+    GtkWidget *dialog = NULL;
+
+    while (!(dialog = syncview_deps_dialog_find(GTK_WINDOW(window))) && g_get_monotonic_time() < end) {
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
+    return dialog;
+}
+
+static void
+close_deps_dialog(GtkWidget *dialog)
+{
+    gtk_window_destroy(GTK_WINDOW(dialog));
+    spin_for(50);
+}
+
+/* Mette a rango NONE tutti i decoder VP8 (restituisce le coppie feature/rango da ripristinare). */
+static GPtrArray *
+demote_vp8_decoders(void)
+{
+    GPtrArray *saved = g_ptr_array_new();
+    GList *features = gst_registry_get_feature_list(gst_registry_get(), GST_TYPE_ELEMENT_FACTORY);
+
+    for (GList *l = features; l; l = l->next) {
+        GstElementFactory *factory = GST_ELEMENT_FACTORY(l->data);
+        const char *klass = gst_element_factory_get_metadata(factory, GST_ELEMENT_METADATA_KLASS);
+
+        if (strstr(GST_OBJECT_NAME(factory), "vp8") && klass && strstr(klass, "Decoder")) {
+            g_ptr_array_add(saved, gst_object_ref(factory));
+            g_ptr_array_add(saved, GUINT_TO_POINTER(gst_plugin_feature_get_rank(GST_PLUGIN_FEATURE(factory))));
+            gst_plugin_feature_set_rank(GST_PLUGIN_FEATURE(factory), GST_RANK_NONE);
+        }
+    }
+    gst_plugin_feature_list_free(features);
+    return saved;
+}
+
+static void
+restore_ranks(GPtrArray *saved)
+{
+    for (guint i = 0; i + 1 < saved->len; i += 2) {
+        gst_plugin_feature_set_rank(GST_PLUGIN_FEATURE(g_ptr_array_index(saved, i)),
+                                    GPOINTER_TO_UINT(g_ptr_array_index(saved, i + 1)));
+        gst_object_unref(g_ptr_array_index(saved, i));
+    }
+    g_ptr_array_free(saved, TRUE);
+}
+
+static void
+test_dependencies_menu_and_missing_plugin(void)
+{
+    char *paths_file = g_build_filename(tmp_dir, "deps-paths.json", NULL);
+    char *state_file = g_build_filename(tmp_dir, "deps-state.json", NULL);
+    GtkWidget *window = new_window(paths_file);
+    SyncviewDepsDialogOptions options = { 0 };
+
+    options.check = missing_check;
+    options.state_file = state_file;
+    syncview_main_window_set_deps_options(window, &options);
+
+    /* Voce di menu «Verifica dipendenze»: apre la finestra «Preparazione di SyncView» (qui manca molto). */
+    assert(syncview_main_window_get_widget(window, "menu") != NULL);
+    assert(syncview_deps_dialog_find(GTK_WINDOW(window)) == NULL);
+    click(window, "menu-deps");
+    GtkWidget *dialog = wait_for_deps_dialog(window, 10000);
+
+    assert(dialog != NULL && syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);
+    assert(gtk_window_get_transient_for(GTK_WINDOW(dialog)) == GTK_WINDOW(window));
+    close_deps_dialog(dialog);
+
+    /* Un decoder che manca davvero: l'errore del player riapre da solo la verifica, e la scheda lo dice. */
+    char *video = make_video("noplugin.webm", 25);
+    GPtrArray *saved = demote_vp8_decoders();
+
+    assert(saved->len > 0);  /* almeno un decoder VP8 nel registry (vp8dec o libav) */
+    assert(syncview_main_window_open_file(window, video));
+    assert(spin_until_state(window, SYNCVIEW_MAIN_WINDOW_ERROR, 20000));
+    assert(strcmp(label_of(window, "card-title"), "Manca un decoder per questo video") == 0);
+    dialog = wait_for_deps_dialog(window, 10000);
+    assert(dialog != NULL && syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);
+    close_deps_dialog(dialog);
+    restore_ranks(saved);
+
+    /* Un file rotto NON è un plugin mancante: nessuna finestra. */
+    char *broken = g_build_filename(tmp_dir, "broken-deps.mp4", NULL);
+
+    assert(g_file_set_contents(broken, "non e' un video", -1, NULL));
+    syncview_main_window_open_file(window, broken);
+    assert(spin_until_state(window, SYNCVIEW_MAIN_WINDOW_ERROR, 20000));
+    assert(strcmp(label_of(window, "card-title"), "Impossibile riprodurre il video") == 0);
+    spin_for(1200);
+    assert(syncview_deps_dialog_find(GTK_WINDOW(window)) == NULL);
+
+    close_window(window);
+    g_free(broken);
+    g_free(video);
+    g_free(state_file);
+    g_free(paths_file);
+}
+
 #define RUN_TEST(call)                                               \
     do {                                                             \
         if (!test_selected(#call)) {                                 \
@@ -472,6 +613,7 @@ main(void)
     RUN_TEST(test_o3_failed_load_does_not_touch_saved_paths());
     RUN_TEST(test_saved_video_is_reloaded_at_startup());
     RUN_TEST(test_close_while_loading_and_playing());
+    RUN_TEST(test_dependencies_menu_and_missing_plugin());
 
     assert(drain_teardowns(15000));
     g_object_unref(app);

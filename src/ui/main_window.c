@@ -38,6 +38,8 @@ typedef struct {
     GtkWidget *scale;
     GtkWidget *time_label;
     GtkWidget *total_label;
+
+    SyncviewDepsDialogOptions *deps_options;  /* copia posseduta, NULL = predefinite */
 } MainWindow;
 
 static const int STEP_VALUES[4] = { -10, -1, 1, 10 };
@@ -254,15 +256,56 @@ on_load_state_changed(SyncviewVideoPlayer *player, gboolean loaded, gpointer use
     log_ui("Video caricato nella finestra: %s", mw->shown_name ? mw->shown_name : "?");
 }
 
+/* Avvia il controllo delle dipendenze con le opzioni della finestra (per i test, sostituibili). */
+static void
+start_deps_check(MainWindow *mw, SyncviewDepsShowMode mode)
+{
+    SyncviewDepsDialogOptions options = { 0 };
+
+    if (mw->deps_options) {
+        options = *mw->deps_options;
+    }
+    options.restart_hint = mw->player == NULL;  /* senza player la finestra va riaperta per usare ciò che si installa */
+    syncview_deps_check_and_show(GTK_WINDOW(mw->window), mode, &options);
+}
+
+static gboolean
+on_missing_plugin_idle(gpointer user_data)
+{
+    GWeakRef *ref = user_data;
+    GtkWidget *window = g_weak_ref_get(ref);
+
+    if (window) {
+        MainWindow *mw = mw_of(window);
+
+        if (mw) {
+            start_deps_check(mw, SYNCVIEW_DEPS_SHOW_AFTER_ERROR);
+        }
+        g_object_unref(window);
+    }
+    g_weak_ref_clear(ref);
+    g_free(ref);
+    return G_SOURCE_REMOVE;
+}
+
 static void
 on_player_error(SyncviewVideoPlayer *player, const char *message, gpointer user_data)
 {
     MainWindow *mw = user_data;
+    gboolean missing_plugin = syncview_video_player_last_error_is_missing_plugin(player);
     char *detail = g_strdup_printf("%s\n%s", mw->shown_name ? mw->shown_name : "", message);
 
-    (void)player;
-    set_state(mw, SYNCVIEW_MAIN_WINDOW_ERROR, "Impossibile riprodurre il video", detail);
+    set_state(mw, SYNCVIEW_MAIN_WINDOW_ERROR, missing_plugin ? "Manca un decoder per questo video" : "Impossibile riprodurre il video",
+              detail);
     g_free(detail);
+
+    if (missing_plugin) {
+        /* Non dentro il segnale del player: il controllo parte appena il main loop è libero. */
+        GWeakRef *ref = g_new0(GWeakRef, 1);
+
+        g_weak_ref_init(ref, mw->window);
+        g_idle_add(on_missing_plugin_idle, ref);
+    }
 }
 
 /* ---- Azioni ---- */
@@ -676,6 +719,40 @@ build_controls(MainWindow *mw)
     return box;
 }
 
+static void
+on_menu_deps_clicked(GtkButton *button, gpointer user_data)
+{
+    MainWindow *mw = user_data;
+    GtkWidget *popover = gtk_widget_get_ancestor(GTK_WIDGET(button), GTK_TYPE_POPOVER);
+
+    if (popover) {
+        gtk_popover_popdown(GTK_POPOVER(popover));
+    }
+    log_user_action("Menu: verifica dipendenze", NULL);
+    start_deps_check(mw, SYNCVIEW_DEPS_SHOW_USER_REQUESTED);
+}
+
+static GtkWidget *
+build_menu(MainWindow *mw)
+{
+    GtkWidget *menu = gtk_menu_button_new();
+    GtkWidget *popover = gtk_popover_new();
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+    GtkWidget *deps = gtk_button_new_with_label("Verifica dipendenze…");
+
+    gtk_menu_button_set_label(GTK_MENU_BUTTON(menu), "Menu");
+    gtk_widget_add_css_class(menu, "sv-btn");
+    gtk_widget_add_css_class(deps, "sv-btn");
+    gtk_widget_add_css_class(popover, "syncview");
+    g_signal_connect(deps, "clicked", G_CALLBACK(on_menu_deps_clicked), mw);
+    gtk_box_append(GTK_BOX(box), deps);
+    gtk_popover_set_child(GTK_POPOVER(popover), box);
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(menu), popover);
+    register_widget(mw, "menu", menu);
+    register_widget(mw, "menu-deps", deps);
+    return menu;
+}
+
 static GtkWidget *
 build_header(MainWindow *mw)
 {
@@ -686,6 +763,7 @@ build_header(MainWindow *mw)
     gtk_widget_add_css_class(open, "sv-btn");
     g_signal_connect(open, "clicked", G_CALLBACK(on_open_clicked), mw);
     gtk_header_bar_pack_start(GTK_HEADER_BAR(header), open);
+    gtk_header_bar_pack_end(GTK_HEADER_BAR(header), build_menu(mw));
 
     gtk_box_append(GTK_BOX(title_box), make_label("SyncView", "sv-title"));
     mw->subtitle = make_label("", "sv-subtitle");
@@ -708,6 +786,7 @@ on_window_destroy(GtkWidget *window, gpointer user_data)
         g_object_unref(mw->player);  /* se la pipeline sta ancora salendo, lo smontaggio è rimandato (vedi video_player.h) */
     }
     user_paths_free(mw->paths);
+    syncview_deps_dialog_options_free(mw->deps_options);
     g_hash_table_destroy(mw->widgets);
     g_free(mw->shown_name);
     g_free(mw);
@@ -762,7 +841,7 @@ syncview_main_window_new(GtkApplication *app, const char *user_paths_file)
         syncview_video_player_set_tick_widget(mw->player, mw->picture);
         set_state(mw, SYNCVIEW_MAIN_WINDOW_EMPTY, "Nessun video", "Carica un video per iniziare");
     } else {
-        /* Manca un componente (tipicamente gtk4paintablesink): niente riproduzione; l'installazione guidata arriva in M2.11. */
+        /* Manca un componente (tipicamente gtk4paintablesink): niente riproduzione; il controllo d'avvio propone l'installazione (M2.12). */
         set_state(mw, SYNCVIEW_MAIN_WINDOW_ERROR, "Manca un componente per leggere i video", error ? error->message : "");
         gtk_widget_set_sensitive(mw->card_button, FALSE);
         log_error("Player non disponibile", error);
@@ -785,6 +864,25 @@ syncview_main_window_new(GtkApplication *app, const char *user_paths_file)
         syncview_main_window_open_file(mw->window, valid[VIDEO_SLOT]);
     }
     return mw->window;
+}
+
+void
+syncview_main_window_check_dependencies(GtkWidget *window, gboolean user_requested)
+{
+    MainWindow *mw = mw_of(window);
+
+    g_return_if_fail(mw != NULL);
+    start_deps_check(mw, user_requested ? SYNCVIEW_DEPS_SHOW_USER_REQUESTED : SYNCVIEW_DEPS_SHOW_STARTUP);
+}
+
+void
+syncview_main_window_set_deps_options(GtkWidget *window, const SyncviewDepsDialogOptions *options)
+{
+    MainWindow *mw = mw_of(window);
+
+    g_return_if_fail(mw != NULL);
+    syncview_deps_dialog_options_free(mw->deps_options);
+    mw->deps_options = syncview_deps_dialog_options_dup(options);
 }
 
 SyncviewMainWindowState

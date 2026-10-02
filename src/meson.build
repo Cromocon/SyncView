@@ -22,6 +22,7 @@ syncview_core_sources = [
   'core/logger.c',
   'core/discoverer.c',
   'core/deps_check.c',
+  'core/deps_state.c',
   'core/dep_manifest.c',
   'core/dep_archive.c',
   'core/dep_installer.c',
@@ -54,7 +55,7 @@ syncview_resources = gnome.compile_resources(
 
 syncview_ui_lib = static_library(
   'syncview_ui',
-  ['ui/theme.c', 'ui/main_window.c', 'ui/debug_log_window.c', 'ui/debug_modules_window.c', 'ui/debug_windows.c', syncview_resources],
+  ['ui/theme.c', 'ui/main_window.c', 'ui/debug_log_window.c', 'ui/debug_modules_window.c', 'ui/debug_windows.c', 'ui/deps_dialog.c', syncview_resources],
   include_directories: syncview_core_inc,
   link_with: [syncview_video_lib, syncview_core_lib],
   dependencies: [glib_dep, gio_dep, gtk_dep, gstreamer_dep],

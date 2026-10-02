@@ -410,3 +410,148 @@ window.syncview scrollbar slider {
 window.syncview scrollbar slider:hover {
   background: @syncview_mute;
 }
+
+/* ---- Primo avvio / dipendenze (M2.12) ---- */
+window.syncview .sv-dlg-h {
+  font-size: {{fs_xl}}px;
+  font-weight: 800;
+}
+window.syncview .sv-dlg-lead {
+  color: @syncview_mute;
+}
+window.syncview .sv-deps-list {
+  background: @syncview_surf;
+  border: {{bw}}px solid @syncview_line;
+  border-radius: {{r_card}}px;
+  padding: 0 {{sp3}}px;
+}
+window.syncview .sv-dep-row {
+  padding: {{sp2}}px 0;
+  border-bottom: 1px solid @syncview_line;
+}
+window.syncview .sv-dep-row:last-child {
+  border-bottom: 0 solid transparent;
+}
+window.syncview .sv-dep-name {
+  font-weight: 800;
+  color: @syncview_text;
+}
+window.syncview .sv-dep-sub {
+  color: @syncview_mute;
+  font-size: {{fs_s}}px;
+}
+window.syncview .sv-badge {
+  background: @syncview_surf;
+  color: @syncview_text;
+  border: {{bw}}px solid @syncview_line;
+  border-radius: {{r_pill}}px;
+  padding: 1px {{sp2}}px;
+  font-size: {{fs_s}}px;
+  font-weight: 700;
+}
+window.syncview .sv-badge.sv-ok {
+  background: @syncview_ok_soft;
+  color: @syncview_ok_text;
+  border-color: @syncview_ok;
+}
+window.syncview .sv-badge.sv-err {
+  background: @syncview_err_soft;
+  color: @syncview_err_text;
+  border-color: @syncview_err;
+}
+window.syncview .sv-badge.sv-warn {
+  background: @syncview_warn_soft;
+  color: @syncview_warn_text;
+  border-color: @syncview_warn;
+}
+window.syncview .sv-dep-row progressbar trough {
+  min-height: 6px;
+  min-width: 96px;
+  margin: 0;
+  padding: 0;
+  border-radius: {{r_pill}}px;
+  background: @syncview_line;
+  border: 0 solid transparent;
+}
+window.syncview .sv-dep-row progressbar progress {
+  min-height: 6px;
+  margin: 0;
+  padding: 0;
+  border-radius: {{r_pill}}px;
+  background: @syncview_text;
+  border: 0 solid transparent;
+}
+window.syncview .sv-note {
+  background: @syncview_surf2;
+  color: @syncview_text;
+  border: {{bw}}px solid @syncview_line;
+  border-radius: {{r_card}}px;
+  padding: {{sp3}}px;
+}
+window.syncview .sv-banner {
+  border: {{bw}}px solid @syncview_line;
+  border-radius: {{r_card}}px;
+  padding: {{sp3}}px;
+  font-weight: 800;
+  background: @syncview_surf2;
+  color: @syncview_text;
+}
+window.syncview .sv-banner.sv-err {
+  background: @syncview_err_soft;
+  color: @syncview_err_text;
+  border-color: @syncview_err;
+}
+window.syncview .sv-banner.sv-ok {
+  background: @syncview_ok_soft;
+  color: @syncview_ok_text;
+  border-color: @syncview_ok;
+}
+window.syncview .sv-banner.sv-warn {
+  background: @syncview_warn_soft;
+  color: @syncview_warn_text;
+  border-color: @syncview_warn;
+}
+window.syncview .sv-section-title {
+  font-weight: 800;
+}
+window.syncview .sv-os-list {
+  background: @syncview_surf;
+  border: {{bw}}px solid @syncview_line;
+  border-radius: {{r_card}}px;
+}
+window.syncview .sv-os-list row {
+  background: transparent;
+  color: @syncview_text;
+  padding: {{sp2}}px {{sp3}}px;
+  border-bottom: 1px solid @syncview_line;
+}
+window.syncview .sv-os-list row:selected {
+  background: @syncview_accent_soft;
+  color: @syncview_text;
+}
+window.syncview .sv-os-name {
+  font-weight: 800;
+  color: @syncview_text;
+}
+window.syncview .sv-os-cmd {
+  color: @syncview_text;
+}
+window.syncview .sv-plan {
+  background: @syncview_surf;
+  color: @syncview_text;
+  border: {{bw}}px solid @syncview_line;
+  border-radius: {{r_card}}px;
+  padding: {{sp3}}px;
+}
+window.syncview textview.sv-output,
+window.syncview textview.sv-output text {
+  background: @syncview_surf;
+  color: @syncview_text;
+}
+window.syncview scrolledwindow.sv-output-box {
+  border: {{bw}}px solid @syncview_line;
+  border-radius: {{r_card}}px;
+}
+window.syncview checkbutton.sv-check {
+  color: @syncview_text;
+}

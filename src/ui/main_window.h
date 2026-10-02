@@ -1,6 +1,7 @@
 #ifndef SYNCVIEW_UI_MAIN_WINDOW_H
 #define SYNCVIEW_UI_MAIN_WINDOW_H
 
+#include "ui/deps_dialog.h"
 #include "video/video_player.h"
 
 #include <gtk/gtk.h>
@@ -34,6 +35,17 @@ GtkWidget *syncview_main_window_new(GtkApplication *app, const char *user_paths_
 /* Avvia il caricamento di un file (come «Apri video…»). FALSE se il file non esiste (la scheda di errore è già mostrata). */
 gboolean syncview_main_window_open_file(GtkWidget *window, const char *path);
 
+/*
+ * Verifica delle dipendenze (M2.12). Con `user_requested` FALSE è il controllo d'avvio: la finestra «Preparazione di
+ * SyncView» compare solo se manca qualcosa che l'utente non ha già scelto di ignorare; con TRUE (voce di menu «Verifica
+ * dipendenze») compare sempre. Il controllo gira in un thread di lavoro: la finestra non si blocca.
+ * Se il player segnala un decoder/plugin mancante, la finestra rilancia da sola il controllo (se manca qualcosa).
+ */
+void syncview_main_window_check_dependencies(GtkWidget *window, gboolean user_requested);
+
+/* Opzioni del dialogo delle dipendenze (sostituzione del controllo, installatore finto...): per i test. NULL = predefinite. */
+void syncview_main_window_set_deps_options(GtkWidget *window, const SyncviewDepsDialogOptions *options);
+
 SyncviewMainWindowState syncview_main_window_get_state(GtkWidget *window);
 
 /* Il player incorporato (transfer none), o NULL se non è stato possibile crearlo (manca un componente GStreamer). */
@@ -41,7 +53,7 @@ SyncviewVideoPlayer *syncview_main_window_get_player(GtkWidget *window);
 
 /*
  * Widget per nome, per i test: "play", "step-m10", "step-m1", "step-p1", "step-p10", "seek", "time", "open",
- * "card-title", "card-detail". NULL se il nome non esiste.
+ * "card-title", "card-detail", "menu", "menu-deps". NULL se il nome non esiste.
  */
 GtkWidget *syncview_main_window_get_widget(GtkWidget *window, const char *name);
 

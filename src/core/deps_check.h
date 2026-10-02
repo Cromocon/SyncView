@@ -138,6 +138,17 @@ char **deps_report_collect_packages(const DepsReport *report, gboolean include_o
  */
 gboolean deps_package_is_known(const char *package_manager, const char *package);
 
+/*
+ * Comando da copiare per installare a mano i componenti mancanti con `package_manager` ("pacman", "apt-get", "dnf",
+ * "zypper"), anche quando NON è il gestore di questo sistema (serve alla tabella «installazione manuale»): es.
+ * "sudo apt install gstreamer1.0-plugins-base ...". NULL se non manca nulla o nessun pacchetto è disponibile per quel
+ * gestore. I componenti opzionali sono inclusi solo con include_optional. *note (opzionale) riceve, se serve, la nota
+ * per ciò che quel gestore non fornisce nei repository predefiniti (es. «Fedora: gstreamer1-libav da RPM Fusion»), o
+ * NULL. Da liberare con g_free.
+ */
+char *deps_report_manual_command(const DepsReport *report, const char *package_manager, gboolean include_optional,
+                                 char **note);
+
 /* Report leggibile, una riga per componente + istruzioni per i mancanti. Da liberare con g_free. */
 char *deps_report_to_text(const DepsReport *report);
 

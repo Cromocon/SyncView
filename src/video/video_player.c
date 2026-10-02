@@ -143,6 +143,7 @@ struct _SyncviewVideoPlayer {
     char *path;              /* ultimo file passato a load() con successo, owned */
     gboolean loading;        /* load() accettato, ASYNC_DONE/errore non ancora arrivati */
     gboolean loaded;
+    gboolean error_missing_plugin;  /* l'ultimo errore del bus era un decoder/plugin mancante (vedi handle_error_message) */
 
     SyncviewPlaybackState playback_state;
     gboolean at_end;         /* il video è arrivato in fondo: il prossimo play() riparte dall'inizio */
@@ -880,6 +881,11 @@ handle_error_message(SyncviewVideoPlayer *self, GstMessage *message)
     gst_message_parse_error(message, &gst_error, &debug);
 
     char *text = g_strdup_printf("%s", gst_error ? gst_error->message : "errore sconosciuto");
+
+    /* Un decoder o un plugin che manca si distingue da un file rotto: la finestra può proporre la verifica delle dipendenze. */
+    self->error_missing_plugin =
+        gst_error && ((gst_error->domain == GST_CORE_ERROR && gst_error->code == GST_CORE_ERROR_MISSING_PLUGIN) ||
+                      (gst_error->domain == GST_STREAM_ERROR && gst_error->code == GST_STREAM_ERROR_CODEC_NOT_FOUND));
     log_gst("player %d: ERROR dal bus: %s (debug: %s)", self->video_index + 1, text, debug ? debug : "-");
 
     char *log_text = g_strdup_printf("Errore caricamento video Feed-%d: %s", self->video_index + 1, text);
@@ -1108,6 +1114,7 @@ syncview_video_player_load(SyncviewVideoPlayer *self, const char *path, GError *
     gst_pipeline_set_auto_flush_bus(GST_PIPELINE(self->pipeline), TRUE);
     self->loaded = FALSE;
     self->loading = FALSE;
+    self->error_missing_plugin = FALSE;
     self->at_end = FALSE;
     g_free(self->path);
     self->path = NULL;
@@ -1623,6 +1630,13 @@ syncview_video_player_get_paintable(SyncviewVideoPlayer *self)
 {
     g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), NULL);
     return self->paintable;
+}
+
+gboolean
+syncview_video_player_last_error_is_missing_plugin(SyncviewVideoPlayer *self)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), FALSE);
+    return self->error_missing_plugin;
 }
 
 GstElement *

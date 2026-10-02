@@ -33,6 +33,7 @@ on_activate(GtkApplication *app, gpointer user_data)
 
     gtk_window_present(GTK_WINDOW(window));
     syncview_debug_windows_open(app, GTK_WINDOW(window), NULL, NULL);  /* solo con --debug */
+    syncview_main_window_check_dependencies(window, FALSE);            /* primo avvio: propone l'installazione se manca qualcosa */
 #ifdef G_OS_UNIX
     g_unix_signal_add(SIGINT, on_terminate_signal, app);
     g_unix_signal_add(SIGTERM, on_terminate_signal, app);
@@ -117,7 +118,7 @@ main(int argc, char *argv[])
     int status = g_application_run(G_APPLICATION(app), argc, argv);
 
     /* Uscita dal main loop (anche da segnale): le finestre vanno distrutte perché rilascino i player. */
-    GList *toplevels = g_list_copy(gtk_window_list_toplevels());
+    GList *toplevels = gtk_window_list_toplevels();  /* lista nuova (transfer container): non serve copiarla */
 
     for (GList *l = toplevels; l; l = l->next) {
         g_object_ref(l->data);
