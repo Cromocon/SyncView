@@ -1349,13 +1349,19 @@ frame_clock_usable(void)
         gtk_window_set_child(GTK_WINDOW(window), picture);
         gtk_widget_add_tick_callback(picture, tick_counter, &ticks, NULL);
         gtk_window_present(GTK_WINDOW(window));
-        spin_for(500);
+        /*
+         * Assestamento di 800 ms ignorato: appena presentata, una finestra può ricevere qualche tick prima di essere spostata
+         * su un desktop non attivo (dove i frame non arrivano più) o prima che il compositor la metta a regime. Si conta dopo.
+         */
+        spin_for(800);
+        ticks = 0;
+        spin_for(700);
         gtk_window_destroy(GTK_WINDOW(window));
         spin_for(50);
         g_object_unref(empty);
-        verdict = ticks >= 10;  /* ~30 attesi a 60 Hz */
+        verdict = ticks >= 15;  /* ~40 attesi a 60 Hz in 700 ms */
         if (!verdict) {
-            g_printerr("frame clock irregolare (%u tick in 500 ms): verifiche sul frame clock saltate\n", ticks);
+            g_printerr("frame clock irregolare (%u tick in 700 ms): verifiche sul frame clock saltate\n", ticks);
         }
     }
     return verdict;
