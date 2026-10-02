@@ -313,7 +313,7 @@ Stesso eseguibile: `syncview:video_player` → **OK** (ora ~70 s; i test di M2.7
 ### M2.7 su file reali — `real_clips`
 
 `tests/test_real_clips.c` prova ogni file di una cartella (`SYNCVIEW_TEST_CLIPS=<cartella>`, senza la variabile è `SKIP`): fps e durata, 8 passi +1 e 8 passi −1 (delta = 1/fps, ritorno al primo frame), seek accurato a 4 punti, −1 dopo un seek, ±10, play e velocità 2× (misurata dopo l'assestamento: il cambio di velocità è un seek).
-Esito sui 65 clip di prova (Big Buck Bunny 10 s, 360p-1080p: H.264 a 30 e 60 fps, H.265, AV1 e VP9 in MP4/WebM, VP8 in WebM, H.264 in MKV vero, e file `.mkv` che in realtà sono MP4): **tutto esatto**, anche a 60 fps; decoder hardware usati: `nvh264dec`, `nvh265dec`, `nvav1dec`, `vavp9dec`, `vavp8dec`. Non coperti: decoder software, framerate variabile, MOV.
+Esito sui 65 clip di prova (Big Buck Bunny 10 s, 360p-1080p: H.264 a 30 e 60 fps, H.265, AV1 e VP9 in MP4/WebM, VP8 in WebM, H.264 in MKV vero, file `.mkv` che in realtà sono MP4 e 4 MOV H.264 con audio AAC da 30,6 s): **tutto esatto**, anche a 60 fps; decoder hardware usati: `nvh264dec`, `nvh265dec`, `nvav1dec`, `vavp9dec`, `vavp8dec`. Non coperti: decoder software, framerate variabile.
 Uso: `SYNCVIEW_TEST_CLIPS=~/Downloads/Videos tools/on-desktop9.sh meson test -C build real_clips`. Sui Mac/Windows: stessa cosa con la propria cartella (vedi i file `TEST_*.md`).
 
 ### Design system — token (`design/`)
