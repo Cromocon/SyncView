@@ -1690,7 +1690,12 @@ test_ticker_only_while_playing(const char *dir)
     Shown shown = show_window_for(player);          /* imposta il widget mentre è in PLAYING */
     assert(syncview_video_player_is_ticking(player));
     guint n = ev.positions->len;
-    spin_for(300);
+    /* Il primo aggiornamento può tardare (avvio del decoder hardware su Windows): si attende, con un limite. */
+    for (gint64 deadline = g_get_monotonic_time() + 5 * G_USEC_PER_SEC;
+         ev.positions->len <= n && g_get_monotonic_time() < deadline;) {
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
     assert(ev.positions->len > n);
     syncview_video_player_set_tick_widget(player, NULL);  /* torna al timer di ripiego */
     assert(syncview_video_player_is_ticking(player));
@@ -1748,6 +1753,12 @@ test_frame_clock_drives_the_ticks(const char *dir)
     assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
     Shown shown = show_window_for(player);
     assert(syncview_video_player_play(player, NULL));
+    /* Si misura dal primo aggiornamento: l'avvio del decoder (hardware su Windows) può superare i 300 ms. */
+    for (gint64 deadline = g_get_monotonic_time() + 10 * G_USEC_PER_SEC;
+         ev.positions->len == 0 && g_get_monotonic_time() < deadline;) {
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
     spin_for(300);
     assert(ev.positions->len >= 4);
 
@@ -2502,7 +2513,14 @@ main(void)
         assert(drain_teardowns(15000));
 
         char *cmd = g_strdup_printf("rm -rf '%s'", dir);
+#ifdef _WIN32
+        /* Una pipeline abbandonata (smontaggio mai concluso, vedi poll_until_settled) tiene i file aperti e Windows non li lascia cancellare. */
+        if (system(cmd) != 0) {
+            fprintf(stderr, "avviso: cartella temporanea non cancellata del tutto: %s\n", dir);
+        }
+#else
         assert(system(cmd) == 0);
+#endif
         g_free(cmd);
         g_free(dir);
     }

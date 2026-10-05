@@ -207,6 +207,39 @@ typedef struct {
     gint64 deadline_us;
 } DeferredTeardown;
 
+/* Scrive nel log gli elementi della pipeline che hanno ancora un cambio di stato in corso (diagnosi dei blocchi). */
+static void
+log_unsettled_elements(GstElement *pipeline)
+{
+    GstIterator *it = gst_bin_iterate_recurse(GST_BIN(pipeline));
+    GValue item = G_VALUE_INIT;
+    gboolean done = FALSE;
+
+    while (!done) {
+        switch (gst_iterator_next(it, &item)) {
+        case GST_ITERATOR_OK: {
+            GstElement *el = g_value_get_object(&item);
+            GstState current, pending;
+
+            if (gst_element_get_state(el, &current, &pending, 0) == GST_STATE_CHANGE_ASYNC) {
+                log_gst("smontaggio: %s non si assesta (%s -> %s)", GST_OBJECT_NAME(el),
+                        gst_element_state_get_name(current), gst_element_state_get_name(pending));
+            }
+            g_value_reset(&item);
+            break;
+        }
+        case GST_ITERATOR_RESYNC:
+            gst_iterator_resync(it);
+            break;
+        default:
+            done = TRUE;
+            break;
+        }
+    }
+    g_value_unset(&item);
+    gst_iterator_free(it);
+}
+
 static gboolean
 poll_until_settled(gpointer user_data)
 {
@@ -217,14 +250,24 @@ poll_until_settled(gpointer user_data)
     if (ret == GST_STATE_CHANGE_ASYNC && g_get_monotonic_time() < t->deadline_us) {
         return G_SOURCE_CONTINUE;  /* ancora in transizione: il main loop continua a girare */
     }
-    if (ret == GST_STATE_CHANGE_ASYNC) {
-        log_gst("smontaggio forzato: la pipeline non si è assestata entro %d s", (int)(TEARDOWN_SETTLE_TIMEOUT_US / G_USEC_PER_SEC));
-    }
+    gboolean stuck = (ret == GST_STATE_CHANGE_ASYNC);
 
-    gst_element_set_state(t->pipeline, GST_STATE_NULL);
+    if (stuck) {
+        log_unsettled_elements(t->pipeline);
+        log_gst("smontaggio abbandonato: la pipeline non si è assestata entro %d s", (int)(TEARDOWN_SETTLE_TIMEOUT_US / G_USEC_PER_SEC));
+    } else {
+        gst_element_set_state(t->pipeline, GST_STATE_NULL);
+    }
     g_atomic_int_dec_and_test(&pending_teardowns);
     t->done(t->data);
-    gst_object_unref(t->pipeline);
+    /*
+     * Una pipeline bloccata si lascia dov'è (il riferimento resta, di proposito): set_state(NULL) sul thread principale
+     * si bloccherebbe per sempre (visto su Windows: gtk4paintablesink, in un thread di playsink, aspetta qualcosa che il
+     * thread principale, fermo nella chiamata, non può dare). Meglio una pipeline persa che un'app congelata.
+     */
+    if (!stuck) {
+        gst_object_unref(t->pipeline);
+    }
     g_free(t);
     return G_SOURCE_REMOVE;
 }
@@ -245,6 +288,8 @@ teardown_pipeline(GstElement *pipeline, TeardownDone done, gpointer data)
     }
 
     DeferredTeardown *t = g_new0(DeferredTeardown, 1);
+    log_gst("smontaggio rimandato: %s è in transizione (%s -> %s)", GST_OBJECT_NAME(pipeline),
+            gst_element_state_get_name(current), gst_element_state_get_name(pending));
 
     t->pipeline = gst_object_ref(pipeline);
     t->done = done;

@@ -280,6 +280,7 @@ on_missing_plugin_idle(gpointer user_data)
         MainWindow *mw = mw_of(window);
 
         if (mw) {
+            log_ui("Plugin mancante nel player: avvio il controllo delle dipendenze");
             start_deps_check(mw, SYNCVIEW_DEPS_SHOW_AFTER_ERROR);
         }
         g_object_unref(window);
@@ -305,7 +306,7 @@ on_player_error(SyncviewVideoPlayer *player, const char *message, gpointer user_
         GWeakRef *ref = g_new0(GWeakRef, 1);
 
         g_weak_ref_init(ref, mw->window);
-        g_idle_add(on_missing_plugin_idle, ref);
+        g_idle_add_full(G_PRIORITY_DEFAULT, on_missing_plugin_idle, ref, NULL);
     }
 }
 
