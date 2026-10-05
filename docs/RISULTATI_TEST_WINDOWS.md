@@ -133,3 +133,17 @@ Avviando `build/src/syncview.exe` da MSYS2 UCRT64 compare la finestra «Preparaz
 - non trattare un formato mancante come «riproduzione impossibile» se gli altri formati funzionano.
 
 Soluzione provvisoria su questo PC: `pacman -S mingw-w64-ucrt-x86_64-gst-plugins-ugly` e riavviare SyncView, oppure «Continua senza».
+
+## Difetto di comportamento (non solo Windows): la finestra «Preparazione di SyncView» si chiude con la X
+
+Osservato a mano su Windows (2026-10-05): la finestra che avvisa dei componenti mancanti si può chiudere con la **X** della barra del titolo (negli screenshot la X è visibile). Per il funzionamento corretto dell'app non dovrebbe essere possibile: l'utente deve scegliere esplicitamente tra «Installa», «Installa a mano», «Annulla» e «Continua senza».
+
+**Cosa dice il codice** (`src/ui/deps_dialog.c`, solo lettura, nessuna modifica):
+- `on_close_request` (collegato a `close-request`, riga ~1404) blocca la chiusura **solo mentre un'installazione è in corso**: in quel caso chiede l'annullamento e la finestra resta. In ogni altro stato restituisce `FALSE` e la finestra si chiude.
+- Il codice non è specifico di Windows: la X e i gesti equivalenti (Alt+F4, Esc se previsto, chiusura dal gestore finestre) si comportano allo stesso modo su Linux e macOS, quindi il difetto vale su tutte le piattaforme, anche se qui è stato visto solo su Windows.
+
+**Cosa non è stato verificato**
+- Cosa succede dopo la chiusura con la X: quale esito (`outcome`) riceve il chiamante tramite `done`, se l'app si avvia lo stesso senza componenti, se riappare al prossimo avvio. Va provato a mano prima di decidere la correzione.
+- Se anche la finestra aperta dopo un plugin mancante (`SYNCVIEW_DEPS_SHOW_AFTER_ERROR`) abbia lo stesso comportamento.
+
+**Da fare** (non fatto, da valutare su Linux e macOS): decidere se la X deve essere disattivata (`gtk_window_set_deletable(FALSE)`) o se deve equivalere a una scelta esplicita (per esempio «Continua senza» o «Annulla»), e bloccare Esc/Alt+F4 allo stesso modo. Dove la X viene nascosta (alcuni gestori finestre Linux la mostrano comunque) serve comunque un `close-request` che non chiuda in silenzio.
