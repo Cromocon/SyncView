@@ -147,3 +147,9 @@ Osservato a mano su Windows (2026-10-05): la finestra che avvisa dei componenti 
 - Se anche la finestra aperta dopo un plugin mancante (`SYNCVIEW_DEPS_SHOW_AFTER_ERROR`) abbia lo stesso comportamento.
 
 **Da fare** (non fatto, da valutare su Linux e macOS): decidere se la X deve essere disattivata (`gtk_window_set_deletable(FALSE)`) o se deve equivalere a una scelta esplicita (per esempio «Continua senza» o «Annulla»), e bloccare Esc/Alt+F4 allo stesso modo. Dove la X viene nascosta (alcuni gestori finestre Linux la mostrano comunque) serve comunque un `close-request` che non chiuda in silenzio.
+
+### Verifica a mano sulla chiusura con la X (2026-10-05, Windows)
+
+Chiudendo con la X la finestra «Preparazione di SyncView» (componenti mancanti), **l'app resta utilizzabile normalmente**: la finestra principale risponde ai comandi come se i componenti ci fossero. Quindi la X equivale in pratica a «Continua senza», senza nessun avviso e senza una scelta esplicita. Questo risponde alla prima domanda lasciata aperta qui sopra (l'app si avvia lo stesso senza componenti).
+
+Conseguenza: con un componente davvero indispensabile (per esempio il decoder H.264) l'utente può arrivare ad aprire un video che non si può riprodurre, e l'errore compare solo allora. Resta da controllare se la finestra riappare al prossimo avvio e se dopo la X il pulsante/menu «Verifica dipendenze» la riapre.
