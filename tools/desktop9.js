@@ -6,11 +6,23 @@ var pattern = /(^|\s)test_|syncview/i;
 function idOf(w) {
     return ((w.resourceClass || "") + " " + (w.resourceName || "") + " " + (w.desktopFileName || "")).trim();
 }
+// Le finestre di prova non devono richiamare l'attenzione dell'utente (lampeggio/evidenziazione nel pannello, nel
+// pager o nelle notifiche): si tolgono dal pannello e dal pager e si azzera ogni richiesta di attenzione.
+function quiet(w) {
+    w.skipTaskbar = true;
+    w.skipPager = true;
+    w.skipSwitcher = true;
+    if (w.demandsAttention) {
+        w.demandsAttention = false;
+        print("d9-quiet: attenzione azzerata per " + idOf(w));
+    }
+}
 function place(w) {
     if (!w || !target) { return; }
     var id = idOf(w);
     var parent = w.transientFor;
     var match = pattern.test(id) || (parent && pattern.test(idOf(parent)));
+    if (match) { quiet(w); }
     if (match && !(w.desktops.length === 1 && w.desktops[0] === target)) {
         w.desktops = [target];
         print("d9-place: " + (id || "(senza classe, genitore " + idOf(parent) + ")") + " -> " + target.name);
@@ -21,6 +33,12 @@ function watch(w) {
     if (w.windowClassChanged) { w.windowClassChanged.connect(function () { place(w); }); }
     if (w.desktopFileNameChanged) { w.desktopFileNameChanged.connect(function () { place(w); }); }
     if (w.transientForChanged) { w.transientForChanged.connect(function () { place(w); }); }
+    if (w.demandsAttentionChanged) {
+        w.demandsAttentionChanged.connect(function () {
+            var id = idOf(w), parent = w.transientFor;
+            if (pattern.test(id) || (parent && pattern.test(idOf(parent)))) { quiet(w); }
+        });
+    }
     print("d9-seen: [" + idOf(w) + "] caption=" + w.caption);
 }
 workspace.windowAdded.connect(watch);

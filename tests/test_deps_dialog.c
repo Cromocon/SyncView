@@ -228,7 +228,7 @@ test_review_shows_exact_plan_and_does_nothing_without_consent(void)
     const char *note = label_text(dialog, "note");
 
     assert(HAS(note, "password") && HAS(note, "non la vede e non la salva"));
-    assert(HAS(note, "non può riprodurre nessun video"));  /* manca il sink: nessun video senza */
+    assert(HAS(note, "non può riprodurre i video di alcuni formati, o di nessuno"));  /* manca il sink: nessun video senza */
 
     /* Nessuna installazione senza consenso: aspettare non cambia nulla. */
     spin_for(400);

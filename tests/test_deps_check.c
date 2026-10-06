@@ -269,6 +269,17 @@ test_demuxers(void)
     assert(!deps_report_can_play(r));
     deps_report_free(r);
 
+    /* Manca solo il demuxer wmv (asfdemux è in plugins-ugly): opzionale, si riproduce il resto; il piano è ugly. */
+    const char *qt[] = { "qtdemux", NULL };
+    fake_add(f, qt);
+    fake_remove(f, "avdemux_asf");
+    r = deps_check_run(&probes, "/deps");
+    it = item(r, "gst-demuxers");
+    assert(it->status == DEPS_STATUS_OPTIONAL_MISSING && it->feature == DEPS_FEATURE_OPTIONAL);
+    assert(HAS(it->detail, "Formati senza demuxer: wmv"));
+    assert(deps_report_can_play(r));
+    deps_report_free(r);
+
     /* Senza nessun demuxer: elencati tutti i formati. */
     const char *gone[] = { "avidemux", "matroskademux", "avdemux_asf", "avdemux_flv" };
     for (size_t i = 0; i < G_N_ELEMENTS(gone); i++) {

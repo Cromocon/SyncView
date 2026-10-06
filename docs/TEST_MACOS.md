@@ -25,7 +25,7 @@ Chi prova: segni ogni voce con ✅ / ❌ e, per ogni ❌, allega l'output richie
 ## 0. Preparazione
 
 ```bash
-brew install meson ninja gtk4 gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-libav gst-plugins-rs sqlite json-glib libsoup pkg-config
+brew install meson ninja gtk4 gstreamer gst-plugins-base gst-plugins-good gst-plugins-ugly gst-plugins-bad gst-libav gst-plugins-rs sqlite json-glib libsoup pkg-config
 git clone <repository> && cd SyncView && git checkout SyncView-C
 meson setup build && meson compile -C build
 ```

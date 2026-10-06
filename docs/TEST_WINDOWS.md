@@ -28,7 +28,7 @@ Come in CI: shell **MSYS2 UCRT64** (non PowerShell, non MINGW64).
 ```bash
 pacman -S --needed mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-meson mingw-w64-ucrt-x86_64-ninja \
   mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-gstreamer mingw-w64-ucrt-x86_64-gst-plugins-base \
-  mingw-w64-ucrt-x86_64-gst-plugins-good mingw-w64-ucrt-x86_64-gst-plugins-bad mingw-w64-ucrt-x86_64-gst-libav \
+  mingw-w64-ucrt-x86_64-gst-plugins-good mingw-w64-ucrt-x86_64-gst-plugins-ugly mingw-w64-ucrt-x86_64-gst-plugins-bad mingw-w64-ucrt-x86_64-gst-libav \
   mingw-w64-ucrt-x86_64-gst-plugins-rs mingw-w64-ucrt-x86_64-sqlite3 mingw-w64-ucrt-x86_64-json-glib \
   mingw-w64-ucrt-x86_64-libsoup3
 git clone <repository> && cd SyncView && git checkout SyncView-C

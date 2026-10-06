@@ -43,7 +43,7 @@ Prerequisiti (pacchetti di sviluppo, nomi validi su distro Arch-based; su altre 
 ```bash
 # Arch/CachyOS
 sudo pacman -S meson ninja gtk4 gstreamer gst-plugins-base gst-plugins-good \
-  gst-plugins-bad gst-libav gst-plugin-gtk4 sqlite json-glib
+  gst-plugins-ugly gst-plugins-bad gst-libav gst-plugin-gtk4 sqlite json-glib
 ```
 
 Build ed esecuzione:

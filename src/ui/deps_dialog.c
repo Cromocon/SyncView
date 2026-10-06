@@ -440,7 +440,7 @@ elevation_text(const Dlg *dlg)
     }
 
     const char *consequence = !deps_report_can_play(dlg->report)
-                                  ? " Senza questi componenti SyncView non può riprodurre nessun video."
+                                  ? " Senza questi componenti SyncView non può riprodurre i video di alcuni formati, o di nessuno."
                               : !deps_report_can_export(dlg->report)
                                   ? " Senza questi componenti SyncView non può esportare i video."
                                   : "";
@@ -1191,7 +1191,7 @@ build_failed_or_manual(Dlg *dlg)
     g_free(instructions);
     gtk_box_append(GTK_BOX(dlg->content),
                    make_label(!deps_report_can_play(dlg->report)
-                                  ? "Senza questi componenti SyncView non può riprodurre nessun video. Dopo l'installazione manuale, ricontrolla da qui."
+                                  ? "Senza questi componenti SyncView non può riprodurre i video di alcuni formati, o di nessuno. Dopo l'installazione manuale, ricontrolla da qui."
                                   : "Dopo l'installazione manuale, ricontrolla da qui.",
                               "sv-dlg-lead", TRUE));
 

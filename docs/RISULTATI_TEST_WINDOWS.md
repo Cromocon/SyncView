@@ -155,3 +155,7 @@ Chiudendo con la X la finestra «Preparazione di SyncView» (componenti mancanti
 Conseguenza: con un componente davvero indispensabile (per esempio il decoder H.264) l'utente può arrivare ad aprire un video che non si può riprodurre, e l'errore compare solo allora. Resta da controllare se la finestra riappare al prossimo avvio e se dopo la X il pulsante/menu «Verifica dipendenze» la riapre.
 
 **Confermato a mano (2026-10-05, Windows):** dopo la chiusura con la X la finestra «Preparazione di SyncView» **riappare al prossimo avvio** e **si riapre con «Verifica dipendenze»**. Il danno è quindi limitato: nessuno stato sbagliato viene salvato e l'utente può sempre tornarci. Resta però il difetto di fondo: la X permette di proseguire senza una scelta esplicita e senza avviso, anche quando manca un componente indispensabile.
+
+## Correzioni successive (2026-10-06)
+
+- **Demuxer WMV / piano di installazione:** il piano include ora `gst-plugins-ugly` (Arch, Debian/Ubuntu; su Fedora e openSUSE solo nota, nome non verificato) e i comandi MSYS2, il README e i documenti di prova lo nominano. Un formato non comune mancante (wmv, flv) rende il componente **opzionale**: la riproduzione resta possibile e il testo non dice più «nessun video». Mancando mp4/mov, avi o mkv resta bloccante. Test aggiunto in `test_deps_check.c`.

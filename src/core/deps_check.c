@@ -456,6 +456,11 @@ static const PackageSet PKG_GOOD = {
 static const PackageSet PKG_BAD = {
     "gst-plugins-bad", "gstreamer1.0-plugins-bad", "gstreamer1-plugins-bad-free", "gstreamer-plugins-bad", NULL,
 };
+/* plugins-ugly: asfdemux (wmv). Su Fedora e openSUSE il nome non è verificato: niente installazione automatica. */
+static const PackageSet PKG_UGLY = {
+    "gst-plugins-ugly", "gstreamer1.0-plugins-ugly", NULL, NULL,
+    "Fedora: gstreamer1-plugins-ugly-free o da RPM Fusion; openSUSE: gstreamer-plugins-ugly (verifica con gst-inspect-1.0 asfdemux)",
+};
 /* gst-libav: su Fedora è in RPM Fusion e su openSUSE in Packman (repository di terze parti, non predefiniti). */
 static const PackageSet PKG_LIBAV = {
     "gst-libav", "gstreamer1.0-libav", NULL, NULL,
@@ -504,7 +509,7 @@ package_manager_program(PackageManager pm)
 gboolean
 deps_package_is_known(const char *package_manager, const char *package)
 {
-    const PackageSet *all[] = { &PKG_BASE, &PKG_GOOD, &PKG_BAD, &PKG_LIBAV, &PKG_GTK4, &PKG_FFMPEG };
+    const PackageSet *all[] = { &PKG_BASE, &PKG_GOOD, &PKG_BAD, &PKG_LIBAV, &PKG_UGLY, &PKG_GTK4, &PKG_FFMPEG };
     PackageManager managers[] = { PM_PACMAN, PM_APT, PM_DNF, PM_ZYPPER };
 
     if (!package_manager || !package) {
@@ -547,6 +552,10 @@ sets_for_component(const char *id, const PackageSet **out)
     if (strcmp(id, "gst-demuxers") == 0 || strcmp(id, "gst-decoder-vp9") == 0 || strcmp(id, "gst-decoder-av1") == 0) {
         out[0] = &PKG_GOOD;
         out[1] = &PKG_LIBAV;
+        if (strcmp(id, "gst-demuxers") == 0) {
+            out[2] = &PKG_UGLY;  /* asfdemux (wmv) */
+            return 3;
+        }
         return 2;
     }
     if (strcmp(id, "gst-decoder-h264") == 0 || strcmp(id, "gst-decoder-hevc") == 0) {
@@ -589,7 +598,7 @@ deps_report_manual_command(const DepsReport *report, const char *package_manager
             continue;
         }
 
-        const PackageSet *sets[2];
+        const PackageSet *sets[3];
         size_t n = sets_for_component(it->id, sets);
 
         for (size_t s = 0; s < n; s++) {
@@ -676,15 +685,15 @@ build_plan(const DepsProbes *probes, const PackageSet *const *sets, size_t n, co
                              g_strdup_printf("Installa %s con l'installer ufficiale di GStreamer: SyncView lo scarica, ne verifica "
                                    "l'SHA-256 e lo lancia chiedendo i permessi di amministratore a Windows (UAC). "
                                    "A mano: gstreamer.freedesktop.org, sezione Download. In una build da sorgente con MSYS2: "
-                                   "pacman -S mingw-w64-ucrt-x86_64-gst-plugins-base mingw-w64-ucrt-x86_64-gst-plugins-good "
+                                   "pacman -S mingw-w64-ucrt-x86_64-gst-plugins-base mingw-w64-ucrt-x86_64-gst-plugins-good mingw-w64-ucrt-x86_64-gst-plugins-ugly "
                                    "mingw-w64-ucrt-x86_64-gst-plugins-bad mingw-w64-ucrt-x86_64-gst-libav "
                                    "mingw-w64-ucrt-x86_64-gst-plugins-rs", what));
         }
         return plan_text(DEPS_RESOLUTION_INSTRUCTIONS,
                          g_strdup_printf("Reinstalla SyncView: il pacchetto per Windows include %s. "
                                "In una build da sorgente con MSYS2: pacman -S mingw-w64-ucrt-x86_64-gst-plugins-base "
-                               "mingw-w64-ucrt-x86_64-gst-plugins-good mingw-w64-ucrt-x86_64-gst-plugins-bad "
-                               "mingw-w64-ucrt-x86_64-gst-libav mingw-w64-ucrt-x86_64-gst-plugins-rs", what));
+                               "mingw-w64-ucrt-x86_64-gst-plugins-good mingw-w64-ucrt-x86_64-gst-plugins-ugly "
+                               "mingw-w64-ucrt-x86_64-gst-plugins-bad mingw-w64-ucrt-x86_64-gst-libav mingw-w64-ucrt-x86_64-gst-plugins-rs", what));
     case DEPS_PLATFORM_MACOS:
     default:
         if (dep_manifest_gstreamer_installer(DEPS_PLATFORM_MACOS)) {
@@ -759,18 +768,24 @@ check_any_of(DepsReport *report, const DepsProbes *probes, const char *id, const
     g_free(names_joined);
 }
 
-/* Un demuxer per ciascun formato supportato (estensioni di core/settings). */
+/*
+ * Un demuxer per ciascun formato supportato (estensioni di core/settings). I formati `core` sono quelli comuni: se
+ * ne manca uno la riproduzione è compromessa; se mancano solo gli altri (wmv, flv) il componente è opzionale.
+ * `ugly`: l'elemento sta in plugins-ugly (asfdemux), non in good.
+ */
 typedef struct {
     const char *formats;
     const char *elements[3];
+    gboolean core;
+    gboolean ugly;
 } ContainerRule;
 
 static const ContainerRule CONTAINER_RULES[] = {
-    { "mp4, mov", { "qtdemux", NULL } },
-    { "avi", { "avidemux", NULL } },
-    { "mkv", { "matroskademux", NULL } },
-    { "wmv", { "asfdemux", "avdemux_asf", NULL } },  /* asfdemux è in plugins-ugly; avdemux_asf in gst-libav */
-    { "flv", { "flvdemux", "avdemux_flv", NULL } },
+    { "mp4, mov", { "qtdemux", NULL }, TRUE, FALSE },
+    { "avi", { "avidemux", NULL }, TRUE, FALSE },
+    { "mkv", { "matroskademux", NULL }, TRUE, FALSE },
+    { "wmv", { "asfdemux", "avdemux_asf", NULL }, FALSE, TRUE },  /* asfdemux è in plugins-ugly; avdemux_asf in gst-libav */
+    { "flv", { "flvdemux", "avdemux_flv", NULL }, FALSE, FALSE },
 };
 
 static void
@@ -778,6 +793,7 @@ check_demuxers(DepsReport *report, const DepsProbes *probes)
 {
     GString *missing = g_string_new(NULL);
     GString *ok = g_string_new(NULL);
+    gboolean core_missing = FALSE, need_good = FALSE, need_ugly = FALSE;
 
     for (size_t i = 0; i < G_N_ELEMENTS(CONTAINER_RULES); i++) {
         const char *found = first_found(probes, CONTAINER_RULES[i].elements);
@@ -785,17 +801,33 @@ check_demuxers(DepsReport *report, const DepsProbes *probes)
 
         g_string_append_printf(target, "%s%s%s%s%s", target->len ? "; " : "", CONTAINER_RULES[i].formats,
                                found ? " (" : "", found ? found : "", found ? ")" : "");
+        if (!found) {
+            core_missing |= CONTAINER_RULES[i].core;
+            need_ugly |= CONTAINER_RULES[i].ugly;
+            need_good |= !CONTAINER_RULES[i].ugly;
+        }
     }
 
     if (missing->len == 0) {
         report_add(report, "gst-demuxers", "Demuxer dei formati supportati", DEPS_FEATURE_PLAYBACK,
                    DEPS_STATUS_OK, g_strdup_printf("Tutti presenti: %s", ok->str), plan_none());
     } else {
-        const PackageSet *sets[] = { &PKG_GOOD, &PKG_LIBAV };
-        report_add(report, "gst-demuxers", "Demuxer dei formati supportati", DEPS_FEATURE_PLAYBACK,
-                   DEPS_STATUS_MISSING,
+        const PackageSet *sets[3];
+        size_t n = 0;
+
+        if (need_good) {
+            sets[n++] = &PKG_GOOD;
+            sets[n++] = &PKG_LIBAV;
+        }
+        if (need_ugly) {
+            sets[n++] = &PKG_UGLY;
+        }
+        report_add(report, "gst-demuxers", "Demuxer dei formati supportati",
+                   core_missing ? DEPS_FEATURE_PLAYBACK : DEPS_FEATURE_OPTIONAL,
+                   core_missing ? DEPS_STATUS_MISSING : DEPS_STATUS_OPTIONAL_MISSING,
                    g_strdup_printf("Formati senza demuxer: %s%s%s", missing->str, ok->len ? " — presenti: " : "", ok->str),
-                   build_plan(probes, sets, G_N_ELEMENTS(sets), "i plugin GStreamer good e libav"));
+                   build_plan(probes, sets, n, need_good && need_ugly ? "i plugin GStreamer good, libav e ugly"
+                                               : need_ugly ? "il plugin GStreamer ugly" : "i plugin GStreamer good e libav"));
     }
 
     g_string_free(missing, TRUE);
