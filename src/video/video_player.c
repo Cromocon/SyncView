@@ -48,6 +48,7 @@ typedef struct {
     gint64 pts_ns;       /* stream time dell'ultimo buffer, -1 se nessuno */
     gint64 end_ns;       /* pts + durata dell'ultimo buffer: la FINE del frame, -1 se nessuno (vedi sotto) */
     int fps_n, fps_d;    /* 0/1 = sconosciuto o variabile */
+    int trace_left;      /* buffer ancora da registrare nel log dopo un cambio di caps (diagnostica framerate) */
 } FrameInfo;
 
 static void
@@ -66,6 +67,7 @@ frame_info_new(void)
     info->pts_ns = -1;
     info->end_ns = -1;
     info->fps_d = 1;
+    info->trace_left = 0;
     return info;
 }
 
@@ -90,11 +92,19 @@ static GstPadProbeReturn
 on_sink_pad_probe(GstPad *pad, GstPadProbeInfo *probe, gpointer user_data)
 {
     FrameInfo *info = user_data;
+    char *trace = NULL;  /* testo da loggare dopo aver rilasciato il lock (diagnostica framerate dei video interlacciati) */
 
     (void)pad;
     g_mutex_lock(&info->lock);
     if (probe->type & GST_PAD_PROBE_TYPE_BUFFER) {
         GstBuffer *buffer = GST_PAD_PROBE_INFO_BUFFER(probe);
+        if (buffer && info->trace_left > 0) {
+            info->trace_left--;
+            trace = g_strdup_printf("sink: buffer pts=%" G_GINT64_FORMAT " ns durata=%" G_GINT64_FORMAT " ns (framerate dei caps %d/%d)",
+                                    GST_BUFFER_PTS_IS_VALID(buffer) ? (gint64)GST_BUFFER_PTS(buffer) : (gint64)-1,
+                                    GST_BUFFER_DURATION_IS_VALID(buffer) ? (gint64)GST_BUFFER_DURATION(buffer) : (gint64)-1,
+                                    info->fps_n, info->fps_d);
+        }
         if (buffer && GST_BUFFER_PTS_IS_VALID(buffer)) {
             guint64 st = info->have_segment
                              ? gst_segment_to_stream_time(&info->segment, GST_FORMAT_TIME, GST_BUFFER_PTS(buffer))
@@ -118,6 +128,11 @@ on_sink_pad_probe(GstPad *pad, GstPadProbeInfo *probe, gpointer user_data)
             int n = 0, d = 1;
             gst_event_parse_caps(event, &caps);
             GstStructure *st = gst_caps_get_structure(caps, 0);
+            char *caps_text = gst_caps_to_string(caps);
+
+            trace = g_strdup_printf("sink: caps %s", caps_text);
+            g_free(caps_text);
+            info->trace_left = 4;
             if (st && gst_structure_get_fraction(st, "framerate", &n, &d) && n > 0 && d > 0) {
                 info->fps_n = n;
                 info->fps_d = d;
@@ -128,6 +143,10 @@ on_sink_pad_probe(GstPad *pad, GstPadProbeInfo *probe, gpointer user_data)
         }
     }
     g_mutex_unlock(&info->lock);
+    if (trace) {
+        log_gst("%s", trace);
+        g_free(trace);
+    }
     return GST_PAD_PROBE_OK;
 }
 
