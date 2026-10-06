@@ -36,7 +36,7 @@ typedef enum {
 } SyncviewDepsDialogPhase;
 
 typedef enum {
-    SYNCVIEW_DEPS_OUTCOME_CLOSED,           /* chiusa senza scegliere (Annulla, X) */
+    SYNCVIEW_DEPS_OUTCOME_CLOSED,           /* chiusa con «Annulla» o «Chiudi» (la X non chiude se serve una scelta) */
     SYNCVIEW_DEPS_OUTCOME_INSTALLED,        /* installazione riuscita e ricontrollata */
     SYNCVIEW_DEPS_OUTCOME_CONTINUED_WITHOUT /* «Continua senza» */
 } SyncviewDepsOutcome;

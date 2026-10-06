@@ -200,11 +200,52 @@ open_dialog(Done *done, GtkWindow *parent)
 static void
 close_dialog(GtkWidget *dialog)
 {
+    GtkWidget *alive = dialog;
+
+    g_object_add_weak_pointer(G_OBJECT(dialog), (gpointer *)&alive);
     gtk_window_close(GTK_WINDOW(dialog));
+    if (alive) {
+        g_object_remove_weak_pointer(G_OBJECT(dialog), (gpointer *)&alive);
+        if (gtk_widget_get_visible(dialog)) {
+            gtk_window_destroy(GTK_WINDOW(dialog));  /* la X è rifiutata finché serve una scelta: nei test si chiude lo stesso */
+        }
+    }
     spin_for(50);
 }
 
 /* ---- Test ---- */
+
+/* La X (come Alt+F4 ed Esc) non è una scelta: con un componente indispensabile mancante la finestra resta aperta. */
+static void
+test_x_does_not_close_when_a_choice_is_needed(void)
+{
+    fake_reset("ok");
+    Done done;
+    GtkWidget *dialog = open_dialog(&done, NULL);
+
+    assert(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);  /* manca il sink: nessun video */
+    gtk_window_close(GTK_WINDOW(dialog));
+    spin_for(100);
+    assert(gtk_widget_get_visible(dialog) && !done.called);
+    assert(HAS(label_text(dialog, "status"), "Scegli un'opzione"));
+    DepsState *state = deps_state_load(state_path);
+
+    assert(deps_state_get_declined(state) == NULL);  /* nessuna scelta ricordata */
+    deps_state_free(state);
+
+    /* Anche dalla schermata «Installa a mano»: si può solo tornare indietro o scegliere. */
+    click(dialog, "manual");
+    assert(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_MANUAL);
+    gtk_window_close(GTK_WINDOW(dialog));
+    spin_for(100);
+    assert(gtk_widget_get_visible(dialog) && !done.called);
+
+    /* Un pulsante, invece, è una scelta esplicita e chiude. */
+    click(dialog, "back");
+    click(dialog, "cancel");
+    spin_for(50);
+    assert(done.called && done.outcome == SYNCVIEW_DEPS_OUTCOME_CLOSED);
+}
 
 static void
 test_review_shows_exact_plan_and_does_nothing_without_consent(void)
@@ -703,6 +744,7 @@ main(void)
         return 0;
     }
 
+    RUN_TEST(test_x_does_not_close_when_a_choice_is_needed());
     RUN_TEST(test_review_shows_exact_plan_and_does_nothing_without_consent());
     RUN_TEST(test_install_success_flow());
     RUN_TEST(test_output_is_streamed_while_running());

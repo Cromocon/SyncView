@@ -78,6 +78,7 @@ typedef struct {
     SyncviewDepsDialogPhase phase;
     SyncviewDepsOutcome outcome;
     gboolean continued_without;
+    gboolean choice_made;  /* chiusura voluta con un pulsante (Annulla, Continua senza, Chiudi), non con la X */
     gboolean outcome_done;
 
     gboolean include_optional;
@@ -600,17 +601,25 @@ on_back(Dlg *dlg)
     set_phase(dlg, SYNCVIEW_DEPS_DIALOG_REVIEW);
 }
 
+/* Chiude la finestra per una scelta esplicita dell'utente (un pulsante): la X no, vedi on_close_request. */
+static void
+close_by_choice(Dlg *dlg)
+{
+    dlg->choice_made = TRUE;
+    gtk_window_close(GTK_WINDOW(dlg->window));
+}
+
 static void
 on_close_clicked(Dlg *dlg)
 {
-    gtk_window_close(GTK_WINDOW(dlg->window));
+    close_by_choice(dlg);
 }
 
 static void
 on_cancel_clicked(Dlg *dlg)
 {
     log_user_action("Dipendenze: annulla", NULL);
-    gtk_window_close(GTK_WINDOW(dlg->window));
+    close_by_choice(dlg);
 }
 
 static void
@@ -618,7 +627,7 @@ on_continue_without(Dlg *dlg)
 {
     log_user_action("Dipendenze: continua senza", NULL);
     dlg->continued_without = TRUE;
-    gtk_window_close(GTK_WINDOW(dlg->window));
+    close_by_choice(dlg);
 }
 
 static void
@@ -1086,6 +1095,8 @@ build_review(Dlg *dlg)
 
     /* Piè di pagina: Installa a mano | Annulla, Continua senza, Installa */
     gtk_box_append(GTK_BOX(dlg->footer), make_button(dlg, "manual", "Installa a mano", FALSE, G_CALLBACK(on_manual)));
+    dlg->status_label = reg(dlg, "status", make_label("", "sv-dep-sub", FALSE));  /* avviso se si prova a chiudere con la X */
+    gtk_box_append(GTK_BOX(dlg->footer), dlg->status_label);
     append_footer_spacer(dlg->footer);
     gtk_box_append(GTK_BOX(dlg->footer), make_button(dlg, "cancel", "Annulla", FALSE, G_CALLBACK(on_cancel_clicked)));
     gtk_box_append(GTK_BOX(dlg->footer), make_button(dlg, "continue", "Continua senza", FALSE, G_CALLBACK(on_continue_without)));
@@ -1312,6 +1323,15 @@ finish_outcome(Dlg *dlg)
     }
 }
 
+/* Con la riproduzione compromessa e una schermata di scelta aperta, la finestra si chiude solo con un pulsante. */
+static gboolean
+close_needs_choice(const Dlg *dlg)
+{
+    return (dlg->phase == SYNCVIEW_DEPS_DIALOG_REVIEW || dlg->phase == SYNCVIEW_DEPS_DIALOG_FAILED ||
+            dlg->phase == SYNCVIEW_DEPS_DIALOG_MANUAL) &&
+           !deps_report_can_play(dlg->report);
+}
+
 static gboolean
 on_close_request(GtkWindow *window, gpointer user_data)
 {
@@ -1321,6 +1341,14 @@ on_close_request(GtkWindow *window, gpointer user_data)
     if (dlg->running) {
         /* Un'installazione non si interrompe a metà chiudendo la finestra: si chiede l'annullamento e si resta qui. */
         on_cancel_install(dlg);
+        return TRUE;
+    }
+    if (!dlg->choice_made && close_needs_choice(dlg)) {
+        /* X, Alt+F4 o Esc non sono una scelta: manca un componente indispensabile e l'utente deve decidere. */
+        log_user_action("Dipendenze: chiusura con la X rifiutata", NULL);
+        if (dlg->status_label) {
+            gtk_label_set_text(GTK_LABEL(dlg->status_label), "Scegli un'opzione: Annulla o Continua senza");
+        }
         return TRUE;
     }
     return FALSE;
