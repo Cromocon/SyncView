@@ -210,11 +210,18 @@ static void on_tick_widget_gone(gpointer data, GObject *where_the_object_was);
 #define TEARDOWN_SETTLE_TIMEOUT_US (10 * G_USEC_PER_SEC)
 
 static gint pending_teardowns = 0;  /* smontaggi rimandati in corso, accesso atomico */
+static gint abandoned_teardowns = 0;  /* smontaggi abbandonati perché la pipeline non si assestava, accesso atomico */
 
 guint
 syncview_video_player_pending_teardowns(void)
 {
     return (guint)g_atomic_int_get(&pending_teardowns);
+}
+
+guint
+syncview_video_player_abandoned_teardowns(void)
+{
+    return (guint)g_atomic_int_get(&abandoned_teardowns);
 }
 
 typedef void (*TeardownDone)(gpointer data);
@@ -272,6 +279,7 @@ poll_until_settled(gpointer user_data)
     gboolean stuck = (ret == GST_STATE_CHANGE_ASYNC);
 
     if (stuck) {
+        g_atomic_int_inc(&abandoned_teardowns);
         log_unsettled_elements(t->pipeline);
         log_gst("smontaggio abbandonato: la pipeline non si è assestata entro %d s", (int)(TEARDOWN_SETTLE_TIMEOUT_US / G_USEC_PER_SEC));
     } else {
@@ -1106,6 +1114,14 @@ start_pending_load(SyncviewVideoPlayer *self, GError **error)
     self->pending_uri = NULL;
     g_object_set(self->pipeline, "uri", uri, NULL);
     log_gst("player %d: uri=%s -> PAUSED", self->video_index + 1, uri);
+
+    /*
+     * Il sink va a READY qui, sul thread principale, prima che parta la pipeline. Altrimenti il passaggio NULL -> READY
+     * lo fa playsink in un thread di decodebin3 (alla comparsa del pad video) e gtk4paintablesink, a volte, vi resta
+     * bloccato per sempre: il primo frame non arriva e il caricamento non finisce (misurato su Windows: 25 caricamenti
+     * su 60 bloccati senza questa riga, 0 su 60 con). Con il sink già a READY la transizione di playsink è un no-op.
+     */
+    gst_element_set_state(self->video_sink, GST_STATE_READY);
 
     if (gst_element_set_state(self->pipeline, GST_STATE_PAUSED) == GST_STATE_CHANGE_FAILURE) {
         g_set_error(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_PIPELINE,

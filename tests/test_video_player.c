@@ -686,10 +686,14 @@ test_players_load_independently(const char *dir)
 static void
 test_dispose_while_loading(const char *dir)
 {
-    char *path = make_video(dir, "d.webm", 320, 240, 25);
+    /* SYNCVIEW_TEST_DISPOSE_FILE: stesso scenario con un file vero (altro codec/decoder, anche hardware). */
+    const char *custom = g_getenv("SYNCVIEW_TEST_DISPOSE_FILE");
+    char *path = custom ? g_strdup(custom) : make_video(dir, "d.webm", 320, 240, 25);
 
     /* Distruggere il player con un caricamento in corso: nessun callback su oggetto distrutto,
      * nessun CRITICAL (fatali), neanche lasciando girare il main context dopo. */
+    guint abandoned_before = syncview_video_player_abandoned_teardowns();
+
     for (int i = 0; i < 10; i++) {
         SyncviewVideoPlayer *player = syncview_video_player_new(i % SYNCVIEW_MAX_VIDEOS, NULL);
         Events ev;
@@ -701,6 +705,11 @@ test_dispose_while_loading(const char *dir)
         g_object_unref(player);
         spin_for(30);
     }
+
+    /* Nessuna pipeline deve restare bloccata in READY -> PAUSED: è lo stallo di gtk4paintablesink (sink portato a READY
+     * dal thread principale in start_pending_load). Senza quella correzione 4-5 caricamenti su 10 restavano bloccati. */
+    assert(drain_teardowns(15000));
+    assert(syncview_video_player_abandoned_teardowns() == abandoned_before);
 
     g_free(path);
 }

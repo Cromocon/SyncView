@@ -219,6 +219,9 @@ gboolean syncview_video_player_last_error_is_missing_plugin(SyncviewVideoPlayer 
  */
 guint syncview_video_player_pending_teardowns(void);
 
+/* Numero di pipeline lasciate dov'erano perché non si sono assestate entro 10 s (stallo del sink): normalmente 0. */
+guint syncview_video_player_abandoned_teardowns(void);
+
 /* La pipeline `playbin3` sottostante (transfer none). Per uso interno dei moduli video e dei test. */
 GstElement *syncview_video_player_get_pipeline(SyncviewVideoPlayer *self);
 

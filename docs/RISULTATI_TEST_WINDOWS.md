@@ -159,3 +159,47 @@ Conseguenza: con un componente davvero indispensabile (per esempio il decoder H.
 ## Correzioni successive (2026-10-06)
 
 - **Demuxer WMV / piano di installazione:** il piano include ora `gst-plugins-ugly` (Arch, Debian/Ubuntu; su Fedora e openSUSE solo nota, nome non verificato) e i comandi MSYS2, il README e i documenti di prova lo nominano. Un formato non comune mancante (wmv, flv) rende il componente **opzionale**: la riproduzione resta possibile e il testo non dice più «nessun video». Mancando mp4/mov, avi o mkv resta bloccante. Test aggiunto in `test_deps_check.c`.
+
+## Terza sessione (2026-10-10): causa e correzione dello stallo del sink
+
+Stesso PC (Windows 11, RTX 4060 Laptop + Intel UHD, MSYS2 UCRT64, GStreamer 1.28.7, `gtk4paintablesink` 0.15.3). Dopo aver riallineato il ramo al remoto (`0b8a393`) sono state rifatte tutte le prove, comprese quelle lunghe.
+
+### Prima della correzione
+
+- `meson test`: 20 OK, 2 SKIP (`real_clips`, `deps_dialog`), 0 FAIL alla prima esecuzione. Ripetendo 10 volte `video_player` e `main_window`: **6 fallimenti su 20** (5 di `video_player`, 1 di `main_window`), tutti `0xc0000409` dopo l'assert `spin_until(&ev.got_loaded, 10000)`.
+- `SYNCVIEW_TEST_ONLY=dispose_while_loading …` (10 player distrutti subito dopo `load()`): **10 esecuzioni su 10** con pipeline abbandonate (da 1 a 4 su 10 caricamenti). In un'esecuzione con `gdb` il processo non è uscito più (thread principale dentro `set_state(PAUSED)` di un caricamento successivo).
+- Matrice per codec (clip 1280×720, 4 esecuzioni da 10 caricamenti): pipeline abbandonate H.264 MP4 4/40, H.264 MKV 5/40, H.265 2/40, VP8 16/40, VP9 3/40, AV1 4/40. Disattivando i decoder hardware non spariscono (H.265 9/40, VP8 7/40, VP9 6/40, AV1 5/40).
+- Escluso: il decoder NVIDIA (ipotesi iniziale: con VP8 software a 320×240 gli stalli sparivano, a 720p no), OpenGL (`GDK_DEBUG=gl-disable`, `gl-gles`, `GST_GL_API=none`: nessuna differenza), il codec.
+- `test_real_clips` con clip da 12 s: OK per tutti i codec tranne l'AV1 con `d3d12av1dec` (caricamento in timeout, stesso stallo).
+
+### Causa
+
+1. Ogni pipeline bloccata ha il sink che riceve `stream-start` e basta. Contando caricamenti, caps, buffer e abbandoni (`sink: caps` / `sink: buffer` nel log di SyncView) i conti tornano in tutte le esecuzioni: le pipeline abbandonate sono quelle per cui il sink non vede mai il primo buffer.
+2. Dando nomi univoci a pipeline e sink (`player-1-u45`, `videosink-1-u45`) e registrando `GST_STATES`, `basesink`, `GST_ELEMENT_PADS`, `decodebin3`: nelle pipeline sane il sink completa `NULL → READY` ~0,1 ms dopo l'aggiunta del pad `video_0` di `decodebin3` e arriva al preroll dopo 40–100 ms; in quelle bloccate lo stesso passaggio finisce dopo ~10,7 s, tutte insieme, nell'istante in cui il processo inizia a chiudersi. Nel frattempo altre pipeline create dopo arrivano al preroll normalmente, quindi non c'è un lock globale occupato da una sola pipeline.
+3. `gdb` su un'esecuzione bloccata: i thread bloccati sono `pool-N` di `decodebin3`, in `WaitOnAddress` dentro `libgstgtk4.dll`, chiamati da `libgstplayback` (`playsink`) e `libgstreamer`. Il thread principale gira (`drain_teardowns` → `poll_until_settled`).
+
+Conclusione: `playsink` esegue `NULL → READY` del sink in un thread di `decodebin3` (alla comparsa del pad), e `gtk4paintablesink` a volte non ne esce (attesa su canale/lock interno, vedi anche l'analisi di `invoke_on_main_thread` più sopra). Non è un difetto di `video_player.c`.
+
+### Correzione
+
+`start_pending_load()` (`src/video/video_player.c`) porta il sink a `READY` con `gst_element_set_state(self->video_sink, GST_STATE_READY)` sul thread principale prima di mettere la pipeline in PAUSED. Quando `playsink` costruisce la catena video, il passaggio `NULL → READY` risulta già fatto (nel log: `skipping transition from READY to READY`) e non resta niente da bloccare. Aggiunti il contatore `syncview_video_player_abandoned_teardowns()` e, in `test_dispose_while_loading`, l'asserzione che non resti nessuna pipeline bloccata (con la riga di correzione tolta il test fallisce 3 volte su 3). Il test accetta anche `SYNCVIEW_TEST_DISPOSE_FILE=<file>` per ripetere lo scenario con un file e un decoder veri.
+
+### Dopo la correzione
+
+- `dispose_while_loading` con il file sintetico (VP8 320×240): 0 caricamenti bloccati su 60 (con `SYNCVIEW_NO_SINK_PREREADY` provvisorio per confronto: 25 su 60).
+- Matrice per codec (1280×720, 4 esecuzioni da 10 caricamenti): **0 abbandoni su 200** per H.264, H.265, VP8, VP9 e AV1.
+- `test_real_clips` (clip da 12 s, decoder di default, tutti hardware): H.264, H.265, VP8, VP9 **e AV1** OK.
+- Suite completa e ripetizione 10× di `video_player` e `main_window`: vedi sotto.
+
+### Altri esiti della sessione
+
+- `--check-deps`: «Riproduzione: possibile, Export: possibile, Completo: no» (manca solo il demuxer WMV, `asfdemux` in `gst-plugins-ugly`); trovati `playbin3`, `gtk4paintablesink`, decoder H.264/H.265/VP9/AV1 anche hardware (`d3d11/d3d12`, `nvh264dec`, `nvh265dec`, `nvav1dec`, `qsv`) e ffmpeg 9.0.2.
+- Una registrazione di gioco a framerate variabile (`Apex Legends 2026-09-14 09-23-57.mp4`, 29,97 fps, 200 s, `d3d12h264dec`) fallisce `test_real_clips` (21 verifiche): passi ±1 da 0 a 76 ms invece di 33,4 ms, ±10 frame a 382 ms invece di 334 ms. Caso «framerate variabile» da gestire.
+- Clip interlacciata (`1080i-25-H264.mkv`) non disponibile in questa sessione: le righe `sink: caps` / `sink: buffer` per il caso dei 100 fps restano da raccogliere.
+- Per ripetere le prove serve `ffmpeg` (c'è nel MSYS2 di questo PC): le clip si generano con `ffmpeg -f lavfi -i testsrc2=size=1280x720:rate=25 -t 12 -pix_fmt yuv420p -c:v libx264 …` (e `libx265`, `libvpx`, `libvpx-vp9`, `libsvtav1`).
+
+### Esito finale della suite dopo la correzione (2026-10-10)
+
+- `meson test` completo: **20 OK, 2 SKIP, 0 FAIL** (`video_player` 173 s, `main_window` 20 s).
+- `meson test video_player main_window --repeat 10`: `main_window` **10 su 10 OK**; `video_player` 7 OK e **3 FAIL**. I 3 fallimenti **non sono lo stallo del sink**: nessun caricamento scaduto né `smontaggio abbandonato`. Sono la stessa asserzione, `last_end >= duration_ns - 2 ms` a `tests/test_video_player.c:2222` (in `check_exact_frame_step`: 100 passi avanti ravvicinati devono fermarsi sull'ultimo frame), dopo 148–176 s.
+- Cinque esecuzioni complete consecutive di `video_player` fatte dopo (ciascuna ~150 s): tutte OK. I due test di passo per frame da soli (`test_frame_step_exact_25fps`/`_30fps`, 8 volte l'uno): 16 su 16 OK. Quindi la gara dell'ultimo frame c'è ma è rara (3 su 16 esecuzioni complete dopo la correzione); prima della correzione non si vedeva solo perché l'esecuzione si fermava prima, allo stallo. Causa non indagata (probabile sensibilità ai tempi: nelle esecuzioni fallite il PC era sotto carico). La prova di confronto con e senza la correzione (6+6 esecuzioni) è stata interrotta dopo 5 esecuzioni perché il PC era a corto di memoria; non è stata rilanciata.
