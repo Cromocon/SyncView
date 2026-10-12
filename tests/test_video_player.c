@@ -2339,6 +2339,10 @@ test_playback_rate(const char *dir)
      * Nessun salto: al più un frame indietro, e in avanti non più di quanto il video avanza in quel tempo REALE alla velocità
      * di prima (2x) più un margine. Un tetto fisso era troppo stretto sui runner lenti, dove il seek può durare oltre un secondo.
      */
+    if (!(after >= before - 100 && after - before <= elapsed_ms * 2 + 300))
+        g_printerr("playback_rate: salto di posizione al cambio di velocità: prima=%" G_GINT64_FORMAT " ms dopo=%" G_GINT64_FORMAT
+                   " ms (delta %" G_GINT64_FORMAT " ms) in %" G_GINT64_FORMAT " ms reali\n",
+                   before, after, after - before, elapsed_ms);
     assert(after >= before - 100 && after - before <= elapsed_ms * 2 + 300);
     spin_for(300);
     speed = measured_speed(player, 1000);
