@@ -21,6 +21,7 @@ syncview_core_sources = [
   'core/user_paths.c',
   'core/logger.c',
   'core/discoverer.c',
+  'core/frame_index.c',
   'core/deps_check.c',
   'core/deps_state.c',
   'core/dep_manifest.c',

@@ -6,6 +6,7 @@
 #include "core/logger.h"
 #include "core/settings.h"
 #include "video/video_player.h"
+#include "vfr_clip.h"
 
 #include <assert.h>
 #include <glib.h>
@@ -2286,6 +2287,74 @@ test_frame_step_unknown_frame_rate(const char *dir)
     g_free(path);
 }
 
+/*
+ * Framerate VARIABILE con durate davvero irregolari (12–55 ms): il passo per frame segue i frame reali, letti dal file
+ * (indice dei timestamp), non 1/fps. Avanti e indietro di uno, di dieci, dopo un seek: sempre il frame esatto.
+ */
+static void
+test_frame_step_variable_rate(const char *dir)
+{
+    const int frames = 120;
+    char *path = make_vfr_video(dir, "irregular.webm", frames);
+    PosEvents ev;
+    SyncviewVideoPlayer *player = loaded_player(&ev, path);
+
+    /* Il container non dichiara un framerate; l'indice arriva da un thread di lavoro dopo il caricamento. */
+    assert(syncview_video_player_get_frame_rate(player) == 0.0);
+    for (int i = 0; i < 3000 && syncview_video_player_frame_index_pending(player); i++) {
+        spin_for(10);
+    }
+    guint n = 0;
+    const gint64 *idx = syncview_video_player_get_frame_index(player, &n);
+    assert(idx != NULL && n == (guint)frames);
+    for (guint i = 0; i < n; i++) {
+        assert(llabs(idx[i] - vfr_frame_start_ns(i)) <= NS_PER_MS);
+    }
+
+    /* Fine del frame k = inizio del k+1. */
+    gint64 prev = settled_frame_end(player);
+    assert(llabs(prev - idx[1]) <= NS_PER_MS);
+    for (int k = 1; k <= 8; k++) {
+        assert(syncview_video_player_step_frames(player, 1, NULL));
+        prev = settled_after(player, prev, 5000);
+        assert(llabs(prev - idx[k + 1]) <= NS_PER_MS);
+    }
+    for (int k = 7; k >= 0; k--) {
+        assert(syncview_video_player_step_frames(player, -1, NULL));
+        prev = settled_after(player, prev, 5000);
+        assert(llabs(prev - idx[k + 1]) <= NS_PER_MS);
+    }
+
+    /* Dieci frame in una volta, in entrambe le direzioni. */
+    assert(syncview_video_player_step_frames(player, 10, NULL));
+    prev = settled_after(player, prev, 5000);
+    assert(llabs(prev - idx[11]) <= NS_PER_MS);
+    assert(syncview_video_player_step_frames(player, -10, NULL));
+    prev = settled_after(player, prev, 5000);
+    assert(llabs(prev - idx[1]) <= NS_PER_MS);
+
+    /* Dopo un seek in mezzo: il frame che contiene il punto, poi un passo indietro. */
+    gint64 target_ms = idx[60] / NS_PER_MS + 3;
+    assert(syncview_video_player_seek(player, target_ms, NULL));
+    prev = settled_after(player, prev, 5000);
+    assert(llabs(prev - idx[61]) <= NS_PER_MS);
+    assert(syncview_video_player_step_frames(player, -1, NULL));
+    prev = settled_after(player, prev, 5000);
+    assert(llabs(prev - idx[60]) <= NS_PER_MS);
+
+    /* Oltre i limiti si ferma sul primo e sull'ultimo frame. */
+    assert(syncview_video_player_step_frames(player, -500, NULL));
+    prev = settled_after(player, prev, 5000);
+    assert(llabs(prev - idx[1]) <= NS_PER_MS);
+    assert(syncview_video_player_step_frames(player, 500, NULL));
+    prev = settled_after(player, prev, 5000);
+    assert(prev >= idx[n - 1]);
+
+    pos_events_free(&ev);
+    g_object_unref(player);
+    g_free(path);
+}
+
 /* Velocità media della posizione (ms di video per ms reale) su una finestra di ~`window_ms` di orologio. */
 static double
 measured_speed(SyncviewVideoPlayer *player, int window_ms)
@@ -2519,6 +2588,7 @@ main(void)
         RUN_TEST(test_frame_step_exact_25fps(dir));
         RUN_TEST(test_frame_step_exact_30fps(dir));
         RUN_TEST(test_frame_step_unknown_frame_rate(dir));
+        RUN_TEST(test_frame_step_variable_rate(dir));
         RUN_TEST(test_playback_rate(dir));
         RUN_TEST(test_seek_step_log(dir));
 

@@ -222,6 +222,16 @@ guint syncview_video_player_pending_teardowns(void);
 /* Numero di pipeline lasciate dov'erano perché non si sono assestate entro 10 s (stallo del sink): normalmente 0. */
 guint syncview_video_player_abandoned_teardowns(void);
 
+/*
+ * Video a framerate variabile: dopo il caricamento un thread di lavoro legge i timestamp di tutti i frame (nessuna
+ * decodifica) e, se le durate sono irregolari, il passo per frame usa quelli invece di 1/fps. Finché la lettura è in corso
+ * (di solito pochi ms, per un file da 200 s meno di un secondo) il passo usa il framerate nominale.
+ * frame_index_pending: la lettura non è ancora finita. get_frame_index: i pts in ns (crescenti, transfer none), NULL se il
+ * framerate è costante o la lettura non è finita; *n_frames ne dà il numero. Per i test e la diagnostica.
+ */
+gboolean syncview_video_player_frame_index_pending(SyncviewVideoPlayer *self);
+const gint64 *syncview_video_player_get_frame_index(SyncviewVideoPlayer *self, guint *n_frames);
+
 /* La pipeline `playbin3` sottostante (transfer none). Per uso interno dei moduli video e dei test. */
 GstElement *syncview_video_player_get_pipeline(SyncviewVideoPlayer *self);
 

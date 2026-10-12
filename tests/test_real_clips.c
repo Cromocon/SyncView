@@ -75,6 +75,42 @@ settled_after(SyncviewVideoPlayer *p, gint64 before)
     return last;
 }
 
+/*
+ * Fine del frame numero `i` (0 = primo). A framerate costante è (i+1)/fps; a framerate variabile viene dall'indice dei
+ * timestamp che il player ha letto (frame_index): i passi si confrontano con i frame REALI, non con 1/fps.
+ */
+typedef struct {
+    const gint64 *pts;
+    guint n;
+    gint64 frame_ns;
+} Expect;
+
+static gint64
+expect_end(const Expect *e, gint64 i)
+{
+    if (!e->pts) {
+        return (i + 1) * e->frame_ns;
+    }
+    i = CLAMP(i, 0, (gint64)e->n - 1);
+    return (guint)i + 1 < e->n ? e->pts[i + 1] : e->pts[e->n - 1] + (e->pts[e->n - 1] - e->pts[e->n - 2]);
+}
+
+/* Numero del frame la cui fine è `end_ns` (o il più vicino). */
+static gint64
+expect_cur(const Expect *e, gint64 end_ns)
+{
+    if (!e->pts) {
+        return (end_ns + e->frame_ns / 2) / e->frame_ns - 1;
+    }
+    gint64 best = 0;
+    for (guint i = 0; i < e->n; i++) {
+        if (llabs(expect_end(e, i) - end_ns) < llabs(expect_end(e, best) - end_ns)) {
+            best = i;
+        }
+    }
+    return best;
+}
+
 static void
 check_clip(const char *path)
 {
@@ -95,34 +131,51 @@ check_clip(const char *path)
     g_print("  fps=%.3f durata=%" G_GINT64_FORMAT " ms primo frame fine=%" G_GINT64_FORMAT " ns decoder=%s\n", fps, duration,
             syncview_video_player_get_frame_end_ns(p), dec ? dec : "?");
     g_free(dec);
+    /* Framerate variabile: aspetta l'indice dei timestamp (la lettura del file è in un thread). */
+    for (int i = 0; i < 3000 && syncview_video_player_frame_index_pending(p); i++) {
+        spin_ms(10);
+    }
+    Expect ex = { .frame_ns = frame_ns };
+    ex.pts = syncview_video_player_get_frame_index(p, &ex.n);
+    if (ex.pts) {
+        g_print("  framerate VARIABILE: indice di %u frame, il passo si confronta con i frame reali\n", ex.n);
+    }
     CHECK(fps > 20 && fps < 70, "fps %.3f", fps);
     CHECK(duration >= 9600,  /* i punti di seek arrivano a 9,5 s */ "durata %" G_GINT64_FORMAT, duration);
-    CHECK(llabs(syncview_video_player_get_frame_end_ns(p) - frame_ns) <= 1000000, "primo frame");
+    CHECK(llabs(syncview_video_player_get_frame_end_ns(p) - expect_end(&ex, 0)) <= 1000000, "primo frame");
 
-    /* Avanti di un frame, 8 volte: ogni volta esattamente +1/fps. */
+    /* Avanti di un frame, 8 volte: ogni volta esattamente il frame successivo. */
     gint64 prev = syncview_video_player_get_frame_end_ns(p);
+    gint64 cur = 0;
     for (int i = 0; i < 8; i++) {
         CHECK(syncview_video_player_step_frames(p, 1, NULL), "step avanti");
         gint64 now = settled_after(p, prev);
-        CHECK(llabs((now - prev) - frame_ns) <= 1000000, "avanti %d: delta %" G_GINT64_FORMAT " ns (atteso %" G_GINT64_FORMAT ")", i, now - prev, frame_ns);
+        cur++;
+        CHECK(llabs((now - prev) - (expect_end(&ex, cur) - expect_end(&ex, cur - 1))) <= 1000000,
+              "avanti %d: delta %" G_GINT64_FORMAT " ns (atteso %" G_GINT64_FORMAT ")", i, now - prev,
+              expect_end(&ex, cur) - expect_end(&ex, cur - 1));
         prev = now;
     }
     /* Indietro di un frame, 8 volte. */
     for (int i = 0; i < 8; i++) {
         CHECK(syncview_video_player_step_frames(p, -1, NULL), "step indietro");
         gint64 now = settled_after(p, prev);
-        CHECK(llabs((prev - now) - frame_ns) <= 1000000, "indietro %d: delta %" G_GINT64_FORMAT " ns", i, prev - now);
+        cur--;
+        CHECK(llabs((prev - now) - (expect_end(&ex, cur + 1) - expect_end(&ex, cur))) <= 1000000,
+              "indietro %d: delta %" G_GINT64_FORMAT " ns (atteso %" G_GINT64_FORMAT ")", i, prev - now,
+              expect_end(&ex, cur + 1) - expect_end(&ex, cur));
         prev = now;
     }
     /* Dopo 8 avanti e 8 indietro si è di nuovo al primo frame. */
-    CHECK(llabs(prev - frame_ns) <= 1000000, "ritorno al primo frame: %" G_GINT64_FORMAT, prev);
+    CHECK(llabs(prev - expect_end(&ex, 0)) <= 1000000, "ritorno al primo frame: %" G_GINT64_FORMAT, prev);
 
-    /* Seek accurato a metà frame: mostra il frame che contiene il punto. */
+    /* Seek accurato: mostra il frame che contiene il punto. */
     gint64 targets[] = { 1000, 4321, 7777, 9500 };
     for (guint i = 0; i < G_N_ELEMENTS(targets); i++) {
         CHECK(syncview_video_player_seek(p, targets[i], NULL), "seek");
         gint64 now = settled_after(p, prev);
-        gint64 start = now - frame_ns;
+        cur = expect_cur(&ex, now);
+        gint64 start = cur > 0 ? expect_end(&ex, cur - 1) : (ex.pts ? ex.pts[0] : 0);
         gint64 t_ns = targets[i] * NS_PER_MS;
         CHECK(t_ns >= start - 1000000 && t_ns < now + 1000000, "seek %" G_GINT64_FORMAT " ms -> frame %" G_GINT64_FORMAT "-%" G_GINT64_FORMAT " ns", targets[i], start, now);
         prev = now;
@@ -130,16 +183,21 @@ check_clip(const char *path)
     /* Passo indietro dopo un seek in mezzo al video (caso tipico). */
     CHECK(syncview_video_player_step_frames(p, -1, NULL), "step indietro dopo seek");
     gint64 now = settled_after(p, prev);
-    CHECK(llabs((prev - now) - frame_ns) <= 1000000, "indietro dopo seek: delta %" G_GINT64_FORMAT, prev - now);
+    cur--;
+    CHECK(llabs((prev - now) - (expect_end(&ex, cur + 1) - expect_end(&ex, cur))) <= 1000000, "indietro dopo seek: delta %" G_GINT64_FORMAT, prev - now);
     prev = now;
     /* Passi multipli ±10. */
+    cur = expect_cur(&ex, prev);
+    g_print("  prima di +10: frame %" G_GINT64_FORMAT " (fine %" G_GINT64_FORMAT " ns)\n", cur, prev);
     CHECK(syncview_video_player_step_frames(p, 10, NULL), "step +10");
     now = settled_after(p, prev);
-    CHECK(llabs((now - prev) - 10 * frame_ns) <= 2000000, "+10: delta %" G_GINT64_FORMAT, now - prev);
+    cur += 10;
+    CHECK(llabs((now - prev) - (expect_end(&ex, cur) - expect_end(&ex, cur - 10))) <= 2000000, "+10: delta %" G_GINT64_FORMAT " ns (atteso %" G_GINT64_FORMAT ")", now - prev, expect_end(&ex, cur) - expect_end(&ex, cur - 10));
     prev = now;
     CHECK(syncview_video_player_step_frames(p, -10, NULL), "step -10");
     now = settled_after(p, prev);
-    CHECK(llabs((prev - now) - 10 * frame_ns) <= 2000000, "-10: delta %" G_GINT64_FORMAT, prev - now);
+    cur -= 10;
+    CHECK(llabs((prev - now) - (expect_end(&ex, cur + 10) - expect_end(&ex, cur))) <= 2000000, "-10: delta %" G_GINT64_FORMAT " ns (atteso %" G_GINT64_FORMAT ")", prev - now, expect_end(&ex, cur + 10) - expect_end(&ex, cur));
 
     /* Riproduzione e velocità: il tempo avanza (senza frame clock si misura la pipeline). */
     CHECK(syncview_video_player_seek(p, 2000, NULL), "seek 2000");

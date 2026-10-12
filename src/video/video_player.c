@@ -1,5 +1,6 @@
 #include "video/video_player.h"
 
+#include "core/frame_index.h"
 #include "core/logger.h"
 #include "core/settings.h"
 
@@ -184,6 +185,11 @@ struct _SyncviewVideoPlayer {
     gboolean snap_to_frame;      /* dopo un frame-step esatto la posizione riportata è l'INIZIO del frame mostrato */
     gint64 anchor_ns;            /* metà del frame a cui l'ultimo frame-step esatto ha portato il video, -1 se non valida */
 
+    /* Framerate variabile: indice dei timestamp di tutti i frame, letto in un thread di lavoro dopo il load */
+    FrameIndex *frame_index;     /* owned; NULL se framerate costante, scansione in corso o non riuscita */
+    struct _ScanCtx *scan;       /* scansione in corso o conclusa e non ancora raccolta, owned */
+    GThread *scan_thread;        /* joinable, owned */
+
     /* Polling della posizione, attivo solo in PLAYING */
     GtkWidget *tick_widget;      /* non posseduto: weak ref, vedi on_tick_widget_gone */
     guint tick_callback_id;      /* gtk_widget_add_tick_callback, 0 se assente */
@@ -194,6 +200,107 @@ G_DEFINE_FINAL_TYPE(SyncviewVideoPlayer, syncview_video_player, G_TYPE_OBJECT)
 
 static void stop_ticker(SyncviewVideoPlayer *self);
 static void on_tick_widget_gone(gpointer data, GObject *where_the_object_was);
+
+/* --- Indice dei frame per i video a framerate variabile --- */
+
+/* Il pts di un buffer che arriva al sink coincide con quello dell'indice; 0,1 ms assorbe gli arrotondamenti di stream time. */
+#define FRAME_PTS_TOLERANCE_NS (GST_MSECOND / 10)
+/* Quanto dopo l'inizio di un frame si mira per mostrarlo (deve restare sotto FRAME_PTS_TOLERANCE_NS). */
+#define FRAME_SEEK_OFFSET_NS (20 * GST_USECOND)
+
+typedef struct _ScanCtx {
+    char *path;
+    gint cancelled;  /* accesso atomico, letto dal thread */
+    gint done;       /* accesso atomico, scritto dal thread a lavoro concluso */
+    FrameIndex *result;
+} ScanCtx;
+
+static gpointer
+scan_thread_main(gpointer data)
+{
+    ScanCtx *ctx = data;
+
+    ctx->result = frame_index_scan(ctx->path, &ctx->cancelled);
+    g_atomic_int_set(&ctx->done, 1);
+    return NULL;
+}
+
+static void
+scan_ctx_free(ScanCtx *ctx)
+{
+    frame_index_free(ctx->result);
+    g_free(ctx->path);
+    g_free(ctx);
+}
+
+/* Ferma e raccoglie la scansione (attende il thread: al massimo qualche decina di ms, la lettura controlla `cancelled`). */
+static void
+stop_frame_index_scan(SyncviewVideoPlayer *self)
+{
+    if (self->scan_thread) {
+        g_atomic_int_set(&self->scan->cancelled, 1);
+        g_thread_join(self->scan_thread);
+        self->scan_thread = NULL;
+    }
+    if (self->scan) {
+        scan_ctx_free(self->scan);
+        self->scan = NULL;
+    }
+}
+
+static void
+discard_frame_index(SyncviewVideoPlayer *self)
+{
+    stop_frame_index_scan(self);
+    g_clear_pointer(&self->frame_index, frame_index_free);
+}
+
+static void
+start_frame_index_scan(SyncviewVideoPlayer *self)
+{
+    discard_frame_index(self);
+    if (!self->path) {
+        return;
+    }
+    self->scan = g_new0(ScanCtx, 1);
+    self->scan->path = g_strdup(self->path);
+    self->scan_thread = g_thread_new("syncview-frame-index", scan_thread_main, self->scan);
+}
+
+/* Se la scansione è finita ne prende il risultato (l'indice, o niente se il framerate è costante). */
+static void
+adopt_frame_index(SyncviewVideoPlayer *self)
+{
+    if (self->scan_thread && g_atomic_int_get(&self->scan->done)) {
+        g_thread_join(self->scan_thread);
+        self->scan_thread = NULL;
+        self->frame_index = g_steal_pointer(&self->scan->result);
+        scan_ctx_free(self->scan);
+        self->scan = NULL;
+        if (self->frame_index) {
+            log_gst("player %d: framerate variabile, indice di %u frame", self->video_index + 1, self->frame_index->n);
+        }
+    }
+}
+
+gboolean
+syncview_video_player_frame_index_pending(SyncviewVideoPlayer *self)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), FALSE);
+    adopt_frame_index(self);
+    return self->scan_thread != NULL;
+}
+
+const gint64 *
+syncview_video_player_get_frame_index(SyncviewVideoPlayer *self, guint *n_frames)
+{
+    g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), NULL);
+    adopt_frame_index(self);
+    if (n_frames) {
+        *n_frames = self->frame_index ? self->frame_index->n : 0;
+    }
+    return self->frame_index ? self->frame_index->pts : NULL;
+}
 
 /* --- Smontaggio della pipeline --- */
 
@@ -355,6 +462,7 @@ syncview_video_player_dispose(GObject *object)
         g_object_weak_unref(G_OBJECT(self->tick_widget), on_tick_widget_gone, self);
         self->tick_widget = NULL;
     }
+    discard_frame_index(self);
     g_clear_pointer(&self->frame_info, frame_info_unref);
     if (self->bus_watch_id) {
         g_source_remove(self->bus_watch_id);
@@ -679,6 +787,15 @@ query_position_ms(SyncviewVideoPlayer *self, gboolean *ok)
         gint64 end_ns = self->frame_info->end_ns;
         g_mutex_unlock(&self->frame_info->lock);
 
+        adopt_frame_index(self);
+        if (self->frame_index && pts_ns >= 0) {
+            /* Framerate variabile: inizio e fine del frame mostrato sono nell'indice (la durata nominale non vale). */
+            guint shown = frame_index_find(self->frame_index, pts_ns + FRAME_PTS_TOLERANCE_NS);
+            pts_ns = frame_index_start(self->frame_index, shown);
+            end_ns = frame_index_end(self->frame_index, shown);
+            frame_ns = end_ns - pts_ns;
+        }
+
         if (frame_ns > 0 && pts_ns >= 0 && end_ns > pts_ns) {
             gint64 start_ns = MAX(end_ns - frame_ns, 0);
 
@@ -760,6 +877,7 @@ reset_position_and_duration(SyncviewVideoPlayer *self)
     self->anchor_ns = -1;
     self->snap_to_frame = FALSE;
     self->pending_seek_ns = -1;
+    discard_frame_index(self);
     if (self->frame_info) {
         frame_info_reset(self->frame_info);
     }
@@ -1031,6 +1149,7 @@ on_bus_message(GstBus *bus, GstMessage *message, gpointer user_data)
             log_video_action(self->video_index, "Video caricato (async)", name);
             g_free(name);
             log_decoder_in_use(self);
+            start_frame_index_scan(self);
 
             /* Come QMediaPlayer: durata e posizione note prima che il video risulti "caricato". */
             emit_duration(self, query_duration_ms(self));
@@ -1471,7 +1590,14 @@ syncview_video_player_get_frame_end_ns(SyncviewVideoPlayer *self)
 
     g_mutex_lock(&self->frame_info->lock);
     gint64 end = self->frame_info->end_ns >= 0 ? self->frame_info->end_ns : self->frame_info->pts_ns;
+    gint64 pts = self->frame_info->pts_ns;
     g_mutex_unlock(&self->frame_info->lock);
+
+    adopt_frame_index(self);
+    if (self->frame_index && pts >= 0) {
+        /* Framerate variabile: la fine del frame è l'inizio del successivo, non pts + durata del container. */
+        end = frame_index_end(self->frame_index, frame_index_find(self->frame_index, pts + FRAME_PTS_TOLERANCE_NS));
+    }
     return end;
 }
 
@@ -1494,8 +1620,10 @@ syncview_video_player_step_frames(SyncviewVideoPlayer *self, int frame_count, GE
         return TRUE;
     }
 
+    adopt_frame_index(self);
+    const FrameIndex *fi = self->frame_index;  /* framerate variabile: i confini dei frame vengono dall'indice, non da 1/fps */
     double fps = syncview_video_player_get_frame_rate(self);
-    if (fps <= 0.0) {
+    if (fps <= 0.0 && !fi) {
         /* Frame rate sconosciuto o variabile: ricade sullo step in ms dell'originale (40 ms = 25 fps). */
         log_gst("player %d: frame rate sconosciuto, step di %d x %d ms", self->video_index + 1, frame_count,
                 SYNCVIEW_DEFAULT_FRAME_STEP_MS);
@@ -1513,10 +1641,26 @@ syncview_video_player_step_frames(SyncviewVideoPlayer *self, int frame_count, GE
     }
 
     g_mutex_lock(&self->frame_info->lock);
-    gint64 frame_ns = gst_util_uint64_scale(GST_SECOND, self->frame_info->fps_d, self->frame_info->fps_n);
+    gint64 frame_ns = self->frame_info->fps_n > 0
+                          ? gst_util_uint64_scale(GST_SECOND, self->frame_info->fps_d, self->frame_info->fps_n)
+                          : 0;
     gint64 pts_ns = self->frame_info->pts_ns;
     gint64 end_ns = self->frame_info->end_ns;
     g_mutex_unlock(&self->frame_info->lock);
+
+    if (fi && pts_ns >= 0) {
+        /*
+         * Framerate variabile: il frame mostrato e i suoi confini REALI vengono dall'indice. La fine del buffer (pts +
+         * durata del demuxer) non vale: a framerate variabile la durata scritta nel container non è la distanza dal frame
+         * successivo.
+         */
+        guint shown = frame_index_find(fi, pts_ns + FRAME_PTS_TOLERANCE_NS);
+        pts_ns = frame_index_start(fi, shown);
+        end_ns = frame_index_end(fi, shown);
+        frame_ns = end_ns - pts_ns;
+    } else if (fi) {
+        frame_ns = frame_index_end(fi, 0) - frame_index_start(fi, 0);
+    }
 
     /*
      * Un seek/step «in corso» la cui destinazione cade già dentro il frame mostrato è concluso, anche se nessun messaggio
@@ -1535,7 +1679,14 @@ syncview_video_player_step_frames(SyncviewVideoPlayer *self, int frame_count, GE
 
     gint64 anchor = self->anchor_ns;
     if (anchor < 0) {
-        if (end_ns > pts_ns && pts_ns >= 0) {
+        if (fi) {
+            /* Un istante dentro il frame mostrato; la destinazione la sceglie l'indice qui sotto. */
+            if (end_ns > pts_ns && pts_ns >= 0) {
+                anchor = end_ns - GST_MSECOND;
+            } else {
+                anchor = (pts_ns >= 0 ? pts_ns : query_position_ns(self)) + GST_MSECOND;
+            }
+        } else if (end_ns > pts_ns && pts_ns >= 0) {
             anchor = end_ns - frame_ns / 2;  /* la fine del frame è esatta anche dopo un seek accurato */
         } else {
             anchor = (pts_ns >= 0 ? pts_ns : query_position_ns(self)) + frame_ns / 2;
@@ -1550,19 +1701,33 @@ syncview_video_player_step_frames(SyncviewVideoPlayer *self, int frame_count, GE
         }
     }
     gboolean busy = self->pending_seek_ns >= 0;  /* un seek o uno step precedente non è ancora concluso */
-    anchor += (gint64)frame_count * frame_ns;
-    gint64 duration_ns = self->duration_ms * GST_MSECOND;
-    if (duration_ns > 0 && anchor > duration_ns - frame_ns / 2) {
-        anchor = duration_ns - frame_ns / 2;  /* ultimo frame */
-    }
-    if (anchor < frame_ns / 2) {
-        anchor = frame_ns / 2;  /* primo frame */
+    if (fi) {
+        /*
+         * Il frame di destinazione è `frame_count` posizioni più in là nell'indice. Si mira subito DOPO il suo inizio, non
+         * al centro: la durata scritta nel container può essere più corta della distanza dal frame successivo, e un seek
+         * accurato scarta i frame che finiscono (pts + durata) prima del punto richiesto, quindi mirando al centro si
+         * arriverebbe al frame dopo. I timestamp dell'indice sono gli stessi dei buffer: nessun arrotondamento da assorbire.
+         */
+        gint64 target = (gint64)frame_index_find(fi, anchor) + frame_count;
+        guint j = (guint)CLAMP(target, 0, (gint64)fi->n - 1);
+        anchor = frame_index_start(fi, j) + FRAME_SEEK_OFFSET_NS;
+    } else {
+        anchor += (gint64)frame_count * frame_ns;
+        gint64 duration_ns = self->duration_ms * GST_MSECOND;
+        if (duration_ns > 0 && anchor > duration_ns - frame_ns / 2) {
+            anchor = duration_ns - frame_ns / 2;  /* ultimo frame */
+        }
+        if (anchor < frame_ns / 2) {
+            anchor = frame_ns / 2;  /* primo frame */
+        }
     }
 
-    if (frame_count > 0 && !busy) {
+    if (frame_count > 0 && !busy && !(fi && frame_count > 1)) {
         /*
          * Via veloce: GST_EVENT_STEP, senza rifare la decodifica da un keyframe. Un nuovo step mentre ne è in corso un
          * altro LO SOSTITUISCE (i frame del primo andrebbero persi), quindi si usa solo a pipeline ferma.
+         * A framerate variabile solo per un frame: uno step di 10 buffer su MKV/WebM a frame molto brevi si ferma uno prima
+         * (misurato), e la destinazione dell'indice è esatta con il seek.
          */
         GstEvent *step = gst_event_new_step(GST_FORMAT_BUFFERS, (guint64)frame_count, 1.0, TRUE, FALSE);
         if (!gst_element_send_event(self->pipeline, step)) {
@@ -1589,7 +1754,8 @@ syncview_video_player_step_frames(SyncviewVideoPlayer *self, int frame_count, GE
 
     char fps_text[G_ASCII_DTOSTR_BUF_SIZE];
     g_ascii_formatd(fps_text, sizeof(fps_text), "%.3f", fps);
-    char *details = g_strdup_printf("%+d frame (esatto, %s fps)", frame_count, fps_text);
+    char *details = fi ? g_strdup_printf("%+d frame (esatto, framerate variabile, indice di %u frame)", frame_count, fi->n)
+                       : g_strdup_printf("%+d frame (esatto, %s fps)", frame_count, fps_text);
     log_video_action(self->video_index, "Step Frame", details);
     g_free(details);
     return TRUE;
