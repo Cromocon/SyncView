@@ -630,6 +630,117 @@ test_open_migrating(const char *dir)
     g_free(dbpath3);
 }
 
+/* db_version NULL (DB legacy con metadata senza NOT NULL): niente crash, trattato come versione 0. */
+static void
+test_null_db_version(const char *dir)
+{
+    char *path = g_build_filename(dir, "nullversion.db", NULL);
+
+    exec_direct(path, "CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT);"
+                      "INSERT INTO metadata (key, value) VALUES ('db_version', NULL);");
+
+    MarkerDb *db = marker_db_open(path, NULL);
+    assert(db != NULL);
+    marker_db_free(db);
+
+    char *version = query_scalar(path, "SELECT value FROM metadata WHERE key='db_version'");
+    assert(version != NULL && strcmp(version, "1") == 0);
+
+    g_free(version);
+    g_free(path);
+}
+
+/* Ri-salvare un marker eliminato (undo) lo rende di nuovo visibile. */
+static void
+test_resave_restores_deleted(const char *dir)
+{
+    char *path = g_build_filename(dir, "resave.db", NULL);
+    MarkerDb *db = marker_db_open(path, NULL);
+
+    MarkerStore *store = marker_store_new();
+    char *id = g_strdup(marker_store_add(store, 1000, "#000000", "d", NULL, 0)->id);
+    assert(marker_db_save_batch(db, store, NULL));
+    assert(marker_db_delete(db, id, NULL));
+
+    MarkerStore *loaded = marker_db_load_all(db, FALSE, NULL);
+    assert(marker_store_count(loaded) == 0);
+    marker_store_free(loaded);
+
+    assert(marker_db_save_batch(db, store, NULL));
+    loaded = marker_db_load_all(db, FALSE, NULL);
+    assert(marker_store_count(loaded) == 1 && marker_store_find_by_id(loaded, id) != NULL);
+    marker_store_free(loaded);
+
+    marker_store_free(store);
+    g_free(id);
+    marker_db_free(db);
+    g_free(path);
+}
+
+/* timestamp double non finito / fuori da int64: errore, non UB. */
+static void
+test_migrate_json_out_of_range_timestamp(const char *dir)
+{
+    char *json = g_build_filename(dir, "range.json", NULL);
+    char *dbpath = g_build_filename(dir, "range.db", NULL);
+    MarkerDb *db = marker_db_open(dbpath, NULL);
+    const char *bad[] = {
+        "{\"markers\": [{\"timestamp\": 1e300, \"color\": \"#fff\"}]}",
+        "{\"markers\": [{\"timestamp\": -1e300, \"color\": \"#fff\"}]}",
+        "{\"markers\": [{\"timestamp\": 9.3e18, \"color\": \"#fff\"}]}",
+        "{\"markers\": [{\"timestamp\": 1, \"color\": \"#fff\", \"video_index\": 1e40}]}",
+    };
+
+    for (size_t i = 0; i < G_N_ELEMENTS(bad); i++) {
+        GError *error = NULL;
+        int migrated = -1;
+
+        write_file(json, bad[i]);
+        assert(!marker_db_migrate_from_json(db, json, &migrated, &error));
+        assert(error != NULL && error->code == MARKER_DB_ERROR_JSON);
+        assert(g_file_test(json, G_FILE_TEST_EXISTS));
+        g_error_free(error);
+    }
+
+    marker_db_free(db);
+    g_free(json);
+    g_free(dbpath);
+}
+
+/* Marker che condividono (timestamp, video_index, created_at): i duplicati sono scartati, il resto migra. */
+static void
+test_migrate_json_duplicates(const char *dir)
+{
+    char *json = g_build_filename(dir, "dup.json", NULL);
+    char *backup = g_build_filename(dir, "dup.json.backup", NULL);
+    char *dbpath = g_build_filename(dir, "dup.markers.db", NULL);
+    write_file(json,
+        "{\"markers\": ["
+        "{\"timestamp\": 1000, \"color\": \"#111111\", \"video_index\": 1, \"created_at\": \"2024-01-01T00:00:00\", \"id\": \"a\"},"
+        "{\"timestamp\": 1000, \"color\": \"#222222\", \"video_index\": 1, \"created_at\": \"2024-01-01T00:00:00\", \"id\": \"b\"},"
+        "{\"timestamp\": 2000, \"color\": \"#333333\", \"video_index\": 1, \"created_at\": \"2024-01-01T00:00:00\", \"id\": \"c\"}"
+        "]}");
+
+    MarkerDb *db = marker_db_open(dbpath, NULL);
+    int migrated = -1;
+    GError *error = NULL;
+    assert(marker_db_migrate_from_json(db, json, &migrated, &error));
+    assert(error == NULL && migrated == 2);
+    assert(g_file_test(backup, G_FILE_TEST_IS_REGULAR));
+
+    MarkerStore *store = marker_db_load_all(db, FALSE, NULL);
+    assert(marker_store_count(store) == 2);
+    assert(marker_store_find_by_id(store, "a") != NULL);
+    assert(marker_store_find_by_id(store, "b") == NULL);
+    assert(marker_store_find_by_id(store, "c") != NULL);
+    marker_store_free(store);
+
+    marker_db_free(db);
+    g_free(json);
+    g_free(backup);
+    g_free(dbpath);
+}
+
 int
 main(void)
 {
@@ -649,6 +760,10 @@ main(void)
     test_migrate_json_no_op_cases(dir);
     test_migrate_json_errors(dir);
     test_open_migrating(dir);
+    test_null_db_version(dir);
+    test_resave_restores_deleted(dir);
+    test_migrate_json_out_of_range_timestamp(dir);
+    test_migrate_json_duplicates(dir);
 
     marker_db_free(NULL);
 

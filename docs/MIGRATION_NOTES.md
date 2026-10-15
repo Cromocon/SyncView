@@ -128,3 +128,15 @@ La riscrittura mira a replicare **e ottimizzare**. Le ottimizzazioni O1–O9 son
 | O9 | `max_workers = cpu − 1` per qualunque encoder | Limite più basso per encoder hardware | da fare (M6.6) |
 
 Aggiunta non legata a una singola ottimizzazione: **verifica e download delle dipendenze al primo avvio** (M2.10–M2.12), assente nell'originale (che richiedeva `pip install` e `ffmpeg` nel PATH).
+
+---
+
+## Marker: DB e migrazione JSON (deviazioni dall'originale)
+
+Sorgenti: `core/marker_db.py` (`save_markers_batch`), `core/markers.py` (`_migrate_from_json`). Lo schema SQL resta identico (UNIQUE inclusa).
+
+- **Undo di un marker eliminato.** L'upsert Python (`ON CONFLICT(id) DO UPDATE`) non tocca `is_deleted`: ri-salvare un id soft-deleted lo lascia nascosto (bug dell'originale). In C l'upsert imposta anche `is_deleted = 0`.
+- **Duplicati nella migrazione JSON.** In Python due marker con stessi `(timestamp, video_index, created_at)` (con `video_index` non NULL; i NULL non confliggono in SQLite) fanno fallire il batch con `IntegrityError`: nessun marker migrato, nessun backup, errore solo nel log. In C la migrazione usa `INSERT OR IGNORE ... ON CONFLICT(id) DO UPDATE`: i duplicati vengono scartati (il primo vince), il resto migra, il numero di scartati è registrato nel log e `migrated_count` conta solo i marker inseriti. Il salvataggio normale (`marker_db_save_batch`) resta rigoroso.
+- **Valori JSON numerici fuori range** (`timestamp`/`video_index` double non finito o fuori da int64): errore di migrazione invece di conversione indefinita.
+- **`db_version` NULL** in un DB legacy: trattato come versione 0 (migrazione), senza crash.
+- **Colore NULL** in creazione/aggiornamento di un marker: ricade sul default `#3498db` (colonna `color` NOT NULL).

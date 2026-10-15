@@ -89,7 +89,7 @@ marker_new_full(const char *id, int64_t timestamp_ms, const char *color, const c
     }
 
     m->timestamp_ms = timestamp_ms;
-    m->color = g_strdup(color);
+    m->color = dup_or_default(color, "#3498db");
     m->description = dup_or_default(description, "");
     m->category = dup_or_default(category, "default");
     m->video_index = video_index;
@@ -259,7 +259,7 @@ marker_store_update(MarkerStore *store, const char *id, const MarkerUpdate *upda
 
     if (update->fields & MARKER_FIELD_COLOR) {
         g_free(m->color);
-        m->color = g_strdup(update->color);
+        m->color = dup_or_default(update->color, "#3498db");
     }
     if (update->fields & MARKER_FIELD_DESCRIPTION) {
         g_free(m->description);

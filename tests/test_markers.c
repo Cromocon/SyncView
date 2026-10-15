@@ -246,6 +246,23 @@ test_store_queries_vs_linear(void)
     g_rand_free(rng);
 }
 
+/* Colore NULL (in creazione o in update): ricade sul default, mai NULL. */
+static void
+test_color_never_null(void)
+{
+    Marker *m = marker_new(1000, NULL, NULL, NULL, 0);
+    assert(m != NULL && m->color != NULL && strcmp(m->color, "#3498db") == 0);
+    marker_free(m);
+
+    MarkerStore *store = marker_store_new();
+    const Marker *added = marker_store_add(store, 1000, "#e74c3c", NULL, NULL, 0);
+    MarkerUpdate update = { .fields = MARKER_FIELD_COLOR, .color = NULL };
+    const Marker *updated = marker_store_update(store, added->id, &update);
+    assert(updated != NULL && updated->color != NULL);
+    assert(strcmp(updated->color, "#3498db") == 0);
+    marker_store_free(store);
+}
+
 int
 main(void)
 {
@@ -315,6 +332,7 @@ main(void)
     test_store_queries_empty();
     test_store_queries_basic();
     test_store_queries_vs_linear();
+    test_color_never_null();
 
     return 0;
 }

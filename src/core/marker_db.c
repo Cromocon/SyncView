@@ -131,7 +131,9 @@ read_db_version(sqlite3 *conn)
     }
 
     if (sqlite3_step(stmt) == SQLITE_ROW) {
-        version = atoi((const char *)sqlite3_column_text(stmt, 0));
+        /* Il valore può essere NULL in un DB legacy senza NOT NULL: trattato come versione 0. */
+        const unsigned char *text = sqlite3_column_text(stmt, 0);
+        version = text ? atoi((const char *)text) : 0;
     }
     sqlite3_finalize(stmt);
     return version;
@@ -254,30 +256,46 @@ set_sql_error(GError **error, sqlite3 *conn)
     g_set_error(error, MARKER_DB_ERROR, MARKER_DB_ERROR_SQL, "SQLite: %s", sqlite3_errmsg(conn));
 }
 
-/* Upsert verbatim da save_markers_batch. */
-static const char *const UPSERT_SQL =
-    "INSERT INTO markers "
-    "(id, timestamp, color, description, category, video_index, created_at, updated_at, is_deleted) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0) "
-    "ON CONFLICT(id) DO UPDATE SET "
-    "    timestamp = excluded.timestamp, "
-    "    color = excluded.color, "
-    "    description = excluded.description, "
-    "    category = excluded.category, "
-    "    video_index = excluded.video_index, "
-    "    updated_at = excluded.updated_at";
+/*
+ * Upsert da save_markers_batch. Deviazione dall'originale: in caso di conflitto su id si
+ * azzera anche is_deleted, altrimenti ri-salvare un marker eliminato (undo) lo lascerebbe
+ * nascosto (vedi MIGRATION_NOTES.md).
+ */
+#define UPSERT_BODY \
+    "(id, timestamp, color, description, category, video_index, created_at, updated_at, is_deleted) " \
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0) " \
+    "ON CONFLICT(id) DO UPDATE SET " \
+    "    timestamp = excluded.timestamp, " \
+    "    color = excluded.color, " \
+    "    description = excluded.description, " \
+    "    category = excluded.category, " \
+    "    video_index = excluded.video_index, " \
+    "    updated_at = excluded.updated_at, " \
+    "    is_deleted = 0"
+
+static const char *const UPSERT_SQL = "INSERT INTO markers " UPSERT_BODY;
+
+/* Variante per la migrazione JSON: le violazioni di altri vincoli (UNIQUE su timestamp,
+ * video_index, created_at) scartano la riga invece di far fallire il batch. */
+static const char *const UPSERT_IGNORE_SQL = "INSERT OR IGNORE INTO markers " UPSERT_BODY;
 
 static gboolean
-upsert_all(sqlite3 *conn, const MarkerStore *store, const char *now, GError **error)
+upsert_all(sqlite3 *conn, const MarkerStore *store, const char *now, gboolean ignore_conflicts,
+           size_t *skipped, GError **error)
 {
     sqlite3_stmt *stmt = NULL;
+    const char *sql = ignore_conflicts ? UPSERT_IGNORE_SQL : UPSERT_SQL;
 
-    if (sqlite3_prepare_v2(conn, UPSERT_SQL, -1, &stmt, NULL) != SQLITE_OK) {
+    if (skipped) {
+        *skipped = 0;
+    }
+
+    if (sqlite3_prepare_v2(conn, sql, -1, &stmt, NULL) != SQLITE_OK) {
         set_sql_error(error, conn);
         return FALSE;
     }
 
-    log_marker("SQL: %s [batch di %zu marker]", UPSERT_SQL, marker_store_count(store));
+    log_marker("SQL: %s [batch di %zu marker]", sql, marker_store_count(store));
 
     gboolean ok = TRUE;
     for (size_t i = 0; ok && i < marker_store_count(store); i++) {
@@ -301,6 +319,9 @@ upsert_all(sqlite3 *conn, const MarkerStore *store, const char *now, GError **er
             set_sql_error(error, conn);
             ok = FALSE;
         } else {
+            if (sqlite3_changes(conn) == 0 && skipped) {
+                (*skipped)++;
+            }
             log_marker("  upsert id=%s ts=%lldms video=%d -> %d riga/e", m->id,
                        (long long)m->timestamp_ms, m->video_index, sqlite3_changes(conn));
         }
@@ -319,7 +340,8 @@ report_failure(const char *message, GError *local, GError **error)
 }
 
 static gboolean
-save_batch_impl(MarkerDb *db, const MarkerStore *store, GError **error)
+save_batch_impl(MarkerDb *db, const MarkerStore *store, gboolean ignore_conflicts,
+                size_t *skipped, GError **error)
 {
     sqlite3 *conn = connect_db(db, error);
     if (!conn) {
@@ -327,7 +349,7 @@ save_batch_impl(MarkerDb *db, const MarkerStore *store, GError **error)
     }
 
     char *now = marker_iso8601_now();
-    gboolean ok = exec_sql(conn, "BEGIN", error) && upsert_all(conn, store, now, error);
+    gboolean ok = exec_sql(conn, "BEGIN", error) && upsert_all(conn, store, now, ignore_conflicts, skipped, error);
 
     if (ok) {
         ok = exec_sql(conn, "COMMIT", error);
@@ -341,12 +363,14 @@ save_batch_impl(MarkerDb *db, const MarkerStore *store, GError **error)
     return ok;
 }
 
-gboolean
-marker_db_save_batch(MarkerDb *db, const MarkerStore *store, GError **error)
+/* Salvataggio batch con log; se ignore_conflicts scarta (e conta in *skipped) i duplicati UNIQUE. */
+static gboolean
+save_batch_logged(MarkerDb *db, const MarkerStore *store, gboolean ignore_conflicts,
+                  size_t *skipped, GError **error)
 {
     GError *local = NULL;
 
-    if (!save_batch_impl(db, store, &local)) {
+    if (!save_batch_impl(db, store, ignore_conflicts, skipped, &local)) {
         report_failure("Errore batch save marker", local, error);
         return FALSE;
     }
@@ -355,6 +379,12 @@ marker_db_save_batch(MarkerDb *db, const MarkerStore *store, GError **error)
     log_user_action("Batch save marker", details);
     g_free(details);
     return TRUE;
+}
+
+gboolean
+marker_db_save_batch(MarkerDb *db, const MarkerStore *store, GError **error)
+{
+    return save_batch_logged(db, store, FALSE, NULL, error);
 }
 
 static char *
@@ -541,7 +571,19 @@ json_get_int(JsonObject *obj, const char *name, const char *json_path, int64_t *
         return FALSE;
     }
 
-    *out = type == G_TYPE_INT64 ? json_node_get_int(node) : (int64_t)json_node_get_double(node);
+    if (type == G_TYPE_INT64) {
+        *out = json_node_get_int(node);
+    } else {
+        /* NaN / infinito / fuori da int64: la conversione sarebbe UB. 2^63 è esattamente
+         * rappresentabile come double, quindi il limite superiore è escluso. */
+        double d = json_node_get_double(node);
+
+        if (!(d >= -9223372036854775808.0 && d < 9223372036854775808.0)) {
+            set_json_error(error, json_path, "il campo '%s' è fuori range", name);
+            return FALSE;
+        }
+        *out = (int64_t)d;
+    }
     *present = TRUE;
     return TRUE;
 }
@@ -694,7 +736,17 @@ migrate_from_json_impl(MarkerDb *db, const char *json_path, int *migrated_count,
 
     /* Lista vuota: come l'originale (`if self._db and markers`) non salva e non crea backup. */
     if (count > 0) {
-        ok = marker_db_save_batch(db, store, error);
+        size_t skipped = 0;
+
+        ok = save_batch_logged(db, store, TRUE, &skipped, error);
+
+        if (ok && skipped > 0) {
+            /* Deviazione dall'originale (che falliva l'intera migrazione): duplicati scartati. */
+            char *details = g_strdup_printf("%zu marker duplicati ignorati su %zu", skipped, count);
+            log_user_action("Migrazione marker JSON: duplicati", details);
+            g_free(details);
+            count -= skipped;
+        }
 
         if (ok) {
             char *backup = legacy_backup_path(json_path);
