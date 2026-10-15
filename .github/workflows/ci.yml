@@ -29,7 +29,7 @@ jobs:
             gstreamer1.0-gtk4 \
             libsqlite3-dev libjson-glib-dev libglib2.0-dev libsoup-3.0-dev
       - name: meson setup
-        run: meson setup build
+        run: meson setup build -Dwerror=true
       - name: meson compile
         run: meson compile -C build
       - name: meson test
@@ -41,6 +41,40 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: meson-logs-linux
+          path: build/meson-logs
+
+  build-linux-sanitizers:
+    name: Linux (ASan + UBSan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            meson ninja-build xvfb libgl1-mesa-dri \
+            libgtk-4-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav \
+            gstreamer1.0-gtk4 \
+            libsqlite3-dev libjson-glib-dev libglib2.0-dev libsoup-3.0-dev
+      - name: meson setup
+        run: meson setup build -Db_sanitize=address,undefined -Db_lundef=false --buildtype=debug
+      - name: meson compile
+        run: meson compile -C build
+      - name: meson test
+        # LSAN_OPTIONS con tests/lsan.supp (driver GPU/Mesa/font di terze parti) è già impostato per ogni test in tests/meson.build.
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: xvfb-run -a meson test -C build --print-errorlogs
+      - name: Test saltati non previsti
+        run: python3 .github/scripts/check_skips.py build/meson-logs/testlog.json linux
+      - name: Log di Meson
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meson-logs-linux-sanitizers
           path: build/meson-logs
 
   build-macos:

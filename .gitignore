@@ -40,3 +40,7 @@ Thumbs.db
 
 # Meson build directory (M0.1)
 build/
+
+# Build alternative (sanitizer, werror) e cache degli strumenti
+build-*/
+.cache/
