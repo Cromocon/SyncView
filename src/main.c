@@ -24,6 +24,20 @@ on_terminate_signal(gpointer user_data)
 }
 #endif
 
+/* Solo l'istanza primaria emette «startup»: è lei sola a troncare il log (un secondo avvio si limita a inoltrare). */
+static void
+on_startup(GApplication *app, gpointer user_data)
+{
+    const char *log_file = user_data;
+    GError *error = NULL;
+
+    (void)app;
+    if (log_file && !logger_open_file(log_file, TRUE, &error)) {
+        log_error("Impossibile aprire il file di log", error);
+        g_clear_error(&error);
+    }
+}
+
 static void
 on_activate(GtkApplication *app, gpointer user_data)
 {
@@ -101,24 +115,32 @@ main(int argc, char *argv[])
 
     /* Prima di qualunque altra inizializzazione (GTK, futuro gst_init): in debug imposta GST_DEBUG. */
     char *log_file = logger_default_file();
-    GError *log_error_details = NULL;
 
-    if (!logger_init(log_file, cli_debug, &log_error_details)) {
-        /* L'app parte comunque: il logger resta attivo (stderr in debug). */
-        log_error("Impossibile aprire il file di log", log_error_details);
-        g_clear_error(&log_error_details);
-    }
-    g_free(log_file);
+    /*
+     * Il logger parte subito (stderr in debug, per non perdere i messaggi iniziali) ma senza file: lo svuotamento del file
+     * spetta all'istanza primaria (on_startup). --check-deps accoda, per non cancellare il log di un'istanza in esecuzione.
+     * Se il file non si apre l'app parte comunque (stderr in debug).
+     */
+    logger_init(NULL, cli_debug, NULL);
 
     if (check_deps) {
+        GError *open_error = NULL;
+
+        if (log_file && !logger_open_file(log_file, FALSE, &open_error)) {
+            log_error("Impossibile aprire il file di log", open_error);
+            g_clear_error(&open_error);
+        }
+
         int deps_status = run_check_deps();
 
         logger_shutdown();
+        g_free(log_file);
         return deps_status;
     }
 
     g_autoptr(GtkApplication) app =
         gtk_application_new("com.syncview.SyncView", G_APPLICATION_DEFAULT_FLAGS);
+    g_signal_connect(app, "startup", G_CALLBACK(on_startup), log_file);
     g_signal_connect(app, "activate", G_CALLBACK(on_activate), NULL);
 
     int status = g_application_run(G_APPLICATION(app), argc, argv);
@@ -153,5 +175,6 @@ main(int argc, char *argv[])
 
     log_user_action("Applicazione chiusa", NULL);
     logger_shutdown();
+    g_free(log_file);
     return status;
 }

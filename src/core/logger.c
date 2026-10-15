@@ -207,6 +207,47 @@ close_locked(void)
 }
 
 gboolean
+logger_open_file(const char *file_path, gboolean truncate, GError **error)
+{
+    g_return_val_if_fail(file_path != NULL, FALSE);
+
+    char *dir = g_path_get_dirname(file_path);
+    g_mkdir_with_parents(dir, 0755);
+    g_free(dir);
+
+    /*
+     * "wb" tronca, "ab" accoda: solo l'istanza primaria tronca (un secondo avvio o --check-deps non devono cancellare il
+     * log di chi sta girando). Binario per avere sempre "\n" (su Windows "w" scriverebbe "\r\n"); g_fopen per i percorsi
+     * UTF-8 su Windows.
+     */
+    FILE *f = g_fopen(file_path, truncate ? "wb" : "ab");
+
+    if (!f) {
+        g_set_error(error, G_FILE_ERROR, g_file_error_from_errno(errno), "Impossibile aprire il file di log %s: %s",
+                    file_path, g_strerror(errno));
+        return FALSE;
+    }
+
+    /* Intestazione di avvio, come _write_startup_header (scritta solo su file). */
+    char *ts = timestamp_now();
+
+    g_mutex_lock(&state_lock);
+    if (log_file) {
+        fclose(log_file);
+    }
+    log_file = f;
+    fprintf(log_file,
+            "\n======================================================================\n"
+            "  SYNCVIEW - AVVIO APPLICAZIONE\n"
+            "  Timestamp: %s\n"
+            "======================================================================\n",
+            ts);
+    g_mutex_unlock(&state_lock);
+    g_free(ts);
+    return TRUE;
+}
+
+gboolean
 logger_init(const char *file_path, gboolean cli_debug, GError **error)
 {
     gboolean ok = TRUE;
@@ -225,33 +266,10 @@ logger_init(const char *file_path, gboolean cli_debug, GError **error)
         g_setenv("GST_DEBUG", "3", FALSE);
     }
 
-    if (file_path) {
-        char *dir = g_path_get_dirname(file_path);
-        g_mkdir_with_parents(dir, 0755);
-        g_free(dir);
-
-        /* "wb": troncato ad ogni avvio; binario per avere sempre "\n" (su Windows "w" scriverebbe "\r\n"). */
-        log_file = fopen(file_path, "wb");
-        if (!log_file) {
-            g_set_error(error, G_FILE_ERROR, g_file_error_from_errno(errno),
-                        "Impossibile aprire il file di log %s: %s", file_path, g_strerror(errno));
-            ok = FALSE;
-        }
-    }
     g_mutex_unlock(&state_lock);
 
-    if (log_file) {
-        /* Intestazione di avvio, come _write_startup_header (scritta solo su file). */
-        char *ts = timestamp_now();
-        g_mutex_lock(&state_lock);
-        fprintf(log_file,
-                "\n======================================================================\n"
-                "  SYNCVIEW - AVVIO APPLICAZIONE\n"
-                "  Timestamp: %s\n"
-                "======================================================================\n",
-                ts);
-        g_mutex_unlock(&state_lock);
-        g_free(ts);
+    if (file_path && !logger_open_file(file_path, TRUE, error)) {
+        ok = FALSE;
     }
 
     emit(LEVEL_INFO, LOGGER_MODULE_APP, "Applicazione SyncView avviata");

@@ -239,6 +239,31 @@ test_truncates_file_on_open(const char *dir)
     g_free(path);
 }
 
+/* LOG-1: logger_init(NULL) non tocca il file; logger_open_file(.., FALSE) accoda; solo (.., TRUE) tronca. */
+static void
+test_open_file_append_does_not_truncate(const char *dir)
+{
+    char *path = g_build_filename(dir, "append.txt", NULL);
+    g_unsetenv("SYNCVIEW_DEBUG");
+
+    assert(logger_init(NULL, FALSE, NULL));
+    assert(logger_open_file(path, TRUE, NULL));  /* istanza primaria */
+    log_user_action("istanza-primaria", NULL);
+    logger_shutdown();
+
+    assert(logger_init(NULL, FALSE, NULL));  /* secondo avvio / --check-deps */
+    assert(logger_open_file(path, FALSE, NULL));
+    log_user_action("secondo-avvio", NULL);
+    logger_shutdown();
+
+    char *content = read_file(path);
+    assert(strstr(content, "istanza-primaria") != NULL);
+    assert(strstr(content, "secondo-avvio") != NULL);
+
+    g_free(content);
+    g_free(path);
+}
+
 static void
 test_gst_debug_propagation(void)
 {
@@ -332,6 +357,7 @@ main(void)
     test_env_values(dir);
     test_uninitialized_is_silent(dir);
     test_truncates_file_on_open(dir);
+    test_open_file_append_does_not_truncate(dir);
     test_gst_debug_propagation();
     test_is_debug_mode();
     test_unwritable_file(dir);

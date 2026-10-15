@@ -95,8 +95,8 @@ void logger_remove_sink(guint sink_id);
 char *logger_default_file(void);
 
 /*
- * Apre il logger. Il file viene troncato ad ogni apertura (come
- * FileHandler mode='w') e riceve l'intestazione di avvio. debug è TRUE se
+ * Apre il logger. Il file (se dato) viene troncato (come
+ * FileHandler mode='w'; vedi logger_open_file per accodare) e riceve l'intestazione di avvio. debug è TRUE se
  * `cli_debug` è TRUE (flag --debug/-v) oppure la variabile d'ambiente
  * SYNCVIEW_DEBUG è impostata a un valore diverso da "", "0", "false". In
  * debug, se GST_DEBUG non è già impostata viene impostata a "3", quindi
@@ -108,6 +108,13 @@ char *logger_default_file(void);
  * seconda chiamata senza logger_shutdown() chiude prima la precedente.
  */
 gboolean logger_init(const char *file_path, gboolean cli_debug, GError **error);
+
+/*
+ * Collega (o sostituisce) il file di log di un logger già inizializzato e vi scrive l'intestazione di avvio.
+ * truncate TRUE = lo svuota (istanza primaria), FALSE = accoda (--check-deps, secondo avvio).
+ * Se non si può aprire ritorna FALSE con error e lascia invariato il file corrente.
+ */
+gboolean logger_open_file(const char *file_path, gboolean truncate, GError **error);
 
 /* Chiude il file e torna allo stato "non inizializzato" (no-op). */
 void logger_shutdown(void);
