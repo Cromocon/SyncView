@@ -147,6 +147,7 @@ discoverer_nominal_fps_from_intervals(const int64_t *intervals_ns, size_t n)
 typedef struct {
     GMutex lock;
     GArray *timestamps;  /* GstClockTime: DTS (o PTS se manca) dei buffer video */
+    gboolean video_probed;  /* il probe è già su un pad video: gli altri stream non contano */
     GstElement *pipeline;
 } FpsProbe;
 
@@ -218,7 +219,14 @@ fps_pad_added(GstElement *parsebin, GstPad *pad, gpointer user_data)
     gst_element_sync_state_with_parent(sink);
 
     GstPad *sink_pad = gst_element_get_static_pad(sink, "sink");
-    if (is_video) {
+    /* Solo il primo stream video (come `-select_streams v:0`): più probe mescolerebbero i timestamp nello stesso array. */
+    g_mutex_lock(&probe->lock);
+    gboolean first_video = is_video && !probe->video_probed;
+    if (first_video) {
+        probe->video_probed = TRUE;
+    }
+    g_mutex_unlock(&probe->lock);
+    if (first_video) {
         gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_BUFFER, fps_buffer_probe, probe, NULL);
     }
     gst_pad_link(pad, sink_pad);

@@ -59,6 +59,9 @@ frame_index_find(const FrameIndex *index, gint64 t_ns)
 gint64
 frame_index_start(const FrameIndex *index, guint i)
 {
+    if (index->n == 0) {
+        return 0;  /* indice vuoto: niente pts[n - 1] con n == 0 */
+    }
     return index->pts[MIN(i, index->n - 1)];
 }
 
@@ -112,6 +115,7 @@ typedef struct {
     GArray *pts;  /* gint64: stream time dei buffer video */
     GstSegment segment;
     gboolean have_segment;
+    gboolean video_probed;  /* il probe è già su un pad video: gli altri non contano (stesso array) */
     GstElement *pipeline;
 } ScanProbe;
 
@@ -185,7 +189,14 @@ scan_pad_added(GstElement *parsebin, GstPad *pad, gpointer user_data)
     gst_element_sync_state_with_parent(sink);
 
     GstPad *sink_pad = gst_element_get_static_pad(sink, "sink");
-    if (is_video) {
+    /* Solo il primo stream video (come il discoverer): più probe sullo stesso array mescolerebbero i timestamp. */
+    g_mutex_lock(&probe->lock);
+    gboolean first_video = is_video && !probe->video_probed;
+    if (first_video) {
+        probe->video_probed = TRUE;
+    }
+    g_mutex_unlock(&probe->lock);
+    if (first_video) {
         gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_BUFFER | GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, scan_pad_probe, probe, NULL);
     }
     gst_pad_link(pad, sink_pad);
@@ -221,7 +232,7 @@ frame_index_scan(const char *path, const gint *cancelled)
     g_signal_connect(parsebin, "pad-added", G_CALLBACK(scan_pad_added), &probe);
 
     GstBus *bus = gst_element_get_bus(pipeline);
-    gboolean irregular = FALSE, decided = FALSE, finished = FALSE, aborted = FALSE;
+    gboolean irregular = FALSE, decided = FALSE, finished = FALSE, got_eos = FALSE, aborted = FALSE;
 
     if (gst_element_set_state(pipeline, GST_STATE_PLAYING) != GST_STATE_CHANGE_FAILURE) {
         gint64 deadline = g_get_monotonic_time() + (gint64)FRAME_INDEX_SCAN_TIMEOUT_S * G_USEC_PER_SEC;
@@ -230,6 +241,14 @@ frame_index_scan(const char *path, const gint *cancelled)
             GstMessage *msg = gst_bus_timed_pop_filtered(bus, 10 * GST_MSECOND, GST_MESSAGE_EOS | GST_MESSAGE_ERROR);
             if (msg) {
                 finished = TRUE;
+                if (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS) {
+                    got_eos = TRUE;
+                } else {
+                    GError *err = NULL;
+                    gst_message_parse_error(msg, &err, NULL);
+                    log_gst("frame index: errore leggendo %s: %s", path, err ? err->message : "?");
+                    g_clear_error(&err);
+                }
                 gst_message_unref(msg);
             }
             if (cancelled && g_atomic_int_get(cancelled)) {
@@ -252,13 +271,13 @@ frame_index_scan(const char *path, const gint *cancelled)
     gst_element_set_state(pipeline, GST_STATE_NULL);  /* dopo questo nessun probe è più in corso */
 
     FrameIndex *index = NULL;
-    if (irregular && !aborted && finished) {
+    if (irregular && !aborted && got_eos) {
         guint n = probe.pts->len;
         gint64 *copy = g_memdup2(probe.pts->data, n * sizeof(gint64));
         index = frame_index_new(copy, n);
         log_gst("frame index: %u frame letti da %s (framerate variabile)", index->n, path);
     } else if (irregular && !aborted) {
-        log_gst("frame index: lettura di %s incompleta (tempo scaduto o errore), nessun indice", path);
+        log_gst("frame index: lettura di %s incompleta (errore o tempo scaduto), nessun indice", path);
     }
 
     g_array_free(probe.pts, TRUE);
