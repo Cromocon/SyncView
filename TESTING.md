@@ -1,6 +1,6 @@
 # TESTING — SyncView-C
 
-Questo documento spiega come avviare il progetto e cosa testare manualmente allo stato attuale. Viene aggiornato ad ogni milestone con i nuovi elementi testabili — copre **M0 (Scaffolding)** completo, **M1 (Core logic)** completo (M1.1–M1.16) e **M2 (Finestra minima con 1 video)** fino a M2.3 incluso.
+Questo documento spiega come avviare il progetto e cosa testare manualmente allo stato attuale. Viene aggiornato ad ogni milestone con i nuovi elementi testabili — copre **M0 (Scaffolding)** completo, **M1 (Core logic)** completo (M1.1–M1.16) e **M2 (Finestra minima con 1 video)** completo nel codice (M2.1–M2.12).
 
 Per il contesto completo (architettura, milestone, rischi) vedi [PLAN.md](PLAN.md). Per le istruzioni di build sintetiche vedi anche [README.md](README.md#build).
 
@@ -12,10 +12,10 @@ Su Arch/CachyOS (sistema di sviluppo di riferimento):
 
 ```bash
 sudo pacman -S meson ninja gtk4 gstreamer gst-plugins-base gst-plugins-good \
-  gst-plugins-bad gst-libav gst-plugin-gtk4 sqlite json-glib
+  gst-plugins-bad gst-libav gst-plugin-gtk4 sqlite json-glib libsoup3
 ```
 
-Su altre distribuzioni Linux i nomi dei pacchetti di sviluppo cambiano leggermente (es. Debian/Ubuntu: `libgtk-4-dev`, `libgstreamer1.0-dev`, `libgstreamer-plugins-base1.0-dev`, `gstreamer1.0-plugins-good`, `gstreamer1.0-plugins-bad`, `libsqlite3-dev`, `libjson-glib-dev` — vedi `.github/workflows/ci.yml` per l'elenco esatto usato in CI).
+Su altre distribuzioni Linux i nomi dei pacchetti di sviluppo cambiano leggermente (es. Debian/Ubuntu: `libgtk-4-dev`, `libgstreamer1.0-dev`, `libgstreamer-plugins-base1.0-dev`, `gstreamer1.0-plugins-good`, `gstreamer1.0-plugins-bad`, `libsqlite3-dev`, `libjson-glib-dev`, `libsoup-3.0-dev` — vedi `.github/workflows/ci.yml` per l'elenco esatto usato in CI).
 
 ### 2. Build
 
@@ -39,9 +39,10 @@ meson test -C build                 # tutti i test
 meson test -C build -v discoverer   # un singolo test, con output
 ```
 
-- I test sono in `tests/` e linkano `libsyncview_core` (nessuna dipendenza da GTK, nessun display richiesto).
-- Un test può terminare con exit code **77** = *skip* (es. `discoverer` se mancano i plugin GStreamer per generare i file di prova): Meson lo riporta come `SKIP`, non come errore.
-- Passata con sanitizer (consigliata prima di chiudere una milestone): vedi **M1.16** più sotto.
+- I test sono in `tests/`. Quelli dei moduli `core/` e `util/` linkano solo `libsyncview_core` (nessuna dipendenza da GTK, nessun display richiesto); `video_player`, `main_window`, `debug_windows` e `deps_dialog` aprono finestre GTK e richiedono un display e `gtk4paintablesink`.
+- Per non aprire finestre sul desktop in uso: `tools/on-virtual.sh meson test -C build` (KWin Wayland virtuale e isolato, serve `kwin_wayland`) oppure `tools/on-desktop9.sh meson test -C build` (aiuto personale, solo KDE Plasma: sposta le finestre sul «Desktop 9»; vedi più sotto).
+- Un test può terminare con exit code **77** = *skip* (es. `discoverer` se mancano i plugin GStreamer per generare i file di prova): Meson lo riporta come `SKIP`, non come errore. In CI però uno skip imprevisto fa fallire il job: `.github/scripts/check_skips.py` legge `meson-logs/testlog.json` e accetta solo gli skip della sua lista di permessi (`ALLOWED_SKIPS`, ognuno con il motivo): `real_clips` ovunque (serve `SYNCVIEW_TEST_CLIPS`), `main_window` su macOS, `deps_dialog` su Windows, nessuno su Linux. Aggiungere un test che salta di proposito richiede di aggiungerlo lì.
+- Passata con sanitizer (consigliata prima di chiudere una milestone): vedi **M1.16** più sotto. La CI ne esegue una a ogni push (job «Linux (ASan + UBSan)», `-Db_sanitize=address,undefined`, sotto `xvfb`); il job Linux normale compila con `-Dwerror=true`.
 - In CI `meson test` gira con `--print-errorlogs`: se un test fallisce, nel log del job compare il suo output (asserzioni comprese). Senza, su Windows un `assert` fallito appare solo come `exit status 3221226505 or 0xc0000409`. In locale l'equivalente è `meson test -C build -v <nome>` oppure `./build/tests/<eseguibile>`.
 
 ### 5. Reconfigure (dopo modifiche a `meson.build`)
@@ -201,6 +202,7 @@ ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:abort_on_error=1 meson test -C build
 - [ ] 19/19 **OK**, zero errori ASan e **zero leak** nel codice SyncView (LeakSanitizer; per `discoverer` con le soppressioni di terze parti in `tests/lsan.supp`).
 - [ ] Stessa passata con `-Db_sanitize=address,undefined` → 19/19 OK, zero `runtime error` UBSan.
 - Prima di fidarsi di "zero leak" verificare che LeakSanitizer sia attivo nell'ambiente (alcuni sandbox/container lo disabilitano in silenzio): un programma di prova che perde 123 byte deve produrre `SUMMARY: AddressSanitizer: 123 byte(s) leaked`.
+- La CI esegue la stessa passata con ASan+UBSan (job dedicato, vedi sopra): in locale resta utile prima di un commit, ma non è più l'unico controllo.
 - ThreadSanitizer **non** è un criterio affidabile con `libglib` di sistema (non instrumentata: falsi positivi sui `GMutex`).
 
 ---
@@ -225,7 +227,7 @@ ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:abort_on_error=1 meson test -C build
 - [ ] Copre: tipo GObject `SyncviewVideoPlayer` registrato e finale; proprietà `video-index` e `paintable` coerenti con i getter; la pipeline è un `playbin3` con `gtk4paintablesink` come `video-sink`, il cui `paintable` è proprio quello esposto, **ferma in `GST_STATE_NULL`**; il paintable si assegna a un `GtkPicture` e, senza video, non ha dimensioni intrinseche (0×0: nessun frame) e il widget si misura senza crash, anche dopo aver distrutto il player; indici non validi (−1, 4, 100…) → errore `INDEX`, tutti gli indici 0..3 validi; 4 player con pipeline, paintable e nomi di elemento distinti; 25 cicli crea/distruggi; **pipeline, sink e paintable vengono finalizzati** alla distruzione del player (riferimenti deboli); elemento mancante → errore `MISSING_ELEMENT` che nomina `gtk4paintablesink` (simulato rimuovendo la factory dal registry, poi ripristinata). I `CRITICAL` di GLib/GTK sono fatali.
 - [ ] Manuale (facoltativo): nessuna finestra nuova in M2.3 — il player non è ancora collegato alla UI (M2.8). Il primo frame visibile arriva con M2.4.
 - **Perché il controllo con riferimenti deboli**: una prova di mutazione (rimuovere il rilascio di `video_sink`/`paintable` in `dispose`) **non** veniva rilevata da LeakSanitizer, perché gli oggetti restano raggiungibili dal main context di GLib; i riferimenti deboli la rilevano.
-- **Limite della CI**: il runner Linux non ha display e nessuna CI installa ancora `gtk4paintablesink`, quindi in CI questo test è *skip*: la CI verifica solo che il codice compili e linki sulle tre piattaforme. Il test vero va eseguito in locale (vedi "Cosa NON è ancora testabile").
+- **CI**: il job Linux gira sotto `xvfb` con `gstreamer1.0-gtk4` installato, quindi questo test gira davvero (non è più *skip*); `check_skips.py` fa fallire il job se salta. Su macOS e Windows vale la lista di permessi di `check_skips.py`.
 - `tests/lsan.supp` ora sopprime anche le perdite dei driver OpenGL/EGL (Mesa) inizializzati da GTK all'apertura del display (nessun frame di codice SyncView).
 
 ### M2.4 — `load()`, bus GStreamer e primo frame
@@ -338,7 +340,7 @@ Uso: `SYNCVIEW_TEST_CLIPS=~/Downloads/Videos tools/on-desktop9.sh meson test -C 
 - [ ] **Chiusura**: finestra chiusa a metà caricamento e in riproduzione (6 volte) → nessuno smontaggio rimasto in sospeso; ASan/UBSan 16/16 (nuove soppressioni di terze parti: cache dei font fontconfig/pango).
 - [ ] **Uscita ordinata dell'app** (manuale, o `kill -TERM` / `kill -INT` all'app in esecuzione): termina in meno di un secondo, il log riporta «Finestra principale chiusa» e «Applicazione chiusa», nessun processo `syncview` residuo.
 - [ ] **Prova visiva** (manuale): con `SYNCVIEW_THEME=light` e `=dark` la finestra mostra barra del titolo, riquadro video con chip «● A · FEED-1», fps e tempo, tempo grande, barra, pulsanti e barra delle scorciatoie come nei mockup della direzione 1b.
-- **Prove su macOS e Windows reali**: elencate in [docs/TEST_MACOS.md](docs/TEST_MACOS.md) e [docs/TEST_WINDOWS.md](docs/TEST_WINDOWS.md) (file vivi, da consegnare a fine M2). Copertura della CI: Linux salta tutti i test con finestra (nessun display); macOS esegue `video_player` e `debug_windows` e salta `main_window`; Windows esegue `debug_windows` ma salta `video_player` e `main_window` perché nella CI manca `gst-plugins-rs` (`gtk4paintablesink`).
+- **Prove su macOS e Windows reali**: elencate in [docs/TEST_MACOS.md](docs/TEST_MACOS.md) e [docs/TEST_WINDOWS.md](docs/TEST_WINDOWS.md) (file vivi, da consegnare a fine M2). Copertura della CI: Linux esegue tutti i test con finestra (xvfb + `gstreamer1.0-gtk4`); macOS salta solo `main_window`; Windows (con `gst-plugins-rs`) salta solo `deps_dialog`; `real_clips` salta ovunque. Ogni altro skip fa fallire il job (`check_skips.py`).
 - **macOS in CI**: il test `main_window` è saltato (`SKIP`) perché sul runner il caricamento col video nella finestra non termina: problema aperto, da provare su un Mac reale (vedi PLAN.md, M2.8).
 - **Desktop 9** (solo sviluppo su KDE/Wayland): uno script KWin temporaneo sposta sul «Desktop 9» le finestre dei test e di `syncview`; su un desktop non attivo il compositor non invia frame callback, quindi le verifiche sul frame clock si saltano da sole.
 
@@ -393,7 +395,7 @@ Uso: `SYNCVIEW_TEST_CLIPS=~/Downloads/Videos tools/on-desktop9.sh meson test -C 
 ```
 meson test -C build
 ```
-deve riportare **22/22** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`, `discoverer`, `video_player`, `deps_check`, `design_tokens`, `main_window`, `debug_windows`, `dep_archive`, `dep_installer`, `real_clips`, `deps_state`, `deps_dialog`); `real_clips` è `SKIP` senza `SYNCVIEW_TEST_CLIPS`; in un ambiente senza display o senza `gtk4paintablesink` `video_player` e `main_window` risultano `SKIP` (e `debug_windows` senza display) (e `discoverer` se mancano i plugin di prova): è normale.
+deve riportare **23/23** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`, `discoverer`, `frame_index`, `video_player`, `deps_check`, `design_tokens`, `main_window`, `debug_windows`, `dep_archive`, `dep_installer`, `real_clips`, `deps_state`, `deps_dialog`); `real_clips` è `SKIP` senza `SYNCVIEW_TEST_CLIPS`; in un ambiente senza display o senza `gtk4paintablesink` `video_player` e `main_window` risultano `SKIP` (e `debug_windows` senza display) (e `discoverer` se mancano i plugin di prova): è normale.
 
 ---
 
@@ -404,7 +406,6 @@ deve riportare **22/22** allo stato attuale (`dummy`, `time_format`, `settings`,
 - **Download/installazione delle dipendenze e dialog del primo avvio**: M2.11–M2.12. La sola *verifica* (M2.10) c'è: `syncview --check-deps`.
 - **Export**: M6.
 - **Sync e marker con video reali**: la logica è testata (`sync_manager`, `MarkerStore`, `marker_db`) ma non è ancora collegata a nessun player o widget (M3/M4).
-- **`video_player` in CI**: il test viene saltato (nessun display sul runner Linux, nessun `gtk4paintablesink` installato in nessuna delle tre CI). Per verificarlo anche in CI servirebbero i pacchetti del plugin (gst-plugins-rs) su ogni piattaforma e, su Linux, un display virtuale (`xvfb`): da decidere.
 - **Esecuzione su macOS e Windows in locale**: solo via CI (`gh run list --branch SyncView-C`). Il primo push di M2.2 è passato su Linux e macOS ma è fallito su Windows per un difetto del *test* (percorsi con backslash in `gst_parse_launch`, vedi M2.2), non del modulo; il fix è committato e va confermato da un nuovo run.
 
 Questo file viene esteso con una nuova sezione ad ogni milestone completata.

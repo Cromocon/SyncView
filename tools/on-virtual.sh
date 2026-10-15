@@ -4,9 +4,10 @@
 # Se il compositor non parte, il comando non viene eseguito (mai ripiego sulla sessione reale).
 sock=syncview-virt-$$
 rt=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
-kwin_wayland --virtual --no-lockscreen --no-global-shortcuts --socket $sock --width 1280 --height 800 >/tmp/$sock.log 2>&1 &
+log=$(mktemp "${TMPDIR:-/tmp}/$sock.XXXXXX.log") || exit 1
+kwin_wayland --virtual --no-lockscreen --no-global-shortcuts --socket $sock --width 1280 --height 800 >$log 2>&1 &
 kpid=$!
-trap 'kill $kpid 2>/dev/null; rm -f $rt/$sock $rt/$sock.lock /tmp/$sock.log' EXIT
+trap 'kill $kpid 2>/dev/null; rm -f $rt/$sock $rt/$sock.lock $log' EXIT
 for i in {1..50}; do [[ -S $rt/$sock ]] && break; sleep 0.1; done
-[[ -S $rt/$sock ]] || { echo "on-virtual: KWin virtuale non partito" >&2; cat /tmp/$sock.log >&2; exit 1; }
+[[ -S $rt/$sock ]] || { echo "on-virtual: KWin virtuale non partito" >&2; cat $log >&2; exit 1; }
 WAYLAND_DISPLAY=$sock GDK_BACKEND=wayland DISPLAY= "$@"

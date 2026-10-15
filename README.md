@@ -26,7 +26,7 @@ Questo squilibrio (il target più importante è il meno testabile in locale) è 
 ## Stack tecnico
 
 - **Linguaggio**: C11
-- **UI**: GTK4 (>= 4.10)
+- **UI**: GTK4 (>= 4.12)
 - **Playback video**: pipeline GStreamer manuale (`playbin3` + `gtk4paintablesink` su un `GtkPicture`) — non `GtkVideo`/`GtkMediaFile`, che non supportano il controllo del playback rate necessario per la compensazione FPS
 - **Metadati video**: `GstDiscoverer` (`gstreamer-pbutils-1.0`), in-process, non più `ffprobe` come nella prima stesura del piano
 - **Markers**: SQLite (schema portato 1:1 dall'originale)
@@ -43,7 +43,7 @@ Prerequisiti (pacchetti di sviluppo, nomi validi su distro Arch-based; su altre 
 ```bash
 # Arch/CachyOS
 sudo pacman -S meson ninja gtk4 gstreamer gst-plugins-base gst-plugins-good \
-  gst-plugins-ugly gst-plugins-bad gst-libav gst-plugin-gtk4 sqlite json-glib
+  gst-plugins-ugly gst-plugins-bad gst-libav gst-plugin-gtk4 sqlite json-glib libsoup3
 ```
 
 Build ed esecuzione:
@@ -59,6 +59,8 @@ Test:
 ```bash
 meson test -C build
 ```
+
+Le librerie `core/` e `util/` non dipendono da GTK; i test di `video_player`, `main_window`, `debug_windows` e `deps_dialog` invece aprono finestre GTK e richiedono un display (e il plugin `gtk4paintablesink`): senza, escono con 77 e Meson li riporta come `SKIP`. In CI girano sotto `xvfb`. In locale sul desktop aprirebbero finestre: puoi eseguirli con `tools/on-virtual.sh meson test -C build` (KWin Wayland virtuale, richiede `kwin_wayland`) oppure con `tools/on-desktop9.sh meson test -C build` (aiuto personale solo per KDE Plasma, sposta le finestre sul «Desktop 9»).
 
 Modalità debug (log verboso anche su terminale, vedi [PLAN.md](PLAN.md#modalità-debug-fin-dallinizio-non-rimandata-a-fine-progetto) — disponibile a partire da M1.14):
 
@@ -77,16 +79,19 @@ Verifica delle dipendenze runtime (plugin GStreamer per la riproduzione, ffmpeg 
 ```
 meson.build
 src/
-  main.c, app.c/.h
-  core/      # sync_manager, markers, marker_db, settings, user_paths, logger, discoverer, export_queue, export_worker
-  video/     # video_player (GObject, pipeline playbin3+gtk4paintablesink), zoom_pan
-  ui/        # main_window, video_grid, timeline_widget, sidebar, titlebar, dialoghi, style.css, keymap
+  main.c
+  core/      # sync_manager, markers, marker_db, settings, user_paths, logger, discoverer, frame_index,
+             # deps_check, deps_state, dep_manifest, dep_archive, dep_installer
+  video/     # video_player (GObject, pipeline playbin3+gtk4paintablesink)
+  ui/        # theme, main_window, debug_log_window, debug_modules_window, debug_windows, deps_dialog
   util/      # time_format
-tests/       # unit test dei moduli core, senza dipendenza da GTK
-docs/        # ARCHITECTURE.md, MIGRATION_NOTES.md
+tests/       # un test per modulo (più controlli statici in Python); quelli di core/ e util/ senza GTK
+design/      # tokens.json (fonte dei token), tokens_tool.py, CSS generati
+tools/       # script di sviluppo (esecuzione dei test con finestre fuori dal desktop attivo)
+docs/        # ARCHITECTURE.md, MIGRATION_NOTES.md, TEST_WINDOWS.md, TEST_MACOS.md
 ```
 
-La struttura viene popolata incrementalmente milestone per milestone (vedi [PLAN.md](PLAN.md#milestone-granulari)); alcuni moduli elencati sopra non esistono ancora.
+La struttura viene popolata incrementalmente milestone per milestone (vedi [PLAN.md](PLAN.md#milestone-granulari)); i moduli previsti nelle milestone successive (export, griglia 2x2, timeline, zoom/pan, ecc.) non esistono ancora.
 
 ## Come contribuire
 
@@ -97,11 +102,12 @@ La struttura viene popolata incrementalmente milestone per milestone (vedi [PLAN
 
 ## Dipendenze runtime (a build completata)
 
-- `gtk4` >= 4.10
+- `gtk4` >= 4.12
 - `gstreamer-1.0` + plugin **base + good + bad + libav** (i decoder H.264/HEVC e quelli hardware per piattaforma sono in `-bad`/`-libav`, non basta base+good — vedi [PLAN.md](PLAN.md#rischi-e-gap-noti))
 - pacchetto `gst-plugin-gtk4` per `gtk4paintablesink` (necessario per il rendering video)
 - `sqlite3`
 - `glib-2.0`/`gio-2.0`, `json-glib-1.0`
+- `libsoup-3.0` (download degli artefatti di dipendenza, `core/dep_installer`)
 - `ffmpeg` (binario esterno, solo per l'export — non più per il probing metadati)
 
 Istruzioni di packaging per piattaforma (macOS `.app` bundle, Windows DLL bundling) verranno aggiunte in M8 (vedi [PLAN.md](PLAN.md)).
