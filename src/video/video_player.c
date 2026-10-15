@@ -318,6 +318,8 @@ syncview_video_player_get_frame_index(SyncviewVideoPlayer *self, guint *n_frames
 
 static gint pending_teardowns = 0;  /* smontaggi rimandati in corso, accesso atomico */
 static gint abandoned_teardowns = 0;  /* smontaggi abbandonati perché la pipeline non si assestava, accesso atomico */
+static gboolean force_abandon = FALSE;  /* solo test: ogni smontaggio rimandato viene abbandonato al primo controllo */
+static GPtrArray *abandoned_pipelines = NULL;  /* pipeline bloccate lasciate di proposito, solo thread principale */
 
 guint
 syncview_video_player_pending_teardowns(void)
@@ -331,13 +333,33 @@ syncview_video_player_abandoned_teardowns(void)
     return (guint)g_atomic_int_get(&abandoned_teardowns);
 }
 
-typedef void (*TeardownDone)(gpointer data);
+void
+syncview_video_player_test_force_abandon(gboolean enable)
+{
+    force_abandon = enable;
+}
+
+void
+syncview_video_player_test_release_abandoned(void)
+{
+    while (abandoned_pipelines && abandoned_pipelines->len > 0) {
+        GstElement *pipeline = g_ptr_array_steal_index(abandoned_pipelines, abandoned_pipelines->len - 1);
+
+        /* Solo nei test, dove la pipeline "bloccata" è in realtà sana. */
+        gst_element_set_state(pipeline, GST_STATE_NULL);
+        gst_object_unref(pipeline);
+    }
+}
+
+/* `abandoned`: la pipeline non si è assestata, NON è a NULL e non va più usata (vedi poll_until_settled). */
+typedef void (*TeardownDone)(gpointer data, gboolean abandoned);
 
 typedef struct {
     GstElement *pipeline;   /* riferimento proprio */
     TeardownDone done;
     gpointer data;
     gint64 deadline_us;
+    gboolean force_stuck;   /* solo test */
 } DeferredTeardown;
 
 /* Scrive nel log gli elementi della pipeline che hanno ancora un cambio di stato in corso (diagnosi dei blocchi). */
@@ -380,10 +402,10 @@ poll_until_settled(gpointer user_data)
     GstState current, pending;
     GstStateChangeReturn ret = gst_element_get_state(t->pipeline, &current, &pending, 0);
 
-    if (ret == GST_STATE_CHANGE_ASYNC && g_get_monotonic_time() < t->deadline_us) {
+    if (ret == GST_STATE_CHANGE_ASYNC && !t->force_stuck && g_get_monotonic_time() < t->deadline_us) {
         return G_SOURCE_CONTINUE;  /* ancora in transizione: il main loop continua a girare */
     }
-    gboolean stuck = (ret == GST_STATE_CHANGE_ASYNC);
+    gboolean stuck = (ret == GST_STATE_CHANGE_ASYNC) || t->force_stuck;
 
     if (stuck) {
         g_atomic_int_inc(&abandoned_teardowns);
@@ -393,12 +415,20 @@ poll_until_settled(gpointer user_data)
         gst_element_set_state(t->pipeline, GST_STATE_NULL);
     }
     g_atomic_int_dec_and_test(&pending_teardowns);
-    t->done(t->data);
     /*
      * Una pipeline bloccata si lascia dov'è (il riferimento resta, di proposito): set_state(NULL) sul thread principale
      * si bloccherebbe per sempre (visto su Windows: gtk4paintablesink, in un thread di playsink, aspetta qualcosa che il
      * thread principale, fermo nella chiamata, non può dare). Meglio una pipeline persa che un'app congelata.
+     * Il riferimento va in un elenco (raggiungibile: non una perdita per LeakSanitizer) PRIMA di done(), che può
+     * rilasciare i riferimenti del chiamante senza mai finalizzare la pipeline.
      */
+    if (stuck) {
+        if (!abandoned_pipelines) {
+            abandoned_pipelines = g_ptr_array_new();
+        }
+        g_ptr_array_add(abandoned_pipelines, t->pipeline);
+    }
+    t->done(t->data, stuck);
     if (!stuck) {
         gst_object_unref(t->pipeline);
     }
@@ -417,7 +447,7 @@ teardown_pipeline(GstElement *pipeline, TeardownDone done, gpointer data)
 
     if (gst_element_get_state(pipeline, &current, &pending, 0) != GST_STATE_CHANGE_ASYNC) {
         gst_element_set_state(pipeline, GST_STATE_NULL);
-        done(data);
+        done(data, FALSE);
         return;
     }
 
@@ -429,6 +459,7 @@ teardown_pipeline(GstElement *pipeline, TeardownDone done, gpointer data)
     t->done = done;
     t->data = data;
     t->deadline_us = g_get_monotonic_time() + TEARDOWN_SETTLE_TIMEOUT_US;
+    t->force_stuck = force_abandon;
     g_atomic_int_inc(&pending_teardowns);
     g_timeout_add(TEARDOWN_POLL_INTERVAL_MS, poll_until_settled, t);
 }
@@ -441,8 +472,9 @@ typedef struct {
 } DisposedPipeline;
 
 static void
-on_disposed_pipeline_stopped(gpointer user_data)
+on_disposed_pipeline_stopped(gpointer user_data, gboolean abandoned)
 {
+    (void)abandoned;  /* abbandonata: il riferimento in più lo tiene l'elenco, qui si rilascia solo il proprio */
     DisposedPipeline *d = user_data;
 
     g_clear_object(&d->paintable);
@@ -1035,8 +1067,6 @@ state_name(GstState state)
     return gst_element_state_get_name(state);
 }
 
-static gboolean pipeline_is_null(SyncviewVideoPlayer *self);
-
 /* Avvia (se non è già in corso) lo smontaggio della pipeline di questo player. */
 static void begin_teardown(SyncviewVideoPlayer *self);
 
@@ -1215,15 +1245,6 @@ on_bus_message(GstBus *bus, GstMessage *message, gpointer user_data)
     return G_SOURCE_CONTINUE;
 }
 
-static gboolean
-pipeline_is_null(SyncviewVideoPlayer *self)
-{
-    GstState current, pending;
-
-    gst_element_get_state(self->pipeline, &current, &pending, 0);
-    return current == GST_STATE_NULL && pending == GST_STATE_VOID_PENDING;
-}
-
 /* Imposta l'URI in attesa e porta la pipeline (che deve essere in NULL) in PAUSED. */
 static gboolean
 start_pending_load(SyncviewVideoPlayer *self, GError **error)
@@ -1255,9 +1276,35 @@ start_pending_load(SyncviewVideoPlayer *self, GError **error)
     return TRUE;
 }
 
+/*
+ * Lo smontaggio è stato abbandonato: la pipeline è ancora in transizione (non è a NULL) e un nuovo uri + PAUSED non
+ * porterebbe mai a un ASYNC_DONE, mentre un ASYNC_DONE tardivo del vecchio video sembrerebbe quello del nuovo (e ogni
+ * load() successivo aspetterebbe altri 10 s). Si stacca quindi: niente più bus watch, i riferimenti del player vengono
+ * rilasciati (la pipeline resta viva nell'elenco di poll_until_settled: non la si finalizza, finalizzare porta a NULL e
+ * può bloccare) e se ne costruisce una nuova. Il paintable cambia: chi lo mostra deve riassegnarlo (notify::paintable).
+ */
+static gboolean
+replace_stuck_pipeline(SyncviewVideoPlayer *self, GError **error)
+{
+    log_gst("player %d: pipeline bloccata staccata, ne viene creata una nuova", self->video_index + 1);
+
+    if (self->bus_watch_id) {
+        g_source_remove(self->bus_watch_id);
+        self->bus_watch_id = 0;
+    }
+    g_clear_pointer(&self->frame_info, frame_info_unref);  /* il probe del vecchio sink ha un riferimento suo */
+    g_clear_object(&self->paintable);
+    g_clear_pointer(&self->video_sink, gst_object_unref);
+    g_clear_pointer(&self->pipeline, gst_object_unref);
+
+    gboolean ok = setup_pipeline(self, error);
+    g_object_notify_by_pspec(G_OBJECT(self), properties[PROP_PAINTABLE]);
+    return ok;
+}
+
 /* Smontaggio concluso: se nel frattempo c'era un load() in attesa, parte adesso. `data` è un GWeakRef* al player. */
 static void
-on_reset_done(gpointer data)
+on_reset_done(gpointer data, gboolean abandoned)
 {
     GWeakRef *weak = data;
     SyncviewVideoPlayer *self = g_weak_ref_get(weak);
@@ -1269,9 +1316,12 @@ on_reset_done(gpointer data)
     }
 
     self->teardown_running = FALSE;
-    if (self->pending_uri) {
-        GError *error = NULL;
 
+    GError *error = NULL;
+    if (abandoned && !replace_stuck_pipeline(self, &error)) {
+        report_failure(self, error->message);
+        g_error_free(error);
+    } else if (self->pending_uri) {
         if (!start_pending_load(self, &error)) {
             report_failure(self, error->message);
             g_error_free(error);
@@ -1283,7 +1333,7 @@ on_reset_done(gpointer data)
 static void
 begin_teardown(SyncviewVideoPlayer *self)
 {
-    if (self->teardown_running) {
+    if (self->teardown_running || !self->pipeline) {
         return;
     }
 
@@ -1329,18 +1379,23 @@ syncview_video_player_load(SyncviewVideoPlayer *self, const char *path, GError *
     self->path = g_strdup(path);
     self->pending_uri = uri;
 
-    if (!self->teardown_running && pipeline_is_null(self)) {
-        /* Pipeline mai avviata o già ferma: si parte subito. */
-        if (!start_pending_load(self, error)) {
-            g_clear_pointer(&self->path, g_free);
-            return FALSE;
+    if (!self->teardown_running) {
+        GstState current, pending;
+
+        if (gst_element_get_state(self->pipeline, &current, &pending, 0) != GST_STATE_CHANGE_ASYNC) {
+            /* Pipeline mai avviata o assestata: a NULL e si parte subito. Un errore qui è dato al chiamante (FALSE, senza segnali). */
+            gst_element_set_state(self->pipeline, GST_STATE_NULL);
+            if (!start_pending_load(self, error)) {
+                g_clear_pointer(&self->path, g_free);
+                return FALSE;
+            }
+            return TRUE;
         }
-        return TRUE;
     }
 
     /*
-     * Pipeline in uso: va portata a NULL. Se è assestata succede subito e il nuovo video parte subito; se sta ancora
-     * salendo a PAUSED si aspetta (senza bloccare il main loop) e il nuovo video parte da on_reset_done().
+     * Pipeline che sta ancora salendo a PAUSED (o smontaggio già in corso): si aspetta che si assesti (senza bloccare il
+     * main loop) e il nuovo video parte da on_reset_done().
      * GstPipeline ha `auto-flush-bus`: scendendo a NULL il bus viene svuotato, quindi i messaggi del caricamento
      * vecchio sono scartati.
      */
@@ -1575,6 +1630,9 @@ syncview_video_player_get_frame_rate(SyncviewVideoPlayer *self)
     g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), 0.0);
 
     double fps = 0.0;
+    if (!self->frame_info) {
+        return fps;  /* dispose() l'ha già rilasciato */
+    }
     g_mutex_lock(&self->frame_info->lock);
     if (self->frame_info->fps_n > 0) {
         fps = (double)self->frame_info->fps_n / self->frame_info->fps_d;
@@ -1588,6 +1646,9 @@ syncview_video_player_get_frame_end_ns(SyncviewVideoPlayer *self)
 {
     g_return_val_if_fail(SYNCVIEW_IS_VIDEO_PLAYER(self), -1);
 
+    if (!self->frame_info) {
+        return -1;
+    }
     g_mutex_lock(&self->frame_info->lock);
     gint64 end = self->frame_info->end_ns >= 0 ? self->frame_info->end_ns : self->frame_info->pts_ns;
     gint64 pts = self->frame_info->pts_ns;

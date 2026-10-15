@@ -134,8 +134,9 @@ SyncviewPlaybackState syncview_video_player_get_playback_state(SyncviewVideoPlay
  *  step_ms(delta): come l'originale: pausa se in PLAYING, poi seek relativo alla posizione corrente (limitato a 0..durata).
  *                  È il comportamento dei preset 40/33/100/200 ms e quello usato in modalità sync (M3.9).
  *  step_frames(n): frame-step ESATTO (O1): n > 0 avanza di n frame con GST_EVENT_STEP, n < 0 indietreggia con un seek
- *                  accurato di n frame interi, calcolati dal framerate reale del video. Se il framerate è sconosciuto o
- *                  variabile ricade su step_ms(n * SYNCVIEW_DEFAULT_FRAME_STEP_MS). Più passi ravvicinati si sommano
+ *                  accurato di n frame interi, calcolati dal framerate reale del video. Con framerate variabile i
+ *                  frame vengono dall'indice dei timestamp (frame_index), letto in un thread dopo il load: finché non è
+ *                  pronto, e se il framerate è sconosciuto, ricade su step_ms(n * SYNCVIEW_DEFAULT_FRAME_STEP_MS). Più passi ravvicinati si sommano
  *                  correttamente anche se i seek precedenti non sono ancora conclusi.
  *  set_playback_rate(r): velocità di riproduzione, r > 0 (INVALID_ARGUMENT altrimenti); 1.0 dopo ogni load(). In PLAYING
  *                  è un seek accurato alla posizione corrente (in PLAYING si nota un breve attimo).
@@ -221,6 +222,15 @@ guint syncview_video_player_pending_teardowns(void);
 
 /* Numero di pipeline lasciate dov'erano perché non si sono assestate entro 10 s (stallo del sink): normalmente 0. */
 guint syncview_video_player_abandoned_teardowns(void);
+
+/*
+ * Quando uno smontaggio è abbandonato nel corso di un load(), la pipeline bloccata viene staccata (resta viva, mai portata
+ * a NULL) e il player ne costruisce una nuova, poi prosegue col load() in attesa: il paintable CAMBIA (notify::paintable),
+ * chi lo mostra deve riassegnarlo. Solo per i test: force_abandon(TRUE) fa abbandonare al primo controllo ogni smontaggio
+ * rimandato da quel momento; release_abandoned() porta a NULL e rilascia le pipeline abbandonate (in un test sono sane).
+ */
+void syncview_video_player_test_force_abandon(gboolean enable);
+void syncview_video_player_test_release_abandoned(void);
 
 /*
  * Video a framerate variabile: dopo il caricamento un thread di lavoro legge i timestamp di tutti i frame (nessuna

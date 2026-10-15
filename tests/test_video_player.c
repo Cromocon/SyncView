@@ -715,6 +715,60 @@ test_dispose_while_loading(const char *dir)
     g_free(path);
 }
 
+static void
+on_paintable_notify(GObject *object, GParamSpec *pspec, gpointer data)
+{
+    (void)object;
+    (void)pspec;
+    (*(int *)data)++;
+}
+
+static void
+test_abandoned_teardown_builds_new_pipeline(const char *dir)
+{
+    /*
+     * Smontaggio abbandonato (forzato dal test: la pipeline in realtà è sana): la pipeline staccata non deve più
+     * toccare il player, ne nasce una nuova e il load() in attesa si completa UNA volta, per il file nuovo.
+     */
+    char *small = make_video(dir, "ab-small.webm", 320, 240, 25);
+    char *big = make_video(dir, "ab-big.webm", 640, 360, 25);
+    SyncviewVideoPlayer *player = syncview_video_player_new(1, NULL);
+    Events ev;
+    events_connect(player, &ev);
+    int notified = 0;
+    g_signal_connect(player, "notify::paintable", G_CALLBACK(on_paintable_notify), &notified);
+
+    GstElement *old_pipeline = syncview_video_player_get_pipeline(player);
+    guint abandoned_before = syncview_video_player_abandoned_teardowns();
+
+    assert(syncview_video_player_load(player, small, NULL));      /* ancora in PAUSED asincrono */
+    syncview_video_player_test_force_abandon(TRUE);
+    assert(syncview_video_player_load(player, big, NULL));         /* smontaggio rimandato */
+    syncview_video_player_test_force_abandon(FALSE);
+    assert(syncview_video_player_pending_teardowns() == 1);
+
+    assert(spin_until(&ev.got_loaded, 15000));
+    spin_for(300);
+    assert(syncview_video_player_abandoned_teardowns() == abandoned_before + 1);
+    assert(syncview_video_player_get_pipeline(player) != old_pipeline);
+    assert(notified == 1);
+    assert(ev.loaded_true == 1 && ev.errors == 0);
+    assert(syncview_video_player_is_loaded(player));
+    assert(wait_for_frame(player, 640, 360));
+
+    /* Il player è di nuovo normale: un load() successivo non aspetta nulla e funziona. */
+    ev.got_loaded = FALSE;
+    assert(syncview_video_player_load(player, small, NULL));
+    assert(spin_until(&ev.got_loaded, 10000) && wait_for_frame(player, 320, 240));
+    assert(syncview_video_player_pending_teardowns() == 0);
+
+    g_object_unref(player);
+    assert(drain_teardowns(15000));
+    syncview_video_player_test_release_abandoned();
+    g_free(small);
+    g_free(big);
+}
+
 /* ===================== M2.5: play / pause / stop ===================== */
 
 typedef struct {
@@ -2559,6 +2613,7 @@ main(void)
         RUN_TEST(test_reload_replaces_video(dir));
         RUN_TEST(test_players_load_independently(dir));
         RUN_TEST(test_dispose_while_loading(dir));
+        RUN_TEST(test_abandoned_teardown_builds_new_pipeline(dir));
 
         RUN_TEST(test_play_pause_basics(dir));
         RUN_TEST(test_toggle(dir));
