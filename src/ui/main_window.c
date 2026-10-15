@@ -393,8 +393,8 @@ syncview_main_window_open_file(GtkWidget *window, const char *path)
     MainWindow *mw = mw_of(window);
     GError *error = NULL;
 
-    g_return_val_if_fail(mw != NULL && path != NULL, FALSE);
-    if (!mw->player) {
+    g_return_val_if_fail(path != NULL, FALSE);
+    if (!mw || !mw->player) {  /* finestra già distrutta: niente da fare */
         return FALSE;
     }
 
@@ -421,7 +421,7 @@ on_file_chosen(GObject *source, GAsyncResult *result, gpointer user_data)
     GtkWidget *window = g_weak_ref_get(ref);
     GFile *file = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), result, NULL);  /* NULL se annullato */
 
-    if (window && file) {
+    if (window && mw_of(window) && file) {  /* mw_of NULL: finestra distrutta ma non ancora finalizzata */
         char *path = g_file_get_path(file);
 
         if (path) {
@@ -544,6 +544,25 @@ sc_to_start(GtkWidget *widget, GVariant *args, gpointer user_data)
     return TRUE;
 }
 
+/* Inizio dell'ultimo frame in ms: un seek esattamente a fine durata, in pausa, può non mostrare alcun frame. */
+static gint64
+last_frame_start_ms(MainWindow *mw)
+{
+    guint n = 0;
+    const gint64 *index = syncview_video_player_get_frame_index(mw->player, &n);
+    double fps = syncview_video_player_get_frame_rate(mw->player);
+    gint64 start;
+
+    if (index && n > 0) {  /* framerate variabile: pts reale dell'ultimo frame */
+        start = index[n - 1] / GST_MSECOND;
+    } else {
+        gint64 frame_ms = fps > 0.0 ? (gint64)(1000.0 / fps + 0.5) : SYNCVIEW_DEFAULT_FRAME_STEP_MS;
+
+        start = mw->duration_ms - MAX(frame_ms, 1);
+    }
+    return CLAMP(start, 0, mw->duration_ms);
+}
+
 static gboolean
 sc_to_end(GtkWidget *widget, GVariant *args, gpointer user_data)
 {
@@ -551,7 +570,9 @@ sc_to_end(GtkWidget *widget, GVariant *args, gpointer user_data)
 
     (void)widget;
     (void)args;
-    do_seek(mw, mw->duration_ms);
+    if (is_loaded(mw)) {
+        do_seek(mw, last_frame_start_ms(mw));
+    }
     return TRUE;
 }
 
@@ -785,7 +806,9 @@ on_window_destroy(GtkWidget *window, gpointer user_data)
 {
     MainWindow *mw = user_data;
 
-    (void)window;
+    /* Prima di tutto: dopo il destroy la finestra può restare viva (riferimenti, callback rimandate) ma mw sta per
+     * essere liberato; chi passa da mw_of() deve trovare NULL, non un puntatore pendente. */
+    g_object_set_data(G_OBJECT(window), MAIN_WINDOW_DATA, NULL);
     if (mw->pulse_id) {
         g_source_remove(mw->pulse_id);
     }

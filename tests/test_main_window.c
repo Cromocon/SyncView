@@ -547,6 +547,24 @@ test_dependencies_menu_and_missing_plugin(void)
     g_free(paths_file);
 }
 
+/* UI-2: finestra distrutta ma ancora viva (riferimento tenuto da una callback rimandata): niente use-after-free. */
+static void
+test_deferred_callback_after_destroy(void)
+{
+    GtkWidget *window = new_window(NULL);
+    GWeakRef weak;
+
+    g_weak_ref_init(&weak, window);
+    g_object_ref(window);  /* come fa g_weak_ref_get() in on_file_chosen / on_missing_plugin_idle */
+    gtk_window_destroy(GTK_WINDOW(window));
+    assert(drain_teardowns(15000));
+    assert(!syncview_main_window_open_file(window, "/nonexistent.webm"));  /* mw già liberato: FALSE, non crash */
+    g_object_unref(window);
+    spin_for(50);
+    assert(g_weak_ref_get(&weak) == NULL);
+    g_weak_ref_clear(&weak);
+}
+
 #define RUN_TEST(call)                                               \
     do {                                                             \
         if (!test_selected(#call)) {                                 \
@@ -614,6 +632,7 @@ main(void)
     RUN_TEST(test_saved_video_is_reloaded_at_startup());
     RUN_TEST(test_close_while_loading_and_playing());
     RUN_TEST(test_dependencies_menu_and_missing_plugin());
+    RUN_TEST(test_deferred_callback_after_destroy());
 
     assert(drain_teardowns(15000));
     g_object_unref(app);

@@ -35,8 +35,14 @@ on_activate(GtkApplication *app, gpointer user_data)
     syncview_debug_windows_open(app, GTK_WINDOW(window), NULL, NULL);  /* solo con --debug */
     syncview_main_window_check_dependencies(window, FALSE);            /* primo avvio: propone l'installazione se manca qualcosa */
 #ifdef G_OS_UNIX
-    g_unix_signal_add(SIGINT, on_terminate_signal, app);
-    g_unix_signal_add(SIGTERM, on_terminate_signal, app);
+    /* activate arriva anche per ogni nuovo avvio inoltrato all'istanza primaria: i gestori si collegano una volta sola. */
+    static gboolean signals_installed = FALSE;
+
+    if (!signals_installed) {
+        signals_installed = TRUE;
+        g_unix_signal_add(SIGINT, on_terminate_signal, app);
+        g_unix_signal_add(SIGTERM, on_terminate_signal, app);
+    }
 #endif
 }
 

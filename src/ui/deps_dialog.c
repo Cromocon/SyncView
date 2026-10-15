@@ -1502,6 +1502,9 @@ typedef struct {
     GWeakRef parent;
 } CheckJob;
 
+/* Sulla finestra madre: il controllo in corso (CheckJob*), così due richieste ravvicinate non aprono due dialoghi. */
+#define CHECK_PENDING_DATA "syncview-deps-check-pending"
+
 static void
 check_job_free(CheckJob *job)
 {
@@ -1528,6 +1531,9 @@ on_show_check_done(GObject *source, GAsyncResult *result, gpointer user_data)
     GtkWindow *parent = g_weak_ref_get(&job->parent);
 
     (void)source;
+    if (parent) {
+        g_object_set_data(G_OBJECT(parent), CHECK_PENDING_DATA, NULL);
+    }
     if (report) {
         DepsState *state = deps_state_load(job->options.opts.state_file);
         gboolean missing = has_missing(report, FALSE);
@@ -1575,11 +1581,24 @@ syncview_deps_check_and_show(GtkWindow *parent, SyncviewDepsShowMode mode, const
         return;
     }
 
+    CheckJob *pending = parent ? g_object_get_data(G_OBJECT(parent), CHECK_PENDING_DATA) : NULL;
+
+    if (pending) {
+        /* Controllo già in corso: non ne parte un secondo. Una richiesta esplicita dell'utente però non si perde. */
+        if (mode == SYNCVIEW_DEPS_SHOW_USER_REQUESTED) {
+            pending->mode = mode;
+        }
+        return;
+    }
+
     CheckJob *job = g_new0(CheckJob, 1);
 
     options_copy_init(&job->options, options);
     job->mode = mode;
     g_weak_ref_init(&job->parent, parent);
+    if (parent) {
+        g_object_set_data(G_OBJECT(parent), CHECK_PENDING_DATA, job);
+    }
 
     GTask *task = g_task_new(NULL, NULL, on_show_check_done, job);
 
