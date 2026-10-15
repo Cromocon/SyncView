@@ -15,6 +15,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef G_OS_WIN32
+#include <unistd.h>
+#endif
 
 #define HAS(text, needle) ((text) != NULL && strstr((text), (needle)) != NULL)
 #define ENTRY(...) ((ZipEntry){ __VA_ARGS__ })
@@ -603,17 +606,28 @@ test_run_with_fake_pkexec(void)
         g_free(log);
     }
 
-    /* Nessun pkexec: errore chiaro e nessun processo. */
+    /* Nessun pkexec nelle cartelle di sistema: errore chiaro e nessun processo. Un finto pkexec nel PATH dell'utente
+     * NON viene mai usato (SEC-1). */
+    static const char *const no_dirs[] = { "/nonexistent", NULL };
     DepRunOptions no_elevation = { 0 };
     char *saved_path = g_strdup(g_getenv("PATH"));
+    char *path_with_fake = g_strdup_printf("%s:%s", root, saved_path);
+    char *fake_named_pkexec = g_strdup_printf("%s/pkexec", root);
 
-    g_setenv("PATH", "/nonexistent", TRUE);
+    assert(g_file_set_contents(fake_named_pkexec, "#!/bin/sh\necho phished >> \"$FAKE_LOG\"\n", -1, NULL));
+    assert(g_chmod(fake_named_pkexec, 0755) == 0);
+    g_setenv("PATH", path_with_fake, TRUE);
+    no_elevation.system_dirs = no_dirs;
     fake_reset("ok");
     assert(!dep_installer_run(plan, &no_elevation, &error));
     assert(error_is(error, DEP_INSTALLER_ERROR_NO_ELEVATION));
     g_clear_error(&error);
+
     g_setenv("PATH", saved_path, TRUE);
     g_free(saved_path);
+    g_free(path_with_fake);
+    g_remove(fake_named_pkexec);
+    g_free(fake_named_pkexec);
     assert(fake_log() == NULL);
 
     /* Programma di elevazione che non esiste (percorso sbagliato): FAILED, nessun crash. */
@@ -626,6 +640,41 @@ test_run_with_fake_pkexec(void)
 
     recorder_free(rec);
     dep_plan_free(plan);
+}
+
+static void
+test_system_program_trust(void)
+{
+    /* Un file dell'utente (nostro uid, in una cartella temporanea) non è mai affidabile. */
+    char *own = g_strdup_printf("%s/own-tool", root);
+
+    assert(g_file_set_contents(own, "#!/bin/sh\n", -1, NULL));
+    assert(g_chmod(own, 0755) == 0);
+    if (geteuid() != 0) {
+        const char *const own_dirs[] = { root, NULL };
+
+        assert(!dep_installer_is_trusted_executable(own));
+        assert(dep_installer_find_system_program("own-tool", own_dirs) == NULL);
+    }
+    g_remove(own);
+    g_free(own);
+
+    /* Casi sempre non affidabili: inesistente, cartella, NULL, nome con separatori. */
+    const char *const sh_dirs[] = { "/usr/bin", NULL };
+
+    assert(!dep_installer_is_trusted_executable("/nonexistent/pkexec"));
+    assert(!dep_installer_is_trusted_executable("/usr"));
+    assert(!dep_installer_is_trusted_executable(NULL));
+    assert(dep_installer_find_system_program("../bin/sh", sh_dirs) == NULL);
+    assert(dep_installer_find_system_program("a/b", sh_dirs) == NULL);
+
+    /* Un vero programma di root in una cartella di sistema passa e si ottiene il percorso assoluto. */
+    const char *const sys_dirs[] = { "/nonexistent", "/usr/bin", "/bin", NULL };
+    char *sh = dep_installer_find_system_program("sh", sys_dirs);
+
+    assert(sh && g_path_is_absolute(sh));
+    assert(dep_installer_is_trusted_executable(sh));
+    g_free(sh);
 }
 
 static void
@@ -1433,6 +1482,7 @@ main(void)
 #ifdef G_OS_UNIX
     setup_fake_pkexec();
     test_run_with_fake_pkexec();
+    test_system_program_trust();
     test_cancel_and_timeout();
     test_third_party_consent_is_enforced_at_run();
     test_recheck_after_install();

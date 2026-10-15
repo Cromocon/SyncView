@@ -12,7 +12,8 @@
  *
  * Percorsi (scelti per componente e piattaforma, vedi PLAN.md «Dipendenze al primo avvio»):
  *  - SYSTEM_PACKAGES (Linux): pacchetti della distribuzione in UN'unica transazione tramite `pkexec <gestore> <opzioni
- *    non interattive> <pacchetti>`. Elevazione SOLO con polkit: la password la chiede il sistema, l'app non la vede mai.
+ *    non interattive> <pacchetti>`, con pkexec e gestore risolti SOLO in /usr/bin, /bin, /usr/sbin, /sbin (di root,
+ *    non scrivibili da altri) e passati con percorso assoluto, mai dal PATH dell'utente. Elevazione SOLO con polkit: la password la chiede il sistema, l'app non la vede mai.
  *    argv fisso, senza shell; i nomi dei pacchetti vengono solo dalla tabella interna di deps_check.c (altro è rifiutato).
  *  - ADD_REPOSITORY + pacchetti di terze parti (solo Fedora, solo con consenso dedicato): RPM Fusion per gstreamer1-libav.
  *    openSUSE/Packman NON si automatizza (procedura invasiva non verificata): resta «istruzioni».
@@ -129,7 +130,8 @@ typedef struct {
     const char *deps_dir;          /* NULL = deps_default_dir() */
 
     /* Solo per i test: */
-    const char *elevation_program; /* NULL = pkexec nel PATH */
+    const char *elevation_program; /* NULL = pkexec di sistema; se indicato NON si applicano i controlli di fiducia */
+    const char *const *system_dirs; /* NULL = /usr/bin, /bin, /usr/sbin, /sbin; NULL-terminato */
     gboolean allow_loopback_http;  /* consente http://127.0.0.1 / localhost (altrimenti solo https) */
     gboolean (*run_installer)(const char *path, GCancellable *cancellable, GError **error, gpointer user_data);
     gpointer run_installer_data;   /* NULL con run_installer NULL = lancio predefinito di piattaforma */
@@ -141,6 +143,18 @@ typedef struct {
  * fallito (i passi successivi non partono). Dopo il successo il chiamante ricontrolla con deps_check_run().
  */
 gboolean dep_installer_run(const DepPlan *plan, const DepRunOptions *options, GError **error);
+
+/*
+ * Controllo di fiducia per i programmi lanciati con privilegi: file regolare (link seguiti), di proprietà di root
+ * (uid 0), non scrivibile da gruppo né altri, eseguibile. Sempre FALSE su Windows.
+ */
+gboolean dep_installer_is_trusted_executable(const char *path);
+
+/*
+ * Cerca `name` (nome semplice) SOLO in `dirs` (NULL-terminato), nell'ordine, e restituisce il percorso assoluto del
+ * primo che passa dep_installer_is_trusted_executable(); NULL se nessuno. Mai il PATH. Da liberare con g_free.
+ */
+char *dep_installer_find_system_program(const char *name, const char *const *dirs);
 
 /*
  * Scarica `artifact` in `dest_path` verificando dimensione esatta e SHA-256 prima di renderlo visibile (scrive su

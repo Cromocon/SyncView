@@ -545,21 +545,80 @@ output_tail(GQueue *lines)
     return g_string_free(text, FALSE);
 }
 
+/* Cartelle di sistema dove cercare pkexec e il gestore di pacchetti: mai il PATH dell'utente (un finto pkexec lì
+ * potrebbe rubare la password). */
+static const char *const SYSTEM_PROGRAM_DIRS[] = { "/usr/bin", "/bin", "/usr/sbin", "/sbin", NULL };
+
+gboolean
+dep_installer_is_trusted_executable(const char *path)
+{
+#ifdef G_OS_WIN32
+    (void)path;
+    return FALSE;  /* l'elevazione con pkexec esiste solo su Linux */
+#else
+    GStatBuf st;
+
+    if (!path || g_stat(path, &st) != 0) {
+        return FALSE;
+    }
+    /* File regolare (g_stat segue i link), di root, non scrivibile da gruppo e altri, eseguibile. */
+    return S_ISREG(st.st_mode) && st.st_uid == 0 && (st.st_mode & (S_IWGRP | S_IWOTH)) == 0 && (st.st_mode & S_IXUSR) != 0;
+#endif
+}
+
+char *
+dep_installer_find_system_program(const char *name, const char *const *dirs)
+{
+    if (!name || !*name || strchr(name, '/')) {
+        return NULL;
+    }
+    for (size_t i = 0; dirs && dirs[i]; i++) {
+        char *candidate = g_build_filename(dirs[i], name, NULL);
+
+        if (dep_installer_is_trusted_executable(candidate)) {
+            return candidate;
+        }
+        g_free(candidate);
+    }
+    return NULL;
+}
+
 static gboolean
 run_elevated_command(const DepStep *step, const DepRunOptions *options, const Reporter *reporter, GError **error)
 {
-    char *elevation = options->elevation_program ? g_strdup(options->elevation_program) : g_find_program_in_path("pkexec");
+    const char *const *dirs = options->system_dirs ? options->system_dirs : SYSTEM_PROGRAM_DIRS;
+    char *elevation = NULL;
+    char *manager = NULL;
+
+    if (options->elevation_program) {
+        /* Solo per i test: programma indicato esplicitamente, senza controlli; il gestore resta il nome semplice. */
+        elevation = g_strdup(options->elevation_program);
+    } else {
+        elevation = dep_installer_find_system_program("pkexec", dirs);
+        if (elevation) {
+            manager = dep_installer_find_system_program(step->argv[0], dirs);
+        }
+    }
 
     if (!elevation) {
         fail_with(error, DEP_INSTALLER_ERROR_NO_ELEVATION,
-                  "pkexec (polkit) non è disponibile: installa i pacchetti a mano con le istruzioni del report");
+                  "pkexec (polkit) non è disponibile in una cartella di sistema affidabile: installa i pacchetti a mano con "
+                  "le istruzioni del report");
+        return FALSE;
+    }
+    if (!options->elevation_program && !manager) {
+        fail_with(error, DEP_INSTALLER_ERROR_NO_ELEVATION,
+                  "«%s» non è in una cartella di sistema affidabile (/usr/bin, /bin, /usr/sbin, /sbin)", step->argv[0]);
+        g_free(elevation);
+        g_free(manager);
         return FALSE;
     }
 
     GPtrArray *argv = g_ptr_array_new();
 
     g_ptr_array_add(argv, elevation);
-    for (int i = 0; step->argv[i]; i++) {
+    g_ptr_array_add(argv, manager ? manager : step->argv[0]);  /* percorso assoluto: pkexec non cerca nel PATH */
+    for (int i = 1; step->argv[i]; i++) {
         g_ptr_array_add(argv, step->argv[i]);
     }
     g_ptr_array_add(argv, NULL);
@@ -570,12 +629,13 @@ run_elevated_command(const DepStep *step, const DepRunOptions *options, const Re
     GSubprocess *process = g_subprocess_launcher_spawnv(launcher, (const char *const *)argv->pdata, &spawn_error);
 
     g_object_unref(launcher);
-    g_ptr_array_free(argv, TRUE);  /* solo l'array: le stringhe sono di `step` e `elevation` si libera sotto */
+    g_ptr_array_free(argv, TRUE);  /* solo l'array: le stringhe sono di `step`; `elevation` e `manager` si liberano sotto */
 
     if (!process) {
         fail_with(error, DEP_INSTALLER_ERROR_FAILED, "impossibile avviare «%s»: %s", elevation, spawn_error->message);
         g_error_free(spawn_error);
         g_free(elevation);
+        g_free(manager);
         return FALSE;
     }
 
@@ -643,6 +703,7 @@ run_elevated_command(const DepStep *step, const DepRunOptions *options, const Re
     g_cond_clear(&watch.cond);
     g_object_unref(process);
     g_free(elevation);
+    g_free(manager);
     return ok;
 }
 
