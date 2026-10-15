@@ -1322,6 +1322,16 @@ spy_installer(const char *path, GCancellable *cancellable, GError **error, gpoin
     return TRUE;
 }
 
+static gboolean
+silent_failing_installer(const char *path, GCancellable *cancellable, GError **error, gpointer user_data)
+{
+    (void)path;
+    (void)cancellable;
+    (void)error;
+    (void)user_data;
+    return FALSE;  /* senza impostare l'errore */
+}
+
 static void
 test_platform_installer_flow(void)
 {
@@ -1377,6 +1387,48 @@ test_platform_installer_flow(void)
     g_clear_error(&error);
     assert(dep_plan_new_for_artifact(NULL, &error) == NULL);
     g_clear_error(&error);
+
+    /* Stesse regole della strada normale: SHA-256 non esadecimale/maiuscolo, install_subdir sospetta. */
+    DepArtifact bad_hash = a;
+
+    bad_hash.sha256 = "zz11111111111111111111111111111111111111111111111111111111111111";  /* 64 caratteri, non hex */
+    assert(dep_plan_new_for_artifact(&bad_hash, &error) == NULL && error_is(error, DEP_INSTALLER_ERROR_INVALID));
+    g_clear_error(&error);
+
+    DepArtifact upper_hash = a;
+
+    upper_hash.sha256 = "ABCDEF1111111111111111111111111111111111111111111111111111111111";
+    assert(dep_plan_new_for_artifact(&upper_hash, &error) == NULL && error_is(error, DEP_INSTALLER_ERROR_INVALID));
+    g_clear_error(&error);
+
+    const char *bad_subdirs[] = { "", "..", "a/../b", "a/b", "/abs", "a\\b", NULL };
+
+    for (size_t i = 0; i < G_N_ELEMENTS(bad_subdirs); i++) {
+        DepArtifact bad_dir = a;
+
+        bad_dir.kind = DEP_ARTIFACT_ARCHIVE;
+        bad_dir.install_subdir = bad_subdirs[i];  /* l'ultimo è NULL */
+        assert(dep_plan_new_for_artifact(&bad_dir, &error) == NULL && error_is(error, DEP_INSTALLER_ERROR_INVALID));
+        g_clear_error(&error);
+    }
+
+    DepArtifact good_dir = a;
+
+    good_dir.kind = DEP_ARTIFACT_ARCHIVE;
+    plan = dep_plan_new_for_artifact(&good_dir, &error);
+    assert(plan != NULL);
+    dep_plan_free(plan);
+
+    /* Un hook che restituisce FALSE senza impostare l'errore non manda in crash l'esecuzione. */
+    DepRunOptions silent = options;
+
+    silent.run_installer = silent_failing_installer;
+    plan = dep_plan_new_for_artifact(&a, &error);
+    assert(plan != NULL);
+    assert(!dep_installer_run(plan, &silent, &error));
+    assert(error_is(error, DEP_INSTALLER_ERROR_FAILED));
+    g_clear_error(&error);
+    dep_plan_free(plan);
 
     recorder_free(rec);
     g_free(spy.seen_path);

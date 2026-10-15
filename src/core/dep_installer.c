@@ -355,9 +355,10 @@ DepPlan *
 dep_plan_new(const DepsReport *report, const DepPlanOptions *options, GError **error)
 {
     DepPlanOptions defaults = { 0 };
-    DepPlan *plan = plan_new_empty();
+    DepPlan *plan;
 
     g_return_val_if_fail(report != NULL, NULL);
+    plan = plan_new_empty();
     if (!options) {
         options = &defaults;
     }
@@ -426,10 +427,27 @@ dep_plan_new(const DepsReport *report, const DepPlanOptions *options, GError **e
 DepPlan *
 dep_plan_new_for_artifact(const DepArtifact *artifact, GError **error)
 {
-    /* Gli URL di prova su loopback usano http: la forma si controlla al download, qui basta il resto. */
-    if (!artifact || !artifact->id || !artifact->url || !artifact->sha256 || artifact->size_bytes <= 0 || !artifact->filename ||
-        strchr(artifact->filename, '/') || strchr(artifact->filename, '\\') || strstr(artifact->filename, "..") ||
-        strlen(artifact->sha256) != 64) {
+    /* Stesse regole della strada normale (nome file, SHA-256 esadecimale, install_subdir...); l'unica eccezione sono gli
+     * URL di prova su loopback, che usano http: la forma dell'URL si controlla al download. */
+    gboolean valid = FALSE;
+
+    if (artifact && artifact->url) {
+        if (g_str_has_prefix(artifact->url, "https://")) {
+            valid = dep_artifact_is_well_formed(artifact);
+        } else if (g_str_has_prefix(artifact->url, "http://")) {
+            DepArtifact https = *artifact;
+            char *swapped = g_strconcat("https://", artifact->url + strlen("http://"), NULL);
+
+            https.url = swapped;
+            valid = dep_artifact_is_well_formed(&https);
+            g_free(swapped);
+        }
+    }
+    /* install_subdir è una sola cartella sotto deps_dir: niente separatori (is_well_formed vieta solo «..» e «/» iniziale). */
+    if (valid && artifact->kind == DEP_ARTIFACT_ARCHIVE && strchr(artifact->install_subdir, '/')) {
+        valid = FALSE;
+    }
+    if (!valid) {
         fail_with(error, DEP_INSTALLER_ERROR_INVALID, "voce del manifest non valida");
         return NULL;
     }
@@ -1241,6 +1259,10 @@ dep_installer_run(const DepPlan *plan, const DepRunOptions *options, GError **er
         }
 
         if (!ok) {
+            if (!step_error) {
+                /* Un hook run_installer può restituire FALSE senza impostare l'errore. */
+                fail_with(&step_error, DEP_INSTALLER_ERROR_FAILED, "il passo «%s» è fallito senza un messaggio d'errore", step->title);
+            }
             log_user_action("Installazione dipendenze: passo fallito", step_error->message);
             g_propagate_error(error, step_error);
             return FALSE;

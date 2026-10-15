@@ -76,6 +76,27 @@ fail(GError **error, DepArchiveError code, const char *fmt, ...)
 
 /* ---- Percorsi ---- */
 
+/* Nome riservato di Windows (CON, PRN, AUX, NUL, COM1-9, LPT1-9), con o senza estensione, senza distinguere le maiuscole. */
+static gboolean
+is_windows_reserved_name(const char *part)
+{
+    static const char *const reserved[] = { "CON", "PRN", "AUX", "NUL", NULL };
+    size_t stem = strcspn(part, ".");
+
+    while (stem > 0 && part[stem - 1] == ' ') {
+        stem--;  /* "CON .txt" è comunque il dispositivo */
+    }
+    if (stem == 3) {
+        for (int i = 0; reserved[i]; i++) {
+            if (g_ascii_strncasecmp(part, reserved[i], 3) == 0) {
+                return TRUE;
+            }
+        }
+    }
+    return stem == 4 && (g_ascii_strncasecmp(part, "COM", 3) == 0 || g_ascii_strncasecmp(part, "LPT", 3) == 0) &&
+           part[3] >= '1' && part[3] <= '9';
+}
+
 /*
  * Controlla un nome di voce e lo riduce di `strip` componenti. Ritorna il percorso relativo (g_free), "" se la voce
  * sparisce con lo strip, o NULL (con error) se è pericoloso. `is_dir` se il nome finisce con «/».
@@ -91,7 +112,7 @@ clean_entry_path(const char *name, gsize name_len, int strip, gboolean *is_dir, 
     char *copy = g_strndup(name, name_len);
 
     if (!g_utf8_validate(copy, -1, NULL) || strchr(copy, '\\') != NULL || copy[0] == '/' ||
-        (g_ascii_isalpha(copy[0]) && copy[1] == ':')) {
+        strchr(copy, ':') != NULL) {  /* ':' = lettera di unità o flusso alternativo NTFS */
         fail(error, DEP_ARCHIVE_ERROR_UNSAFE, "percorso non consentito nell'archivio: «%s»", copy);
         g_free(copy);
         return NULL;
@@ -111,6 +132,14 @@ clean_entry_path(const char *name, gsize name_len, int strip, gboolean *is_dir, 
             continue;  /* il «/» finale */
         }
         if (parts[i][0] == '\0' || strcmp(parts[i], ".") == 0 || strcmp(parts[i], "..") == 0) {
+            ok = FALSE;
+            break;
+        }
+        /* Su Windows questi nomi cambiano significato (dispositivi, punti e spazi finali ignorati): si rifiutano
+         * in ogni componente, anche in quelli eliminati dallo strip. */
+        size_t part_len = strlen(parts[i]);
+
+        if (is_windows_reserved_name(parts[i]) || parts[i][part_len - 1] == '.' || parts[i][part_len - 1] == ' ') {
             ok = FALSE;
             break;
         }
@@ -300,8 +329,10 @@ dep_archive_extract_zip(const char *zip_path, const char *dest_dir, int strip_co
             g_free(relative);  /* voce scartata dallo strip */
             continue;
         }
-        if (!g_hash_table_add(seen, g_strdup(relative))) {
-            ok = fail(error, DEP_ARCHIVE_ERROR_UNSAFE, "voce duplicata nell'archivio: «%s»", relative);
+        /* Chiave senza distinzione di maiuscole: "A" e "a" sono la stessa voce su Windows/macOS. */
+        if (!g_hash_table_add(seen, g_utf8_casefold(relative, -1))) {
+            ok = fail(error, DEP_ARCHIVE_ERROR_UNSAFE, "voce duplicata (o diversa solo per le maiuscole) nell'archivio: «%s»",
+                      relative);
             g_free(relative);
             break;
         }

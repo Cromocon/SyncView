@@ -181,6 +181,21 @@ test_zip_slip_and_unsafe_paths(void)
         "a//b.txt",                /* componente vuoto */
         "./x.txt",                 /* componente «.» */
         "..",
+        "a:b.txt",                 /* ':' ovunque (flusso alternativo NTFS) */
+        "dir/file.txt:stream",
+        "CON",                     /* nomi riservati di Windows */
+        "con.txt",
+        "dir/Nul.tar.gz",
+        "AUX",
+        "prn.x",
+        "com1",
+        "COM9.log",
+        "LPT1",
+        "lpt9.txt",
+        "dir./y.txt",              /* componente che finisce con '.' */
+        "dir /y.txt",              /* componente che finisce con spazio */
+        "y.txt.",
+        "y.txt ",
     };
 
     for (size_t i = 0; i < G_N_ELEMENTS(bad_names); i++) {
@@ -196,6 +211,18 @@ test_zip_slip_and_unsafe_paths(void)
     ZipEntry strip_trick[] = { ENTRY("../x/evil.txt", data, 4, 0, 0, 0100644, -1, FALSE) };
 
     expect_rejected(strip_trick, 1, DEP_ARCHIVE_ERROR_UNSAFE, 2, 0);
+
+    /* I nomi riservati valgono anche nei componenti scartati dallo strip; COM0/COM10/CONSOLE sono nomi normali. */
+    ZipEntry reserved_stripped[] = { ENTRY("nul/x.txt", data, 4, 0, 0, 0100644, -1, FALSE) };
+
+    expect_rejected(reserved_stripped, 1, DEP_ARCHIVE_ERROR_UNSAFE, 1, 0);
+
+    ZipEntry case_clash[] = {
+        ENTRY("Dir/File.txt", data, 4, 0, 0, 0100644, -1, FALSE),
+        ENTRY("dir/file.TXT", data, 4, 0, 0, 0100644, -1, FALSE),
+    };
+
+    expect_rejected(case_clash, 2, DEP_ARCHIVE_ERROR_UNSAFE, 0, 0);
 
     ZipEntry duplicate[] = {
         ENTRY("x.txt", data, 4, 0, 0, 0100644, -1, FALSE),
