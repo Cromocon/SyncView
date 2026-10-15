@@ -1001,6 +1001,8 @@ default_run_installer(const char *path, GCancellable *cancellable, GError **erro
     if (!process) {
         return FALSE;
     }
+    /* `open -W` esce con 0 anche se l'utente annulla l'Installer: qui si sa solo che si è chiuso; l'esito vero lo dà
+     * il ricontrollo del chiamante (deps_check_run). */
     gboolean waited = g_subprocess_wait_check(process, NULL, error);
 
     g_object_unref(process);
@@ -1095,6 +1097,61 @@ done:
 /* Esecuzione del piano                                                */
 /* ------------------------------------------------------------------ */
 
+#ifdef G_OS_WIN32
+/*
+ * Windows (TOCTOU): la cartella dei download è scrivibile dall'utente, quindi tra la verifica dell'hash e il lancio
+ * con «runas» il file potrebbe essere sostituito. Si apre il file con condivisione SOLO in lettura (nessuno può
+ * scriverlo, rinominarlo o cancellarlo finché l'handle è aperto) e se ne ricalcola dimensione e SHA-256 attraverso
+ * QUELL'handle. L'handle va tenuto aperto fino dopo il lancio. INVALID_HANDLE_VALUE (con errore) se non corrisponde.
+ */
+static HANDLE
+open_locked_and_verify(const char *path, const DepArtifact *artifact, GError **error)
+{
+    gunichar2 *wide = g_utf8_to_utf16(path, -1, NULL, NULL, NULL);
+    HANDLE handle = INVALID_HANDLE_VALUE;
+
+    if (wide) {
+        handle = CreateFileW((LPCWSTR)wide, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+    }
+    g_free(wide);
+    if (handle == INVALID_HANDLE_VALUE) {
+        fail_with(error, DEP_INSTALLER_ERROR_VERIFY, "impossibile bloccare l'installer scaricato (errore Windows %lu)",
+                  (unsigned long)GetLastError());
+        return INVALID_HANDLE_VALUE;
+    }
+
+    GChecksum *sum = g_checksum_new(G_CHECKSUM_SHA256);
+    guchar buffer[DOWNLOAD_CHUNK];
+    DWORD got = 0;
+    gint64 total = 0;
+    gboolean read_ok = TRUE;
+
+    for (;;) {
+        if (!ReadFile(handle, buffer, (DWORD)sizeof buffer, &got, NULL)) {
+            read_ok = FALSE;
+            break;
+        }
+        if (got == 0) {
+            break;
+        }
+        g_checksum_update(sum, buffer, (gssize)got);
+        total += (gint64)got;
+    }
+
+    gboolean same = read_ok && total == artifact->size_bytes &&
+                    g_ascii_strcasecmp(g_checksum_get_string(sum), artifact->sha256) == 0;
+
+    g_checksum_free(sum);
+    if (!same) {
+        CloseHandle(handle);
+        fail_with(error, DEP_INSTALLER_ERROR_VERIFY, "l'installer scaricato è cambiato dopo la verifica: scartato");
+        return INVALID_HANDLE_VALUE;
+    }
+    return handle;
+}
+#endif
+
 static gboolean
 run_artifact_step(const DepStep *step, const DepRunOptions *options, const Reporter *reporter, GError **error)
 {
@@ -1102,6 +1159,9 @@ run_artifact_step(const DepStep *step, const DepRunOptions *options, const Repor
     char *downloads = g_build_filename(deps_dir, "downloads", NULL);
     char *dest = g_build_filename(downloads, step->artifact->filename, NULL);
     gboolean ok = FALSE;
+#ifdef G_OS_WIN32
+    HANDLE held = INVALID_HANDLE_VALUE;
+#endif
 
     if (!download_verified(step->artifact, dest, options, reporter, error)) {
         goto done;
@@ -1114,6 +1174,16 @@ run_artifact_step(const DepStep *step, const DepRunOptions *options, const Repor
     if (step->kind == DEP_STEP_ARCHIVE) {
         ok = install_archive(step->artifact, dest, deps_dir, error);
     } else {
+#ifdef G_OS_WIN32
+        /* Lancio predefinito: file bloccato e riverificato attraverso l'handle, che resta aperto fino a dopo il lancio.
+         * (Con l'hook dei test non si blocca: l'hook può voler leggere o spostare il file.) */
+        if (!options->run_installer) {
+            held = open_locked_and_verify(dest, step->artifact, error);
+            if (held == INVALID_HANDLE_VALUE) {
+                goto done;
+            }
+        }
+#endif
         /* Solo ORA, a file verificato, si lancia l'installer con l'elevazione del sistema. */
         gboolean (*launch)(const char *, GCancellable *, GError **, gpointer) =
             options->run_installer ? options->run_installer : default_run_installer;
@@ -1122,6 +1192,11 @@ run_artifact_step(const DepStep *step, const DepRunOptions *options, const Repor
     }
 
 done:
+#ifdef G_OS_WIN32
+    if (held != INVALID_HANDLE_VALUE) {
+        CloseHandle(held);  /* prima di cancellare il file */
+    }
+#endif
     g_remove(dest);  /* l'installer/archivio scaricato non serve più (né in caso di errore) */
     g_free(dest);
     g_free(downloads);
@@ -1170,6 +1245,12 @@ dep_installer_run(const DepPlan *plan, const DepRunOptions *options, GError **er
             g_propagate_error(error, step_error);
             return FALSE;
         }
+#ifdef __APPLE__
+        /* `open -W` esce con 0 anche se l'utente annulla l'Installer: "completato" non sarebbe vero. */
+        if (step->kind == DEP_STEP_PLATFORM_INSTALLER) {
+            log_user_action("Installazione dipendenze: installer chiuso (esito da ricontrollare)", step->title);
+        } else
+#endif
         log_user_action("Installazione dipendenze: passo completato", step->title);
         report_progress(&reporter, DEP_PROGRESS_STEP_FINISHED, NULL, 0, 0);
     }
