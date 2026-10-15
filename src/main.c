@@ -1,6 +1,7 @@
 #include "core/deps_check.h"
 #include "core/logger.h"
 #include "ui/debug_windows.h"
+#include "ui/deps_dialog.h"
 #include "ui/main_window.h"
 #include "video/video_player.h"
 
@@ -165,11 +166,25 @@ main(int argc, char *argv[])
      */
     gint64 deadline = g_get_monotonic_time() + 12 * G_USEC_PER_SEC;
 
-    while (syncview_video_player_pending_teardowns() > 0 && g_get_monotonic_time() < deadline) {
+    while ((syncview_video_player_pending_teardowns() > 0 || syncview_deps_active_jobs() > 0) &&
+           g_get_monotonic_time() < deadline) {
         g_main_context_iteration(NULL, FALSE);
         g_usleep(2000);
     }
-    if (gst_is_initialized()) {
+
+    /*
+     * I thread delle dipendenze (installazione annullata alla chiusura del dialogo, controlli) usano il registry di
+     * GStreamer: se non sono finiti nel tempo concesso (su Windows l'installatore può restare in attesa del processo
+     * figlio) gst_deinit() li farebbe schiantare. Meglio lasciare GStreamer inizializzato: il processo sta uscendo.
+     */
+    guint busy_jobs = syncview_deps_active_jobs();
+
+    if (busy_jobs > 0) {
+        char *msg = g_strdup_printf("%u thread delle dipendenze ancora attivi", busy_jobs);
+
+        log_user_action("Chiusura: gst_deinit saltato", msg);
+        g_free(msg);
+    } else if (gst_is_initialized()) {
         gst_deinit();
     }
 

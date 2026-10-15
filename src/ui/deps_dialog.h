@@ -91,6 +91,13 @@ typedef enum {
 void syncview_deps_check_and_show(GtkWindow *parent, SyncviewDepsShowMode mode, const SyncviewDepsDialogOptions *options);
 
 /*
+ * Numero di thread di lavoro delle dipendenze ancora vivi (installazione e controlli). Alla chiusura dell'applicazione,
+ * chiusi i dialoghi (che annullano l'installazione), si attende che scenda a 0 prima di gst_deinit(): quei thread usano il
+ * registry di GStreamer. Thread-safe.
+ */
+guint syncview_deps_active_jobs(void);
+
+/*
  * Copia profonda delle opzioni (stringhe e opzioni dell'installatore comprese), per chi le conserva (la finestra
  * principale). Da liberare con syncview_deps_dialog_options_free(). NULL se `options` è NULL.
  */

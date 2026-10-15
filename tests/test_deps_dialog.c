@@ -755,6 +755,13 @@ main(void)
     RUN_TEST(test_continue_without_is_remembered_across_startups());
     RUN_TEST(test_declined_set_changes_prompt_again());
 
+    /* DEPS-2: finiti tutti i test nessun thread di lavoro deve risultare vivo (il contatore usato da main per gst_deinit). */
+    for (gint64 end = g_get_monotonic_time() + 10 * G_USEC_PER_SEC; syncview_deps_active_jobs() > 0 && g_get_monotonic_time() < end;) {
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
+    assert(syncview_deps_active_jobs() == 0);
+
     char *cmd = g_strdup_printf("rm -rf '%s'", tmp_dir);
     assert(system(cmd) == 0);
     g_free(cmd);

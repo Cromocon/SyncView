@@ -7,6 +7,15 @@
 #include <gst/gst.h>
 #include <string.h>
 
+/* Thread di lavoro vivi (installazione, controlli) che toccano GStreamer: vedi syncview_deps_active_jobs(). */
+static gint active_jobs;
+
+guint
+syncview_deps_active_jobs(void)
+{
+    return (guint)g_atomic_int_get(&active_jobs);
+}
+
 #define DIALOG_DATA "syncview-deps-dialog"
 #define PULSE_INTERVAL_MS 120
 #define OUTPUT_MAX_LINES 2000
@@ -656,7 +665,10 @@ check_thread(GTask *task, gpointer source, gpointer task_data, GCancellable *can
 
     Dlg *dlg = task_data;
 
-    g_task_return_pointer(task, run_check(&dlg->options.opts), (GDestroyNotify)deps_report_free);
+    DepsReport *report = run_check(&dlg->options.opts);
+
+    g_atomic_int_dec_and_test(&active_jobs);
+    g_task_return_pointer(task, report, (GDestroyNotify)deps_report_free);
 }
 
 static void
@@ -693,6 +705,7 @@ on_recheck(Dlg *dlg)
     GTask *task = g_task_new(NULL, NULL, on_recheck_done, dlg_ref(dlg));
 
     g_task_set_task_data(task, dlg_ref(dlg), (GDestroyNotify)dlg_unref);
+    g_atomic_int_inc(&active_jobs);
     g_task_run_in_thread(task, check_thread);
     g_object_unref(task);
 }
@@ -904,6 +917,7 @@ job_thread(gpointer data)
     dep_plan_free(job->plan);
     dlg_unref(job->dlg);
     g_free(job);
+    g_atomic_int_dec_and_test(&active_jobs);  /* ultimo: dopo ogni uso di GStreamer */
     return NULL;
 }
 
@@ -978,6 +992,7 @@ on_install(Dlg *dlg)
         dlg->pulse_id = g_timeout_add(PULSE_INTERVAL_MS, on_pulse, dlg);
     }
 
+    g_atomic_int_inc(&active_jobs);
     GThread *thread = g_thread_new("syncview-deps-install", job_thread, job);
 
     g_thread_unref(thread);
@@ -1520,7 +1535,10 @@ show_check_thread(GTask *task, gpointer source, gpointer task_data, GCancellable
 
     (void)source;
     (void)cancellable;
-    g_task_return_pointer(task, run_check(&job->options.opts), (GDestroyNotify)deps_report_free);
+    DepsReport *report = run_check(&job->options.opts);
+
+    g_atomic_int_dec_and_test(&active_jobs);
+    g_task_return_pointer(task, report, (GDestroyNotify)deps_report_free);
 }
 
 static void
@@ -1603,6 +1621,7 @@ syncview_deps_check_and_show(GtkWindow *parent, SyncviewDepsShowMode mode, const
     GTask *task = g_task_new(NULL, NULL, on_show_check_done, job);
 
     g_task_set_task_data(task, job, NULL);
+    g_atomic_int_inc(&active_jobs);
     g_task_run_in_thread(task, show_check_thread);
     g_object_unref(task);
 }
