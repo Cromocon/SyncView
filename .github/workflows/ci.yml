@@ -1,10 +1,14 @@
 name: CI
 
+# main è l'app Python: la CI C gira su ogni altro branch (SyncView-C e i branch di lavoro) e su ogni pull request.
 on:
   push:
-    branches: [SyncView-C]
+    branches-ignore: [main]
   pull_request:
-    branches: [SyncView-C]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-linux:
@@ -12,21 +16,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # gstreamer1.0-gtk4 (Ubuntu 24.04, universe) fornisce gtk4paintablesink; xvfb il display per i test con finestra.
+      # Senza uno dei due i test GTK escono con 77 (skip): lo script check_skips.py lo trasforma in errore.
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            meson ninja-build \
+            meson ninja-build xvfb libgl1-mesa-dri \
             libgtk-4-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-            gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav \
+            gstreamer1.0-gtk4 \
             libsqlite3-dev libjson-glib-dev libglib2.0-dev libsoup-3.0-dev
       - name: meson setup
         run: meson setup build
       - name: meson compile
         run: meson compile -C build
       - name: meson test
-        run: meson test -C build --print-errorlogs
+        run: xvfb-run -a meson test -C build --print-errorlogs
+      - name: Test saltati non previsti
+        run: python3 .github/scripts/check_skips.py build/meson-logs/testlog.json linux
+      - name: Log di Meson
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meson-logs-linux
+          path: build/meson-logs
 
   build-macos:
     name: macOS (macos-latest)
@@ -43,6 +58,14 @@ jobs:
         run: meson compile -C build
       - name: meson test
         run: meson test -C build --print-errorlogs
+      - name: Test saltati non previsti
+        run: python3 .github/scripts/check_skips.py build/meson-logs/testlog.json macos
+      - name: Log di Meson
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meson-logs-macos
+          path: build/meson-logs
 
   build-windows:
     name: Windows (windows-latest, MSYS2/MinGW-w64)
@@ -60,6 +83,7 @@ jobs:
             mingw-w64-ucrt-x86_64-toolchain
             mingw-w64-ucrt-x86_64-meson
             mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-python
             mingw-w64-ucrt-x86_64-gtk4
             mingw-w64-ucrt-x86_64-gstreamer
             mingw-w64-ucrt-x86_64-gst-plugins-base
@@ -76,3 +100,11 @@ jobs:
         run: meson compile -C build
       - name: meson test
         run: meson test -C build --print-errorlogs
+      - name: Test saltati non previsti
+        run: python3 .github/scripts/check_skips.py build/meson-logs/testlog.json windows
+      - name: Log di Meson
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meson-logs-windows
+          path: build/meson-logs
