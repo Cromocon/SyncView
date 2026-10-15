@@ -33,6 +33,10 @@ static gboolean module_enabled[LOGGER_MODULE_COUNT] = { TRUE, TRUE, TRUE, TRUE, 
 static GArray *sinks = NULL;  /* Sink, protetto da state_lock */
 static guint next_sink_id = 1;
 
+/* Righe emesse mentre non c'è un file (prima di logger_open_file): conservate, in numero limitato, e scritte all'apertura. */
+#define PENDING_MAX 200
+static GQueue pending_lines = G_QUEUE_INIT;
+
 /* Impostato mentre il thread corrente esegue un sink: blocca la ricorsione sui sink. */
 static GPrivate in_sink_key = G_PRIVATE_INIT(NULL);
 
@@ -156,6 +160,11 @@ emit(Level level, LoggerModule module, const char *message)
         if (log_file) {
             fputs(line, log_file);
             fflush(log_file);
+        } else {
+            if (g_queue_get_length(&pending_lines) >= PENDING_MAX) {
+                g_free(g_queue_pop_head(&pending_lines));
+            }
+            g_queue_push_tail(&pending_lines, g_strdup(line));
         }
         if (debug_mode) {
             fputs(line, stderr);
@@ -202,6 +211,7 @@ close_locked(void)
         fclose(log_file);
         log_file = NULL;
     }
+    g_queue_clear_full(&pending_lines, g_free);
     initialized = FALSE;
     debug_mode = FALSE;
 }
@@ -242,6 +252,12 @@ logger_open_file(const char *file_path, gboolean truncate, GError **error)
             "  Timestamp: %s\n"
             "======================================================================\n",
             ts);
+    /* Le righe emesse prima dell'apertura (es. «Applicazione avviata») seguono l'intestazione. */
+    for (GList *l = pending_lines.head; l; l = l->next) {
+        fputs(l->data, log_file);
+    }
+    fflush(log_file);
+    g_queue_clear_full(&pending_lines, g_free);
     g_mutex_unlock(&state_lock);
     g_free(ts);
     return TRUE;

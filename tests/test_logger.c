@@ -264,6 +264,41 @@ test_open_file_append_does_not_truncate(const char *dir)
     g_free(path);
 }
 
+/* Le righe emesse prima dell'apertura del file finiscono nel file, dopo l'intestazione. */
+static void
+test_lines_before_open_file_are_flushed(const char *dir)
+{
+    char *path = g_build_filename(dir, "pending.txt", NULL);
+    g_unsetenv("SYNCVIEW_DEBUG");
+
+    assert(logger_init(NULL, FALSE, NULL));
+    log_user_action("riga-precoce", NULL);
+    assert(logger_open_file(path, TRUE, NULL));
+    log_user_action("riga-tardiva", NULL);
+    logger_shutdown();
+
+    char *content = read_file(path);
+    char *header = strstr(content, "AVVIO APPLICAZIONE");
+    char *early = strstr(content, "riga-precoce");
+
+    assert(header && early && early > header);
+    assert(strstr(content, "Applicazione SyncView avviata") != NULL);
+    assert(strstr(content, "riga-tardiva") != NULL);
+    g_free(content);
+
+    /* Il buffer non sopravvive a logger_shutdown. */
+    assert(logger_init(NULL, FALSE, NULL));
+    log_user_action("solo-buffer", NULL);
+    logger_shutdown();
+    assert(logger_init(NULL, FALSE, NULL));
+    assert(logger_open_file(path, TRUE, NULL));
+    logger_shutdown();
+    content = read_file(path);
+    assert(strstr(content, "solo-buffer") == NULL);
+    g_free(content);
+    g_free(path);
+}
+
 static void
 test_gst_debug_propagation(void)
 {
@@ -358,6 +393,7 @@ main(void)
     test_uninitialized_is_silent(dir);
     test_truncates_file_on_open(dir);
     test_open_file_append_does_not_truncate(dir);
+    test_lines_before_open_file_are_flushed(dir);
     test_gst_debug_propagation();
     test_is_debug_mode();
     test_unwritable_file(dir);
