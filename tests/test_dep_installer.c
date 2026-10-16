@@ -477,6 +477,7 @@ recorder_has(Recorder *r, const char *needle)
     }
     return FALSE;
 }
+#ifdef G_OS_UNIX  /* finto pkexec: script di shell, geteuid, kill */
 
 static char *fake_pkexec_path;
 static char *fake_log_path;
@@ -812,6 +813,7 @@ test_recheck_after_install(void)
     deps_report_free(before);
     fake_free(f);
 }
+#endif  /* G_OS_UNIX */
 
 /* ------------------------------------------------------------------ */
 /* Server HTTP locale (thread dedicato)                                */
