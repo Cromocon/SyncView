@@ -22,6 +22,8 @@ typedef struct {
     int width;            /* pixel codificati; 0 se sconosciuti. Niente correzione PAR/rotazione */
     int height;
     char *codec;          /* owned, mai NULL: nome breve ("h264", "vp8", ...) o "unknown" */
+    char *missing_plugins; /* owned, NULL se nessuno: decoder audio/sottotitoli mancanti (file comunque
+                              utilizzabile, senza quelle tracce); vedi discoverer_missing_plugins_non_video */
 } VideoInfo;
 
 void video_info_free(VideoInfo *info);
@@ -111,6 +113,17 @@ double discoverer_nominal_fps_from_intervals(const int64_t *intervals_ns, size_t
  * stimabile. Bloccante.
  */
 double discoverer_estimate_fps(const char *path);
+
+/*
+ * TRUE se details non e' vuoto e TUTTI i plugin mancanti sono decoder
+ * audio/testo/sottotitoli ("decoder-audio/...", "decoder-text/...",
+ * "decoder-subpicture/..."): il video e' riproducibile. Qualsiasi altro
+ * tipo (decoder video, demuxer, sconosciuto) -> FALSE (bloccante). In
+ * discoverer_probe_file questo caso, con almeno uno stream video, ritorna
+ * le info con VideoInfo.missing_plugins valorizzato invece di
+ * DISCOVERER_ERROR_MISSING_PLUGINS. Funzione pura, esposta per i test.
+ */
+gboolean discoverer_missing_plugins_non_video(const char *const *details);
 
 /*
  * Trasforma le stringhe "installer details" di GStreamer

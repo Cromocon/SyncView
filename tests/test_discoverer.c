@@ -254,6 +254,36 @@ test_missing_plugins_message(void)
 }
 
 static void
+test_missing_plugins_non_video(void)
+{
+    g_assert_false(discoverer_missing_plugins_non_video(NULL));
+    const char *const none[] = { NULL };
+    g_assert_false(discoverer_missing_plugins_non_video(none));
+
+    const char *const audio[] = {
+        "gstreamer|1.0|app|AAC decoder|decoder-audio/mpeg, mpegversion=(int)4",
+        "gstreamer|1.0|app|Subtitle decoder|decoder-text/x-raw",
+        NULL
+    };
+    g_assert_true(discoverer_missing_plugins_non_video(audio));
+
+    const char *const video[] = { "gstreamer|1.0|app|H.265 decoder|decoder-video/x-h265", NULL };
+    g_assert_false(discoverer_missing_plugins_non_video(video));
+
+    /* Basta un plugin video (o sconosciuto, o un demuxer) per restare bloccanti. */
+    const char *const mixed[] = {
+        "gstreamer|1.0|app|AAC decoder|decoder-audio/mpeg",
+        "gstreamer|1.0|app|H.265 decoder|decoder-video/x-h265",
+        NULL
+    };
+    g_assert_false(discoverer_missing_plugins_non_video(mixed));
+    const char *const demux[] = { "gstreamer|1.0|app|Matroska demuxer|demux-video/x-matroska", "x", NULL };
+    g_assert_false(discoverer_missing_plugins_non_video(demux));
+    const char *const odd[] = { "formato-strano", NULL };
+    g_assert_false(discoverer_missing_plugins_non_video(odd));
+}
+
+static void
 test_timeout_does_not_crash(const char *dir)
 {
     char *path = make_video(dir, "t.webm", 320, 240, "25/1", 25);
@@ -505,6 +535,7 @@ main(void)
     test_default_info();
     test_error_classification();
     test_missing_plugins_message();
+    test_missing_plugins_non_video();
     test_nominal_fps_from_intervals();
     test_video_info(dir);
     test_estimate_fps_from_file(dir);

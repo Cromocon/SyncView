@@ -19,6 +19,7 @@ video_info_free(VideoInfo *info)
 
     g_free(info->path);
     g_free(info->codec);
+    g_free(info->missing_plugins);
     g_free(info);
 }
 
@@ -76,6 +77,28 @@ discoverer_format_missing_plugins(const char *const *details)
     char *joined = g_strjoinv(", ", (char **)names->pdata);
     g_ptr_array_free(names, TRUE);
     return joined;
+}
+
+gboolean
+discoverer_missing_plugins_non_video(const char *const *details)
+{
+    if (!details || !details[0]) {
+        return FALSE;
+    }
+
+    for (int i = 0; details[i]; i++) {
+        /* Il 5° campo è "<tipo>-<media>/<sottotipo>, ...", es. "decoder-audio/mpeg, mpegversion=(int)4". */
+        char **fields = g_strsplit(details[i], "|", 5);
+        const char *caps = (fields[0] && fields[1] && fields[2] && fields[3]) ? fields[4] : NULL;
+        gboolean ok = caps && (g_str_has_prefix(caps, "decoder-audio/") ||
+                               g_str_has_prefix(caps, "decoder-text/") ||
+                               g_str_has_prefix(caps, "decoder-subpicture/"));
+        g_strfreev(fields);
+        if (!ok) {
+            return FALSE;
+        }
+    }
+    return TRUE;
 }
 
 /* --- Frame rate nominale per i file a framerate variabile --- */
@@ -422,8 +445,20 @@ discoverer_probe_file(const char *path, int timeout_ms, GError **error)
             info = info_from_discoverer(path, dinfo);
             break;
         case GST_DISCOVERER_MISSING_PLUGINS: {
-            char *missing = discoverer_format_missing_plugins(
-                (const char *const *)gst_discoverer_info_get_missing_elements_installer_details(dinfo));
+            const char *const *details =
+                (const char *const *)gst_discoverer_info_get_missing_elements_installer_details(dinfo);
+            char *missing = discoverer_format_missing_plugins(details);
+            GList *vstreams = gst_discoverer_info_get_video_streams(dinfo);
+            gboolean has_video = vstreams != NULL;
+            gst_discoverer_stream_info_list_free(vstreams);
+
+            if (has_video && discoverer_missing_plugins_non_video(details)) {
+                /* Mancano solo decoder audio/sottotitoli: il video è riproducibile. */
+                log_gst("discoverer: %s: plugin non video mancanti (%s), file utilizzabile", path, missing);
+                info = info_from_discoverer(path, dinfo);
+                info->missing_plugins = missing;
+                break;
+            }
             g_set_error(error, DISCOVERER_ERROR, DISCOVERER_ERROR_MISSING_PLUGINS,
                         "Plugin GStreamer mancanti: %s", missing ? missing : "(non specificati)");
             g_free(missing);
