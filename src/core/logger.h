@@ -74,9 +74,12 @@ gboolean logger_is_module_enabled(LoggerModule module);
  *  - `timestamp` e `message` valgono solo durante la chiamata (copiarli).
  *  - I log emessi da dentro un sink non vengono recapitati ai sink (nessuna
  *    ricorsione) ma vanno comunque su file/stderr.
- *  - Il sink non è invocato con il lock del logger: può chiamare
- *    logger_add_sink/logger_remove_sink. Dopo logger_remove_sink() una
- *    chiamata già in corso in un altro thread può ancora completarsi.
+ *  - Il sink non è invocato con il lock di stato del logger: può chiamare
+ *    logger_add_sink/logger_remove_sink. logger_remove_sink() attende una
+ *    consegna in corso in un altro thread: quando ritorna il sink non gira
+ *    e non girerà più, quindi il suo user_data si può liberare. Di
+ *    conseguenza un sink non deve attendere il thread che sta rimuovendo
+ *    sink (né il main thread, se è lui a rimuovere): accoda e basta.
  */
 typedef void (*LoggerSinkFunc)(LoggerLevel level, LoggerModule module, const char *timestamp,
                                const char *message, gpointer user_data);

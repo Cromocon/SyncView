@@ -417,6 +417,82 @@ test_concurrent_logging(void)
     g_ptr_array_free(rec.messages, TRUE);
 }
 
+/* --- rimozione di un sink da un altro thread mentre si logga: dopo logger_remove_sink() il sink non deve più girare --- */
+#define PROBE_MAGIC 0x5eed5eedu
+
+typedef struct {
+    guint magic;
+    volatile gint removed;  /* messo dopo il ritorno di logger_remove_sink: da quel momento il sink non deve più girare */
+} Probe;
+
+static volatile gint probe_calls = 0;
+static volatile gint stop_logging = 0;
+
+static void
+probe_sink(LoggerLevel level, LoggerModule module, const char *timestamp, const char *message, gpointer user_data)
+{
+    Probe *probe = user_data;
+
+    (void)level;
+    (void)module;
+    (void)timestamp;
+    (void)message;
+    g_atomic_int_inc(&probe_calls);
+    g_usleep(100);  /* allarga la finestra: la consegna è ancora in corso quando l'altro thread rimuove il sink */
+    g_assert_cmpuint(probe->magic, ==, PROBE_MAGIC);
+    g_assert_cmpint(g_atomic_int_get(&probe->removed), ==, 0);  /* chiamato dopo la rimozione: user_data già liberabile */
+}
+
+static gpointer
+spam_thread(gpointer data)
+{
+    (void)data;
+    while (!g_atomic_int_get(&stop_logging)) {
+        log_sync("spam");
+    }
+    return NULL;
+}
+
+static void
+test_remove_sink_while_logging(const char *dir)
+{
+    g_unsetenv("SYNCVIEW_DEBUG");
+    char *err_path = g_build_filename(dir, "remove-race.err", NULL);
+
+    g_assert_true(logger_init(NULL, TRUE, NULL));
+    capture_begin(err_path);
+    g_atomic_int_set(&stop_logging, 0);
+
+    GThread *threads[3];
+
+    for (int t = 0; t < 3; t++) {
+        threads[t] = g_thread_new("spam", spam_thread, NULL);
+    }
+    /* Le sonde si liberano a fine test (non subito: un indirizzo riusato nasconderebbe la lettura dopo la free). */
+    GPtrArray *probes = g_ptr_array_new_with_free_func(g_free);
+
+    for (int i = 0; i < 300; i++) {
+        Probe *probe = g_new0(Probe, 1);
+
+        probe->magic = PROBE_MAGIC;
+        g_ptr_array_add(probes, probe);
+        guint id = logger_add_sink(probe_sink, probe);
+
+        g_usleep(150);
+        logger_remove_sink(id);
+        g_atomic_int_set(&probe->removed, 1);
+    }
+    g_atomic_int_set(&stop_logging, 1);
+    for (int t = 0; t < 3; t++) {
+        g_thread_join(threads[t]);
+    }
+    capture_end();
+    logger_shutdown();
+    g_free(err_path);
+    g_ptr_array_free(probes, TRUE);
+    g_assert_cmpint(g_atomic_int_get(&probe_calls), >, 0);  /* la corsa c'è stata davvero */
+}
+
 int
 main(void)
 {
@@ -430,6 +506,7 @@ main(void)
     test_multiple_sinks_and_removal();
     test_reentrant_sink(dir);
     test_concurrent_logging();
+    test_remove_sink_while_logging(dir);
 
     char *cmd = g_strdup_printf("rm -rf '%s'", dir);
     g_assert_cmpint(system(cmd), ==, 0);

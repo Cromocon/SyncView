@@ -295,6 +295,13 @@ test_malformed_files(void)
     g_assert_true(g_error_matches(error, DEP_ARCHIVE_ERROR, DEP_ARCHIVE_ERROR_FORMAT));
     g_clear_error(&error);
 
+    /* Un errore già impostato non viene sovrascritto (né il suo messaggio): vince il primo. */
+    error = g_error_new_literal(DEP_ARCHIVE_ERROR, DEP_ARCHIVE_ERROR_IO, "errore precedente");
+    g_assert_false(dep_archive_extract_zip(path, dest, 0, 0, &error));
+    g_assert_true(g_error_matches(error, DEP_ARCHIVE_ERROR, DEP_ARCHIVE_ERROR_IO));
+    g_assert_cmpstr(error->message, ==, "errore precedente");
+    g_clear_error(&error);
+
     /* Troncato a metà: fine della directory centrale mancante. */
     const guchar data[] = "dati";
     ZipEntry entries[] = { ENTRY("x.txt", data, 4, 0, 0, 0100644, -1, FALSE) };

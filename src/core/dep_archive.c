@@ -64,13 +64,16 @@ fail(GError **error, DepArchiveError code, const char *fmt, ...)
 {
     va_list args;
 
-    va_start(args, fmt);
-    g_set_error_literal(error, DEP_ARCHIVE_ERROR, code, "");
-    if (error && *error) {
-        g_free((*error)->message);
-        (*error)->message = g_strdup_vprintf(fmt, args);
+    /* Convenzione GLib: un GError già impostato non si sovrascrive (g_set_error avverte e lo lascia): vince il primo errore. */
+    if (error && !*error) {
+        char *message;
+
+        va_start(args, fmt);
+        message = g_strdup_vprintf(fmt, args);
+        va_end(args);
+        g_set_error_literal(error, DEP_ARCHIVE_ERROR, code, message);
+        g_free(message);
     }
-    va_end(args);
     return FALSE;
 }
 

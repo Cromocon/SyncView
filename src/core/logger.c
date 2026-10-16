@@ -40,6 +40,11 @@ static GQueue pending_lines = G_QUEUE_INIT;
 /* Impostato mentre il thread corrente esegue un sink: blocca la ricorsione sui sink. */
 static GPrivate in_sink_key = G_PRIVATE_INIT(NULL);
 
+/* Tenuto (ricorsivo) per tutta la consegna ai sink e da logger_remove_sink: dopo che questa ritorna nessun thread sta
+ * eseguendo né eseguirà più quel sink, quindi il suo user_data si può liberare. Ordine dei lock: dispatch_lock, poi
+ * state_lock (mai il contrario). */
+static GRecMutex dispatch_lock;
+
 const char *
 logger_module_name(LoggerModule module)
 {
@@ -99,6 +104,7 @@ logger_add_sink(LoggerSinkFunc func, gpointer user_data)
 void
 logger_remove_sink(guint sink_id)
 {
+    g_rec_mutex_lock(&dispatch_lock);  /* attende una consegna in corso in un altro thread */
     g_mutex_lock(&state_lock);
     for (guint i = 0; sinks && i < sinks->len; i++) {
         if (g_array_index(sinks, Sink, i).id == sink_id) {
@@ -107,6 +113,20 @@ logger_remove_sink(guint sink_id)
         }
     }
     g_mutex_unlock(&state_lock);
+    g_rec_mutex_unlock(&dispatch_lock);
+}
+
+static gboolean
+sink_is_registered(guint sink_id)
+{
+    gboolean found = FALSE;
+
+    g_mutex_lock(&state_lock);
+    for (guint i = 0; sinks && i < sinks->len && !found; i++) {
+        found = g_array_index(sinks, Sink, i).id == sink_id;
+    }
+    g_mutex_unlock(&state_lock);
+    return found;
 }
 
 char *
@@ -143,8 +163,7 @@ timestamp_now(void)
 static void
 emit(Level level, LoggerModule module, const char *message)
 {
-    Sink *sinks_copy = NULL;
-    guint n_sinks = 0;
+    gboolean deliver = FALSE;
     char *ts = NULL;
 
     g_mutex_lock(&state_lock);
@@ -170,10 +189,7 @@ emit(Level level, LoggerModule module, const char *message)
             fputs(line, stderr);
             fflush(stderr);
 
-            if (sinks && sinks->len > 0 && !g_private_get(&in_sink_key)) {
-                n_sinks = sinks->len;
-                sinks_copy = g_memdup2(sinks->data, n_sinks * sizeof(Sink));
-            }
+            deliver = sinks && sinks->len > 0 && !g_private_get(&in_sink_key);
         }
 
         g_free(line);
@@ -181,13 +197,29 @@ emit(Level level, LoggerModule module, const char *message)
 
     g_mutex_unlock(&state_lock);
 
-    /* Sink fuori dal lock: possono registrare/rimuovere sink, e un log dal sink non causa deadlock. */
-    if (sinks_copy) {
+    /* Sink fuori da state_lock (possono registrare/rimuovere sink, e un log dal sink non causa deadlock), ma sotto
+     * dispatch_lock e con la copia presa DOPO averlo preso: logger_remove_sink() o precede la copia o attende la fine. */
+    if (deliver) {
+        Sink *sinks_copy = NULL;
+        guint n_sinks = 0;
+
+        g_rec_mutex_lock(&dispatch_lock);
+        g_mutex_lock(&state_lock);
+        if (sinks && sinks->len > 0) {
+            n_sinks = sinks->len;
+            sinks_copy = g_memdup2(sinks->data, n_sinks * sizeof(Sink));
+        }
+        g_mutex_unlock(&state_lock);
+
         g_private_set(&in_sink_key, GINT_TO_POINTER(1));
         for (guint i = 0; i < n_sinks; i++) {
-            sinks_copy[i].func(level, module, ts, message, sinks_copy[i].user_data);
+            /* Un sink può averne rimosso un altro (stesso thread, il lock è ricorsivo): non si chiama uno già rimosso. */
+            if (sink_is_registered(sinks_copy[i].id)) {
+                sinks_copy[i].func(level, module, ts, message, sinks_copy[i].user_data);
+            }
         }
         g_private_set(&in_sink_key, NULL);
+        g_rec_mutex_unlock(&dispatch_lock);
         g_free(sinks_copy);
     }
 
