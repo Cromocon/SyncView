@@ -120,6 +120,30 @@ test_sync_all_to_master_null_slot(void)
     g_assert_true(p.pause_called == false);
 }
 
+static void
+test_sync_all_to_master_out_of_range(void)
+{
+    /* Master 3 ma solo 2 player: nessun seek, entrambi in pausa. */
+    SyncManager sm;
+    sync_manager_init(&sm, 4);
+    sync_manager_set_master(&sm, 3);
+    sync_manager_set_offset(&sm, 1, 1000);
+
+    MockPlayer players[2];
+    mock_player_reset(&players[0], true);
+    mock_player_reset(&players[1], true);
+    SyncPlayerOps ops[2] = {
+        {.user_data = &players[0], .is_loaded = mock_is_loaded, .seek = mock_seek, .pause = mock_pause},
+        {.user_data = &players[1], .is_loaded = mock_is_loaded, .seek = mock_seek, .pause = mock_pause},
+    };
+
+    sync_manager_sync_all_to_master(&sm, 10000, ops, 2);
+    for (int i = 0; i < 2; i++) {
+        g_assert_false(players[i].seek_called);
+        g_assert_true(players[i].pause_called);
+    }
+}
+
 int
 main(void)
 {
@@ -197,6 +221,7 @@ main(void)
 
     test_sync_all_to_master();
     test_sync_all_to_master_null_slot();
+    test_sync_all_to_master_out_of_range();
 
     return 0;
 }

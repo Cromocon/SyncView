@@ -86,6 +86,8 @@ typedef struct {
  * viene solo messo in pausa (nessun seek). Funziona indipendentemente
  * da sm->sync_enabled, esattamente come l'originale (chiamata anche
  * dal resync manuale a sync disattivata).
+ * Deviazione: se master_video_index non è in [0, n_players) si tratta come
+ * "nessun master": nessun seek, i player caricati sono solo messi in pausa.
  */
 void sync_manager_sync_all_to_master(SyncManager *sm,
                                       int64_t master_position_ms,

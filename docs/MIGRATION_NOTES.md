@@ -140,3 +140,10 @@ Sorgenti: `core/marker_db.py` (`save_markers_batch`), `core/markers.py` (`_migra
 - **Valori JSON numerici fuori range** (`timestamp`/`video_index` double non finito o fuori da int64): errore di migrazione invece di conversione indefinita.
 - **`db_version` NULL** in un DB legacy: trattato come versione 0 (migrazione), senza crash.
 - **Colore NULL** in creazione/aggiornamento di un marker: ricade sul default `#3498db` (colonna `color` NOT NULL).
+
+
+## Deviazioni: user_paths, discoverer, sync_manager
+
+- **Percorsi video recenti (`user_paths`)**: Python rimuoveva (e salvava) ogni percorso il cui file non esisteva, anche con un'unità esterna smontata. In C si rimuove solo se la directory padre esiste ma il file no; se la directory padre manca lo slot resta nel file ed `out[i]` e' NULL (non disponibile) finche' l'unità non torna.
+- **Plugin mancanti (`discoverer`)**: l'originale (ffprobe) non falliva per un decoder mancante. In C `GST_DISCOVERER_MISSING_PLUGINS` e' bloccante solo se manca un decoder video/demuxer/sconosciuto o non c'e' uno stream video; se mancano solo decoder audio/testo/sottotitoli il file e' utilizzabile e i nomi sono in `VideoInfo.missing_plugins` (NULL altrimenti).
+- **Master fuori range (`sync_manager`)**: se `master_video_index` non e' in `[0, n_players)`, `sync_all_to_master` non fa seek e mette solo in pausa i player caricati (Python avrebbe seekato tutti rispetto a un master inesistente). Input valido: invariato.

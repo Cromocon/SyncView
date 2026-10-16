@@ -98,6 +98,17 @@ sync_manager_sync_all_to_master(SyncManager *sm,
     log_sync("sync_all_to_master(master=%d, master_pos=%lldms, n_players=%d)",
              sm->master_video_index, (long long)master_position_ms, n_players);
 
+    /*
+     * Master fuori da [0, n_players): deviazione dall'originale (che seekava
+     * tutti rispetto a un player inesistente). Si tratta come "nessun master":
+     * nessun seek, tutti i player caricati vengono solo messi in pausa.
+     */
+    bool master_valid = sm->master_video_index >= 0 && sm->master_video_index < n_players;
+    if (!master_valid) {
+        log_sync("  master %d fuori range (n_players=%d): nessun seek, solo pausa",
+                 sm->master_video_index, n_players);
+    }
+
     for (int i = 0; i < n_players; i++) {
         SyncPlayerOps *ops = &players[i];
 
@@ -106,7 +117,7 @@ sync_manager_sync_all_to_master(SyncManager *sm,
             continue;
         }
 
-        if (i != sm->master_video_index) {
+        if (master_valid && i != sm->master_video_index) {
             int64_t sync_pos = sync_manager_calculate_sync_position(
                 sm, master_position_ms, sm->master_video_index, i);
             log_sync("  player %d: seek(%lldms) + pause", i, (long long)sync_pos);
@@ -117,7 +128,7 @@ sync_manager_sync_all_to_master(SyncManager *sm,
                 ops->pause(ops->user_data);
             }
         } else {
-            log_sync("  player %d (master): pause", i);
+            log_sync("  player %d%s: pause", i, master_valid ? " (master)" : "");
             if (ops->pause) {
                 ops->pause(ops->user_data);
             }
