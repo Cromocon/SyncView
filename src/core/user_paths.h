@@ -58,9 +58,12 @@ const char *user_paths_get_export_dir(const UserPaths *paths);
 
 /*
  * Come get_valid_video_paths: riempie out[0..SYNCVIEW_MAX_VIDEOS-1] con i
- * percorsi che esistono ancora come file regolari (NULL per gli altri),
- * rimuove dagli slot quelli non più validi e, se ne ha rimossi, salva il
- * file. Ritorna il numero di percorsi validi. Un eventuale errore di
+ * percorsi che esistono ancora come file regolari (NULL per gli altri).
+ * Rimuove dagli slot (e salva) solo i percorsi la cui directory padre esiste
+ * ma il file no (file davvero sparito). Se la directory padre manca (es.
+ * unità esterna smontata) lo slot è NULL in out ma resta in memoria e nel
+ * file, così torna disponibile al rimontaggio (deviazione dall'originale
+ * Python, che lo cancellava). Ritorna il numero di percorsi validi. Un eventuale errore di
  * salvataggio è riportato in save_error (opzionale); out resta comunque
  * valido. Le stringhe di out valgono fino alla prossima modifica.
  */

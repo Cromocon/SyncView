@@ -221,6 +221,15 @@ user_paths_get_export_dir(const UserPaths *paths)
     return paths->last_export_dir;
 }
 
+static gboolean
+path_parent_exists(const char *path)
+{
+    char *parent = g_path_get_dirname(path);
+    gboolean exists = g_file_test(parent, G_FILE_TEST_IS_DIR);
+    g_free(parent);
+    return exists;
+}
+
 int
 user_paths_get_valid_video_paths(UserPaths *paths, const char *out[SYNCVIEW_MAX_VIDEOS],
                                  GError **save_error)
@@ -238,6 +247,9 @@ user_paths_get_valid_video_paths(UserPaths *paths, const char *out[SYNCVIEW_MAX_
         if (g_file_test(paths->video_paths[i], G_FILE_TEST_IS_REGULAR)) {
             out[i] = paths->video_paths[i];
             valid++;
+        } else if (!path_parent_exists(paths->video_paths[i])) {
+            /* Directory padre assente (es. unità esterna smontata): lo slot resta salvato ma non è disponibile. */
+            continue;
         } else {
             char *details = g_strdup_printf("Slot %d: %s (file non trovato)", i, paths->video_paths[i]);
             log_user_action("Percorso non valido rimosso", details);

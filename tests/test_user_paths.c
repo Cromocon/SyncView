@@ -142,18 +142,24 @@ test_valid_paths_pruning(const char *dir)
     g_assert_true(user_paths_set_video_path(p, 0, real, NULL));
     g_assert_true(user_paths_set_video_path(p, 1, gone, NULL));
     g_assert_true(user_paths_set_video_path(p, 2, subdir, NULL));  /* esiste ma non è un file */
+    char *unmounted = g_build_filename(dir, "unita_smontata", "film.mp4", NULL);
+    g_assert_true(user_paths_set_video_path(p, 3, unmounted, NULL));  /* directory padre assente */
 
     const char *out[SYNCVIEW_MAX_VIDEOS];
     g_assert_cmpint(user_paths_get_valid_video_paths(p, out, NULL), ==, 1);
     g_assert_cmpstr(out[0], ==, real);
     g_assert_true(out[1] == NULL && out[2] == NULL && out[3] == NULL);
 
-    /* Gli slot non validi sono stati rimossi dalla memoria e dal file. */
+    /* Padre assente: non disponibile ma conservato (memoria e file). */
+    g_assert_cmpstr(user_paths_get_video_path(p, 3), ==, unmounted);
+
+    /* Gli slot con padre esistente e file sparito sono stati rimossi dalla memoria e dal file. */
     g_assert_true(user_paths_get_video_path(p, 1) == NULL && user_paths_get_video_path(p, 2) == NULL);
     user_paths_free(p);
     p = user_paths_new(file);
     g_assert_cmpstr(user_paths_get_video_path(p, 0), ==, real);
     g_assert_true(user_paths_get_video_path(p, 1) == NULL && user_paths_get_video_path(p, 2) == NULL);
+    g_assert_cmpstr(user_paths_get_video_path(p, 3), ==, unmounted);
 
     /* Nessuna modifica: il file non viene riscritto. */
     char *before = read_file(file);
@@ -166,6 +172,7 @@ test_valid_paths_pruning(const char *dir)
     g_free(real);
     g_free(gone);
     g_free(subdir);
+    g_free(unmounted);
 }
 
 static void
