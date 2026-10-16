@@ -106,8 +106,9 @@ exercise_modules(const char *dir)
 
     /* user_paths */
     char *paths_file = g_build_filename(dir, "up.json", NULL);
+    char *gone_path = g_build_filename(dir, "esiste_no.mp4", NULL);
     UserPaths *up_paths = user_paths_new(paths_file);
-    g_assert_true(user_paths_set_video_path(up_paths, 0, "/non/esiste.mp4", NULL));
+    g_assert_true(user_paths_set_video_path(up_paths, 0, gone_path, NULL));
     const char *out[SYNCVIEW_MAX_VIDEOS];
     user_paths_get_valid_video_paths(up_paths, out, NULL);
     user_paths_free(up_paths);
@@ -116,6 +117,7 @@ exercise_modules(const char *dir)
     g_free(db_path);
     g_free(json_path);
     g_free(paths_file);
+    g_free(gone_path);
 }
 
 static void
@@ -157,8 +159,8 @@ main(void)
     g_assert_true(HAS(file, "[AZIONE UTENTE] Migrazione marker JSON\xe2\x86\x92SQLite - 1 marker migrati, backup: m.json.backup"));
     g_assert_true(HAS(file, "ERROR - Errore batch save marker"));
     g_assert_true(HAS(file, "INFO - [AZIONE UTENTE] user_paths.json salvato - File: "));
-    g_assert_true(HAS(file, "[AZIONE UTENTE] Percorso salvato in user_paths - Slot 0: /non/esiste.mp4"));
-    g_assert_true(HAS(file, "[AZIONE UTENTE] Percorso non valido rimosso - Slot 0: /non/esiste.mp4 (file non trovato)"));
+    g_assert_true(HAS(file, "[AZIONE UTENTE] Percorso salvato in user_paths - Slot 0: ") && HAS(file, "/esiste_no.mp4"));
+    g_assert_true(HAS(file, "[AZIONE UTENTE] Percorso non valido rimosso - Slot 0: ") && HAS(file, "/esiste_no.mp4 (file non trovato)"));
     g_assert_true(!HAS(file, "[SYNC]") && !HAS(file, "[MARKER]") && !HAS(file, "DEBUG"));
     g_free(file);
     g_free(err);
