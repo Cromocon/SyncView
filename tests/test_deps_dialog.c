@@ -595,6 +595,10 @@ test_continue_without_is_remembered_across_startups(void)
     wait_check_finished(before);
     dialog = wait_dialog(GTK_WINDOW(parent));
     g_assert_nonnull(dialog);
+    /* Anche questo ingresso condivide la guardia: con un componente indispensabile mancante la X/Esc è rifiutata. */
+    gtk_window_close(GTK_WINDOW(dialog));
+    spin_for(100);
+    g_assert_true(syncview_deps_dialog_find(GTK_WINDOW(parent)) == dialog && gtk_widget_get_visible(dialog));
     close_dialog(dialog);
 
     /* Se l'insieme dei componenti mancanti cambia, la richiesta si ripresenta: qui si «risolve» tutto → mai più richieste. */
