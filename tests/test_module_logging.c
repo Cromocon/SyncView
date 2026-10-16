@@ -159,8 +159,8 @@ main(void)
     g_assert_true(HAS(file, "[AZIONE UTENTE] Migrazione marker JSON\xe2\x86\x92SQLite - 1 marker migrati, backup: m.json.backup"));
     g_assert_true(HAS(file, "ERROR - Errore batch save marker"));
     g_assert_true(HAS(file, "INFO - [AZIONE UTENTE] user_paths.json salvato - File: "));
-    g_assert_true(HAS(file, "[AZIONE UTENTE] Percorso salvato in user_paths - Slot 0: ") && HAS(file, "/esiste_no.mp4"));
-    g_assert_true(HAS(file, "[AZIONE UTENTE] Percorso non valido rimosso - Slot 0: ") && HAS(file, "/esiste_no.mp4 (file non trovato)"));
+    g_assert_true(HAS(file, "[AZIONE UTENTE] Percorso salvato in user_paths - Slot 0: ") && HAS(file, G_DIR_SEPARATOR_S "esiste_no.mp4"));
+    g_assert_true(HAS(file, "[AZIONE UTENTE] Percorso non valido rimosso - Slot 0: ") && HAS(file, G_DIR_SEPARATOR_S "esiste_no.mp4 (file non trovato)"));
     g_assert_true(!HAS(file, "[SYNC]") && !HAS(file, "[MARKER]") && !HAS(file, "DEBUG"));
     g_free(file);
     g_free(err);
