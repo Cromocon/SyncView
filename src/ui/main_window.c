@@ -218,6 +218,20 @@ on_playback_state_changed(SyncviewVideoPlayer *player, guint state, gpointer use
                                              syncview_video_player_get_position(mw->player) > 0);
 }
 
+/* Dopo uno smontaggio abbandonato il player costruisce una pipeline nuova e il suo paintable cambia: il GtkPicture
+ * creato all'avvio terrebbe quello vecchio (immagine ferma). */
+static void
+on_paintable_notify(GObject *player, GParamSpec *pspec, gpointer user_data)
+{
+    MainWindow *mw = user_data;
+
+    (void)pspec;
+    if (mw->picture) {
+        gtk_picture_set_paintable(GTK_PICTURE(mw->picture),
+                                  syncview_video_player_get_paintable(SYNCVIEW_VIDEO_PLAYER(player)));
+    }
+}
+
 static void
 on_load_state_changed(SyncviewVideoPlayer *player, gboolean loaded, gpointer user_data)
 {
@@ -655,8 +669,9 @@ build_tile(MainWindow *mw)
     gtk_widget_set_size_request(overlay, 560, 315);
     gtk_widget_set_overflow(overlay, GTK_OVERFLOW_HIDDEN);
 
-    mw->picture = mw->player ? gtk_picture_new_for_paintable(syncview_video_player_get_paintable(mw->player))
-                             : gtk_picture_new();
+    mw->picture = register_widget(mw, "picture",
+                                  mw->player ? gtk_picture_new_for_paintable(syncview_video_player_get_paintable(mw->player))
+                                             : gtk_picture_new());
     gtk_widget_add_css_class(mw->picture, "sv-video");
     gtk_picture_set_content_fit(GTK_PICTURE(mw->picture), GTK_CONTENT_FIT_CONTAIN);
     gtk_widget_set_hexpand(mw->picture, TRUE);
@@ -869,6 +884,7 @@ syncview_main_window_new(GtkApplication *app, const char *user_paths_file)
         g_signal_connect(mw->player, "playback-state-changed", G_CALLBACK(on_playback_state_changed), mw);
         g_signal_connect(mw->player, "load-state-changed", G_CALLBACK(on_load_state_changed), mw);
         g_signal_connect(mw->player, "error", G_CALLBACK(on_player_error), mw);
+        g_signal_connect(mw->player, "notify::paintable", G_CALLBACK(on_paintable_notify), mw);
         syncview_video_player_set_tick_widget(mw->player, mw->picture);
         set_state(mw, SYNCVIEW_MAIN_WINDOW_EMPTY, "Nessun video", "Carica un video per iniziare");
     } else {

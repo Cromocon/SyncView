@@ -565,6 +565,47 @@ test_deferred_callback_after_destroy(void)
     g_weak_ref_clear(&weak);
 }
 
+static void
+test_abandoned_teardown_updates_picture(void)
+{
+    /* Smontaggio abbandonato (forzato) durante un secondo caricamento: il player cambia paintable e il GtkPicture
+     * della finestra deve seguirlo, altrimenti resterebbe sul vecchio. */
+    char *first = make_video("ab-first.webm", 100);
+    char *second = make_video("ab-second.webm", 50);
+    GtkWidget *window = new_window(NULL);
+    SyncviewVideoPlayer *player = syncview_main_window_get_player(window);
+    GtkWidget *picture = syncview_main_window_get_widget(window, "picture");
+    GdkPaintable *old_paintable = syncview_video_player_get_paintable(player);
+
+    assert(picture != NULL && gtk_picture_get_paintable(GTK_PICTURE(picture)) == old_paintable);
+    assert(syncview_main_window_open_file(window, first));
+    /* Il primo load passa già da uno smontaggio (la pipeline appena creata è in transizione): si attende che finisca,
+     * così la pipeline sale a PAUSED in modo asincrono e il secondo load() trova uno smontaggio da rimandare. */
+    assert(drain_teardowns(15000));
+    assert(syncview_main_window_get_state(window) == SYNCVIEW_MAIN_WINDOW_LOADING);
+    guint abandoned_before = syncview_video_player_abandoned_teardowns();
+
+    syncview_video_player_test_force_abandon(TRUE);
+    assert(syncview_main_window_open_file(window, second));     /* smontaggio rimandato e abbandonato */
+    syncview_video_player_test_force_abandon(FALSE);
+    assert(syncview_video_player_pending_teardowns() == 1);
+    assert(spin_until_state(window, SYNCVIEW_MAIN_WINDOW_LOADED, 15000));
+    spin_for(300);
+    assert(syncview_video_player_abandoned_teardowns() == abandoned_before + 1);
+    assert(syncview_main_window_get_state(window) == SYNCVIEW_MAIN_WINDOW_LOADED);
+    assert(syncview_video_player_is_loaded(player));
+
+    GdkPaintable *new_paintable = syncview_video_player_get_paintable(player);
+
+    assert(new_paintable != old_paintable);
+    assert(gtk_picture_get_paintable(GTK_PICTURE(picture)) == new_paintable);
+
+    close_window(window);
+    syncview_video_player_test_release_abandoned();
+    g_free(first);
+    g_free(second);
+}
+
 #define RUN_TEST(call)                                               \
     do {                                                             \
         if (!test_selected(#call)) {                                 \
@@ -633,6 +674,7 @@ main(void)
     RUN_TEST(test_close_while_loading_and_playing());
     RUN_TEST(test_dependencies_menu_and_missing_plugin());
     RUN_TEST(test_deferred_callback_after_destroy());
+    RUN_TEST(test_abandoned_teardown_updates_picture());
 
     assert(drain_teardowns(15000));
     g_object_unref(app);
