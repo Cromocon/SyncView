@@ -7,7 +7,7 @@ Per il riferimento architetturale completo (non ancora implementato) vedi la sez
 ## Stato implementativo
 
 - **M0 (Scaffolding)**: ✅ completa (M0.1-M0.6). Build Meson funzionante, tutte le dipendenze collegate, CI multi-piattaforma (Linux/macOS/Windows) verde.
-- **M1 (Core logic, nessuna dipendenza da GTK)**: ✅ completa (M1.1-M1.16). 11 test Meson verdi su Linux/macOS/Windows in CI al momento della chiusura; passata ASan (leak detection attiva) e ASan+UBSan pulite. Oggi la suite conta 23 test (`tests/meson.build`) e la CI ha anche un job Linux con ASan+UBSan.
+- **M1 (Core logic, nessuna dipendenza da GTK)**: ✅ completa (M1.1-M1.16). 11 test Meson verdi su Linux/macOS/Windows in CI al momento della chiusura; passata ASan (leak detection attiva) e ASan+UBSan pulite. Oggi la suite conta 22 test (`tests/meson.build`) e la CI ha anche un job Linux con ASan+UBSan.
 - **M2 (Finestra minima con 1 video)**: ✅ completa nel codice (restano le prove su Windows/macOS reali) — M2.1 (analisi di `core/video_loader.py`, vedi [MIGRATION_NOTES.md](MIGRATION_NOTES.md)), M2.2 (`core/discoverer`), M2.3 (scheletro `SyncviewVideoPlayer`), M2.4 (`load()`, bus, primo frame), M2.5 (play/pausa/stop), M2.6 (posizione/durata col frame clock), M2.7 (seek, frame-step esatto, velocità), M2.8 (finestra minima col design system), M2.9 (finestre di debug), M2.10 (verifica dipendenze), M2.11 (installazione delle dipendenze) e M2.12 (interfaccia del primo avvio) completate.
 - **M3-M8**: non ancora iniziate.
 

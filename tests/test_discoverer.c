@@ -5,7 +5,6 @@
  */
 #include "core/discoverer.h"
 
-#include <assert.h>
 #include <glib.h>
 #include <glib/gstdio.h>
 #include <gst/gst.h>
@@ -40,17 +39,17 @@ run_pipeline_to_file(const char *description, const char *output_path)
 {
     GError *error = NULL;
     GstElement *pipeline = gst_parse_launch(description, &error);
-    assert(pipeline != NULL && error == NULL);
+    g_assert_true(pipeline != NULL && error == NULL);
 
     GstElement *out = gst_bin_get_by_name(GST_BIN(pipeline), "out");
-    assert(out != NULL);
+    g_assert_nonnull(out);
     g_object_set(out, "location", output_path, NULL);
     gst_object_unref(out);
 
     gst_element_set_state(pipeline, GST_STATE_PLAYING);
     GstBus *bus = gst_element_get_bus(pipeline);
     GstMessage *msg = gst_bus_timed_pop_filtered(bus, 30 * GST_SECOND, GST_MESSAGE_EOS | GST_MESSAGE_ERROR);
-    assert(msg != NULL && GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS);
+    g_assert_true(msg != NULL && GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS);
 
     gst_message_unref(msg);
     gst_object_unref(bus);
@@ -79,25 +78,25 @@ test_video_info(const char *dir)
     GError *error = NULL;
 
     VideoInfo *info = discoverer_probe_file(path, 0, &error);
-    assert(info != NULL && error == NULL);
-    assert(strcmp(info->path, path) == 0);
-    assert(info->width == 320 && info->height == 240);
-    assert(fabs(info->fps - 25.0) < 1e-9);
-    assert(info->duration_ms >= 1900 && info->duration_ms <= 2200);
-    assert(strcmp(info->codec, "vp8") == 0);
+    g_assert_true(info != NULL && error == NULL);
+    g_assert_cmpstr(info->path, ==, path);
+    g_assert_true(info->width == 320 && info->height == 240);
+    g_assert_true(fabs(info->fps - 25.0) < 1e-9);
+    g_assert_true(info->duration_ms >= 1900 && info->duration_ms <= 2200);
+    g_assert_cmpstr(info->codec, ==, "vp8");
     video_info_free(info);
 
     /* Framerate frazionario 30000/1001 -> 29.97, come num/den di ffprobe. */
     char *ntsc = make_video(dir, "v2997.webm", 640, 360, "30000/1001", 30);
     info = discoverer_probe_file(ntsc, 0, &error);
-    assert(info != NULL);
-    assert(info->width == 640 && info->height == 360);
-    assert(fabs(info->fps - 30000.0 / 1001.0) < 1e-9);
+    g_assert_nonnull(info);
+    g_assert_true(info->width == 640 && info->height == 360);
+    g_assert_true(fabs(info->fps - 30000.0 / 1001.0) < 1e-9);
     video_info_free(info);
 
     /* La versione con fallback dà lo stesso risultato sui file buoni. */
     info = discoverer_probe_file_with_fallback(path, 0, &error);
-    assert(info != NULL && info->width == 320);
+    g_assert_true(info != NULL && info->width == 320);
     video_info_free(info);
 
     g_free(path);
@@ -118,9 +117,9 @@ test_audio_only_gives_defaults(const char *dir)
 
     /* Senza stream video non è un errore: valori di default, come ffprobe senza stream. */
     VideoInfo *info = discoverer_probe_file(path, 0, NULL);
-    assert(info != NULL);
-    assert(info->fps == 0.0 && info->width == 0 && info->height == 0);
-    assert(strcmp(info->codec, "unknown") == 0);
+    g_assert_nonnull(info);
+    g_assert_true(info->fps == 0.0 && info->width == 0 && info->height == 0);
+    g_assert_cmpstr(info->codec, ==, "unknown");
     video_info_free(info);
 
     g_free(path);
@@ -132,20 +131,20 @@ test_file_not_found(const char *dir)
     char *missing = g_build_filename(dir, "non_esiste.mp4", NULL);
     GError *error = NULL;
 
-    assert(discoverer_probe_file(missing, 0, &error) == NULL);
-    assert(error->domain == DISCOVERER_ERROR && error->code == DISCOVERER_ERROR_FILE_NOT_FOUND);
-    assert(strcmp(error->message, "File non trovato") == 0);
+    g_assert_null(discoverer_probe_file(missing, 0, &error));
+    g_assert_true(error->domain == DISCOVERER_ERROR && error->code == DISCOVERER_ERROR_FILE_NOT_FOUND);
+    g_assert_cmpstr(error->message, ==, "File non trovato");
     g_clear_error(&error);
 
     /* Bloccante anche con il fallback. */
-    assert(discoverer_probe_file_with_fallback(missing, 0, &error) == NULL);
-    assert(error->code == DISCOVERER_ERROR_FILE_NOT_FOUND);
+    g_assert_null(discoverer_probe_file_with_fallback(missing, 0, &error));
+    g_assert_true(error->code == DISCOVERER_ERROR_FILE_NOT_FOUND);
     g_clear_error(&error);
 
     /* Una directory e NULL non sono file regolari. */
-    assert(discoverer_probe_file(dir, 0, &error) == NULL && error->code == DISCOVERER_ERROR_FILE_NOT_FOUND);
+    g_assert_true(discoverer_probe_file(dir, 0, &error) == NULL && error->code == DISCOVERER_ERROR_FILE_NOT_FOUND);
     g_clear_error(&error);
-    assert(discoverer_probe_file(NULL, 0, &error) == NULL && error->code == DISCOVERER_ERROR_FILE_NOT_FOUND);
+    g_assert_true(discoverer_probe_file(NULL, 0, &error) == NULL && error->code == DISCOVERER_ERROR_FILE_NOT_FOUND);
     g_clear_error(&error);
 
     g_free(missing);
@@ -159,24 +158,24 @@ test_corrupt_file(const char *dir)
     for (size_t i = 0; i < sizeof(data); i++) {
         data[i] = (char)((i * 131 + 17) % 251);
     }
-    assert(g_file_set_contents(garbage, data, sizeof(data), NULL));
+    g_assert_true(g_file_set_contents(garbage, data, sizeof(data), NULL));
 
     GError *error = NULL;
-    assert(discoverer_probe_file(garbage, 0, &error) == NULL);
-    assert(error->domain == DISCOVERER_ERROR && error->code == DISCOVERER_ERROR_CORRUPT);
-    assert(strstr(error->message, "corrotto") != NULL);
+    g_assert_null(discoverer_probe_file(garbage, 0, &error));
+    g_assert_true(error->domain == DISCOVERER_ERROR && error->code == DISCOVERER_ERROR_CORRUPT);
+    g_assert_nonnull(strstr(error->message, "corrotto"));
     g_clear_error(&error);
 
     /* Bloccante: niente fallback silenzioso. */
-    assert(discoverer_probe_file_with_fallback(garbage, 0, &error) == NULL);
-    assert(error->code == DISCOVERER_ERROR_CORRUPT);
+    g_assert_null(discoverer_probe_file_with_fallback(garbage, 0, &error));
+    g_assert_true(error->code == DISCOVERER_ERROR_CORRUPT);
     g_clear_error(&error);
 
     /* File vuoto. */
     char *empty = g_build_filename(dir, "empty.mp4", NULL);
-    assert(g_file_set_contents(empty, "", 0, NULL));
-    assert(discoverer_probe_file(empty, 0, &error) == NULL);
-    assert(discoverer_error_is_blocking((DiscovererError)error->code));
+    g_assert_true(g_file_set_contents(empty, "", 0, NULL));
+    g_assert_null(discoverer_probe_file(empty, 0, &error));
+    g_assert_true(discoverer_error_is_blocking((DiscovererError)error->code));
     g_clear_error(&error);
 
     g_free(garbage);
@@ -189,19 +188,19 @@ test_truncated_file(const char *dir)
     char *path = make_video(dir, "full.webm", 320, 240, "25/1", 50);
     char *content = NULL;
     gsize len = 0;
-    assert(g_file_get_contents(path, &content, &len, NULL));
+    g_assert_true(g_file_get_contents(path, &content, &len, NULL));
 
     /* Solo l'intestazione e poco altro: o riconosciuto con meno dati, o errore bloccante/specifico. */
     char *cut = g_build_filename(dir, "cut.webm", NULL);
-    assert(g_file_set_contents(cut, content, (gssize)(len / 20), NULL));
+    g_assert_true(g_file_set_contents(cut, content, (gssize)(len / 20), NULL));
 
     GError *error = NULL;
     VideoInfo *info = discoverer_probe_file(cut, 0, &error);
     if (info) {
-        assert(info->width == 320);  /* intestazione intatta: metadati comunque letti */
+        g_assert_cmpint(info->width, ==, 320);  /* intestazione intatta: metadati comunque letti */
         video_info_free(info);
     } else {
-        assert(error->domain == DISCOVERER_ERROR);
+        g_assert_true(error->domain == DISCOVERER_ERROR);
         g_clear_error(&error);
     }
 
@@ -213,21 +212,21 @@ test_truncated_file(const char *dir)
 static void
 test_error_classification(void)
 {
-    assert(discoverer_error_is_blocking(DISCOVERER_ERROR_FILE_NOT_FOUND));
-    assert(discoverer_error_is_blocking(DISCOVERER_ERROR_URI_INVALID));
-    assert(discoverer_error_is_blocking(DISCOVERER_ERROR_MISSING_PLUGINS));
-    assert(discoverer_error_is_blocking(DISCOVERER_ERROR_CORRUPT));
-    assert(!discoverer_error_is_blocking(DISCOVERER_ERROR_TIMEOUT));
-    assert(!discoverer_error_is_blocking(DISCOVERER_ERROR_BUSY));
-    assert(!discoverer_error_is_blocking(DISCOVERER_ERROR_INTERNAL));
+    g_assert_true(discoverer_error_is_blocking(DISCOVERER_ERROR_FILE_NOT_FOUND));
+    g_assert_true(discoverer_error_is_blocking(DISCOVERER_ERROR_URI_INVALID));
+    g_assert_true(discoverer_error_is_blocking(DISCOVERER_ERROR_MISSING_PLUGINS));
+    g_assert_true(discoverer_error_is_blocking(DISCOVERER_ERROR_CORRUPT));
+    g_assert_false(discoverer_error_is_blocking(DISCOVERER_ERROR_TIMEOUT));
+    g_assert_false(discoverer_error_is_blocking(DISCOVERER_ERROR_BUSY));
+    g_assert_false(discoverer_error_is_blocking(DISCOVERER_ERROR_INTERNAL));
 }
 
 static void
 test_missing_plugins_message(void)
 {
-    assert(discoverer_format_missing_plugins(NULL) == NULL);
+    g_assert_null(discoverer_format_missing_plugins(NULL));
     const char *const none[] = { NULL };
-    assert(discoverer_format_missing_plugins(none) == NULL);
+    g_assert_null(discoverer_format_missing_plugins(none));
 
     /* Formato reale degli installer details: il 4° campo è la descrizione leggibile. */
     const char *const one[] = {
@@ -235,7 +234,7 @@ test_missing_plugins_message(void)
         NULL
     };
     char *msg = discoverer_format_missing_plugins(one);
-    assert(msg && strcmp(msg, "H.265 / HEVC decoder") == 0);
+    g_assert_true(msg && strcmp(msg, "H.265 / HEVC decoder") == 0);
     g_free(msg);
 
     const char *const two[] = {
@@ -244,13 +243,13 @@ test_missing_plugins_message(void)
         NULL
     };
     msg = discoverer_format_missing_plugins(two);
-    assert(msg && strcmp(msg, "H.265 decoder, AAC decoder") == 0);
+    g_assert_true(msg && strcmp(msg, "H.265 decoder, AAC decoder") == 0);
     g_free(msg);
 
     /* Stringa non nel formato atteso: la si mostra così com'è, senza crash. */
     const char *const odd[] = { "formato-strano", NULL };
     msg = discoverer_format_missing_plugins(odd);
-    assert(msg && strcmp(msg, "formato-strano") == 0);
+    g_assert_true(msg && strcmp(msg, "formato-strano") == 0);
     g_free(msg);
 }
 
@@ -268,15 +267,15 @@ test_timeout_does_not_crash(const char *dir)
         if (probed) {
             video_info_free(probed);
         } else {
-            assert(error->domain == DISCOVERER_ERROR);
+            g_assert_true(error->domain == DISCOVERER_ERROR);
             g_clear_error(&error);
         }
     }
 
     /* Con fallback, un timeout (non bloccante) restituisce sempre info utilizzabili. */
     VideoInfo *info = discoverer_probe_file_with_fallback(path, 1, &error);
-    assert(info != NULL && error == NULL);
-    assert(strcmp(info->path, path) == 0);
+    g_assert_true(info != NULL && error == NULL);
+    g_assert_cmpstr(info->path, ==, path);
     video_info_free(info);
 
     g_free(path);
@@ -296,38 +295,38 @@ test_nominal_fps_from_intervals(void)
     int64_t iv[100];
 
     /* Cadenze standard: agganciate al valore nominale. */
-    fill(iv, 100, 40000000);   assert(discoverer_nominal_fps_from_intervals(iv, 100) == 25.0);
-    fill(iv, 100, 41708333);   assert(fabs(discoverer_nominal_fps_from_intervals(iv, 100) - 24000.0 / 1001.0) < 1e-9);
-    fill(iv, 100, 41666667);   assert(discoverer_nominal_fps_from_intervals(iv, 100) == 24.0);
-    fill(iv, 100, 20000000);   assert(discoverer_nominal_fps_from_intervals(iv, 100) == 50.0);
+    fill(iv, 100, 40000000);   g_assert_true(discoverer_nominal_fps_from_intervals(iv, 100) == 25.0);
+    fill(iv, 100, 41708333);   g_assert_true(fabs(discoverer_nominal_fps_from_intervals(iv, 100) - 24000.0 / 1001.0) < 1e-9);
+    fill(iv, 100, 41666667);   g_assert_true(discoverer_nominal_fps_from_intervals(iv, 100) == 24.0);
+    fill(iv, 100, 20000000);   g_assert_true(discoverer_nominal_fps_from_intervals(iv, 100) == 50.0);
 
     /* 30 e 29.97 distano solo 0.1%: deve vincere il più vicino, non il primo entro la soglia. */
-    fill(iv, 100, 33333333);   assert(discoverer_nominal_fps_from_intervals(iv, 100) == 30.0);
-    fill(iv, 100, 33366700);   assert(fabs(discoverer_nominal_fps_from_intervals(iv, 100) - 30000.0 / 1001.0) < 1e-9);
-    fill(iv, 100, 16683333);   assert(fabs(discoverer_nominal_fps_from_intervals(iv, 100) - 60000.0 / 1001.0) < 1e-9);
+    fill(iv, 100, 33333333);   g_assert_true(discoverer_nominal_fps_from_intervals(iv, 100) == 30.0);
+    fill(iv, 100, 33366700);   g_assert_true(fabs(discoverer_nominal_fps_from_intervals(iv, 100) - 30000.0 / 1001.0) < 1e-9);
+    fill(iv, 100, 16683333);   g_assert_true(fabs(discoverer_nominal_fps_from_intervals(iv, 100) - 60000.0 / 1001.0) < 1e-9);
 
     /* Frame rate non standard: valore grezzo (1/0.0571428 s = 17.5). */
     fill(iv, 100, 57142857);
     double raw = discoverer_nominal_fps_from_intervals(iv, 100);
-    assert(fabs(raw - 17.5) < 1e-3);
+    g_assert_true(fabs(raw - 17.5) < 1e-3);
 
     /* Mediana: robusta a outlier (pause, buchi) anche numerosi ma minoritari. */
     fill(iv, 100, 33333333);
     for (int i = 0; i < 30; i++) iv[i * 3] = 500000000;
-    assert(discoverer_nominal_fps_from_intervals(iv, 100) == 30.0);
+    g_assert_true(discoverer_nominal_fps_from_intervals(iv, 100) == 30.0);
 
     /* Intervalli <= 0 (timestamp duplicati/non crescenti) ignorati. */
     fill(iv, 100, 40000000);
     for (int i = 0; i < 40; i++) iv[i] = (i % 2) ? 0 : -5;
-    assert(discoverer_nominal_fps_from_intervals(iv, 100) == 25.0);
+    g_assert_true(discoverer_nominal_fps_from_intervals(iv, 100) == 25.0);
 
     /* Troppo pochi dati validi -> sconosciuto. */
     fill(iv, 100, 40000000);
-    assert(discoverer_nominal_fps_from_intervals(iv, SYNCVIEW_FPS_MIN_INTERVALS - 1) == 0.0);
-    assert(discoverer_nominal_fps_from_intervals(iv, SYNCVIEW_FPS_MIN_INTERVALS) == 25.0);
+    g_assert_true(discoverer_nominal_fps_from_intervals(iv, SYNCVIEW_FPS_MIN_INTERVALS - 1) == 0.0);
+    g_assert_true(discoverer_nominal_fps_from_intervals(iv, SYNCVIEW_FPS_MIN_INTERVALS) == 25.0);
     fill(iv, 100, 0);
-    assert(discoverer_nominal_fps_from_intervals(iv, 100) == 0.0);
-    assert(discoverer_nominal_fps_from_intervals(NULL, 0) == 0.0);
+    g_assert_true(discoverer_nominal_fps_from_intervals(iv, 100) == 0.0);
+    g_assert_true(discoverer_nominal_fps_from_intervals(NULL, 0) == 0.0);
 }
 
 static void
@@ -335,16 +334,16 @@ test_estimate_fps_from_file(const char *dir)
 {
     /* Stima dai timestamp reali del demuxer, su file a frame rate costante noto. */
     char *p25 = make_video(dir, "e25.webm", 320, 240, "25/1", 100);
-    assert(discoverer_estimate_fps(p25) == 25.0);
+    g_assert_true(discoverer_estimate_fps(p25) == 25.0);
 
     char *p30 = make_video(dir, "e30.webm", 320, 240, "30000/1001", 100);
-    assert(fabs(discoverer_estimate_fps(p30) - 30000.0 / 1001.0) < 1e-9);
+    g_assert_true(fabs(discoverer_estimate_fps(p30) - 30000.0 / 1001.0) < 1e-9);
 
     /* File inesistente / non video: 0.0, senza crash né blocchi. */
-    assert(discoverer_estimate_fps("/non/esiste.webm") == 0.0);
+    g_assert_true(discoverer_estimate_fps("/non/esiste.webm") == 0.0);
     char *garbage = g_build_filename(dir, "estimate_garbage.bin", NULL);
-    assert(g_file_set_contents(garbage, "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", -1, NULL));
-    assert(discoverer_estimate_fps(garbage) == 0.0);
+    g_assert_true(g_file_set_contents(garbage, "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", -1, NULL));
+    g_assert_true(discoverer_estimate_fps(garbage) == 0.0);
 
     g_free(p25);
     g_free(p30);
@@ -366,15 +365,15 @@ test_special_path_characters(const char *dir)
 
     for (size_t i = 0; i < G_N_ELEMENTS(names); i++) {
         char *sub = g_build_filename(dir, names[i], NULL);
-        assert(g_mkdir_with_parents(sub, 0755) == 0);
+        g_assert_cmpint(g_mkdir_with_parents(sub, 0755), ==, 0);
 
         char *path = make_video(sub, "v.webm", 320, 240, "25/1", 50);
         GError *error = NULL;
         VideoInfo *info = discoverer_probe_file(path, 0, &error);
-        assert(info != NULL && error == NULL);
-        assert(info->width == 320 && fabs(info->fps - 25.0) < 1e-9);
+        g_assert_true(info != NULL && error == NULL);
+        g_assert_true(info->width == 320 && fabs(info->fps - 25.0) < 1e-9);
         video_info_free(info);
-        assert(discoverer_estimate_fps(path) == 25.0);
+        g_assert_true(discoverer_estimate_fps(path) == 25.0);
 
         g_free(path);
         g_free(sub);
@@ -385,9 +384,9 @@ static void
 test_default_info(void)
 {
     VideoInfo *info = video_info_default("/x/y.mp4");
-    assert(strcmp(info->path, "/x/y.mp4") == 0);
-    assert(info->fps == 0.0 && info->duration_ms == 0 && info->width == 0 && info->height == 0);
-    assert(strcmp(info->codec, "unknown") == 0);
+    g_assert_cmpstr(info->path, ==, "/x/y.mp4");
+    g_assert_true(info->fps == 0.0 && info->duration_ms == 0 && info->width == 0 && info->height == 0);
+    g_assert_cmpstr(info->codec, ==, "unknown");
     video_info_free(info);
     video_info_free(NULL);
 }
@@ -444,22 +443,22 @@ test_async(const char *dir)
 
     /* Successo: callback nel main context, info corrette. */
     run_async(path, NULL, &r, FALSE);
-    assert(r.calls == 1 && r.info != NULL && r.error == NULL);
-    assert(r.info->width == 320 && fabs(r.info->fps - 25.0) < 1e-9);
+    g_assert_true(r.calls == 1 && r.info != NULL && r.error == NULL);
+    g_assert_true(r.info->width == 320 && fabs(r.info->fps - 25.0) < 1e-9);
     video_info_free(r.info);
 
     /* File assente: errore bloccante propagato dal thread. */
     char *missing = g_build_filename(dir, "manca.webm", NULL);
     run_async(missing, NULL, &r, FALSE);
-    assert(r.calls == 1 && r.info == NULL);
-    assert(r.error->domain == DISCOVERER_ERROR && r.error->code == DISCOVERER_ERROR_FILE_NOT_FOUND);
+    g_assert_true(r.calls == 1 && r.info == NULL);
+    g_assert_true(r.error->domain == DISCOVERER_ERROR && r.error->code == DISCOVERER_ERROR_FILE_NOT_FOUND);
     g_clear_error(&r.error);
 
     /* Annullamento: la callback riceve CANCELLED (una sola volta) e nessuna info. */
     GCancellable *cancellable = g_cancellable_new();
     run_async(path, cancellable, &r, TRUE);
-    assert(r.calls == 1 && r.info == NULL);
-    assert(g_error_matches(r.error, G_IO_ERROR, G_IO_ERROR_CANCELLED));
+    g_assert_true(r.calls == 1 && r.info == NULL);
+    g_assert_true(g_error_matches(r.error, G_IO_ERROR, G_IO_ERROR_CANCELLED));
     g_clear_error(&r.error);
     g_object_unref(cancellable);
 
@@ -478,7 +477,7 @@ test_async(const char *dir)
         }
     }
     g_source_remove(timeout);
-    assert(a.info && b.info && a.info->width == 320 && b.info->width == 640);
+    g_assert_true(a.info && b.info && a.info->width == 320 && b.info->width == 640);
     video_info_free(a.info);
     video_info_free(b.info);
     g_main_loop_unref(a.loop);
@@ -501,7 +500,7 @@ main(void)
     }
 
     char *dir = g_dir_make_tmp("syncview-discoverer-XXXXXX", NULL);
-    assert(dir != NULL);
+    g_assert_nonnull(dir);
 
     test_default_info();
     test_error_classification();
@@ -518,7 +517,7 @@ main(void)
     test_async(dir);
 
     char *cmd = g_strdup_printf("rm -rf '%s'", dir);
-    assert(system(cmd) == 0);
+    g_assert_cmpint(system(cmd), ==, 0);
     g_free(cmd);
     g_free(dir);
     return 0;

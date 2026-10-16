@@ -3,7 +3,6 @@
  */
 #include "core/logger.h"
 
-#include <assert.h>
 #include <fcntl.h>
 #include <glib.h>
 #include <glib/gstdio.h>
@@ -22,7 +21,7 @@ capture_begin(const char *path)
     fflush(stderr);
     saved_stderr = dup(2);
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    assert(fd >= 0 && saved_stderr >= 0);
+    g_assert_true(fd >= 0 && saved_stderr >= 0);
     dup2(fd, 2);
     close(fd);
 }
@@ -39,7 +38,7 @@ static char *
 read_file(const char *path)
 {
     char *content = NULL;
-    assert(g_file_get_contents(path, &content, NULL, NULL));
+    g_assert_true(g_file_get_contents(path, &content, NULL, NULL));
     return content;
 }
 
@@ -127,14 +126,14 @@ test_names_and_defaults(void)
 {
     const char *expected[] = { "APP", "USER", "VIDEO", "EXPORT", "SYNC", "MARKER", "GST", "UI" };
 
-    assert(LOGGER_MODULE_COUNT == G_N_ELEMENTS(expected));
+    g_assert_true(LOGGER_MODULE_COUNT == G_N_ELEMENTS(expected));
     for (int m = 0; m < LOGGER_MODULE_COUNT; m++) {
-        assert(strcmp(logger_module_name(m), expected[m]) == 0);
-        assert(logger_is_module_enabled(m));
+        g_assert_cmpstr(logger_module_name(m), ==, expected[m]);
+        g_assert_true(logger_is_module_enabled(m));
     }
-    assert(strcmp(logger_module_name(LOGGER_MODULE_COUNT), "?") == 0);
-    assert(strcmp(logger_module_name(-1), "?") == 0);
-    assert(!logger_is_module_enabled(LOGGER_MODULE_COUNT));
+    g_assert_cmpstr(logger_module_name(LOGGER_MODULE_COUNT), ==, "?");
+    g_assert_cmpstr(logger_module_name(-1), ==, "?");
+    g_assert_false(logger_is_module_enabled(LOGGER_MODULE_COUNT));
     logger_set_module_enabled(LOGGER_MODULE_COUNT, FALSE);  /* indice non valido: ignorato */
 }
 
@@ -149,9 +148,9 @@ test_filter_all_destinations(const char *dir)
     recorder_init(&rec);
 
     capture_begin(err_path);
-    assert(logger_init(log_path, TRUE, NULL));
+    g_assert_true(logger_init(log_path, TRUE, NULL));
     guint sink = logger_add_sink(recorder_sink, &rec);
-    assert(sink > 0);
+    g_assert_true(sink > 0);
 
     /* 1) Tutto abilitato: ogni messaggio arriva ovunque. */
     log_sync("sync-uno");
@@ -159,7 +158,7 @@ test_filter_all_destinations(const char *dir)
 
     /* 2) SYNC disabilitato: sparisce da file, stderr e sink; MARKER resta. */
     logger_set_module_enabled(LOGGER_MODULE_SYNC, FALSE);
-    assert(!logger_is_module_enabled(LOGGER_MODULE_SYNC) && logger_is_module_enabled(LOGGER_MODULE_MARKER));
+    g_assert_true(!logger_is_module_enabled(LOGGER_MODULE_SYNC) && logger_is_module_enabled(LOGGER_MODULE_MARKER));
     log_sync("sync-due-NASCOSTO");
     log_marker("marker-due");
 
@@ -175,15 +174,15 @@ test_filter_all_destinations(const char *dir)
     char *err = read_file(err_path);
     const char *dests[] = { file, err };
     for (int i = 0; i < 2; i++) {
-        assert(HAS(dests[i], "sync-uno") && HAS(dests[i], "marker-uno"));
-        assert(!HAS(dests[i], "sync-due-NASCOSTO"));
-        assert(HAS(dests[i], "marker-due") && HAS(dests[i], "sync-tre"));
+        g_assert_true(HAS(dests[i], "sync-uno") && HAS(dests[i], "marker-uno"));
+        g_assert_false(HAS(dests[i], "sync-due-NASCOSTO"));
+        g_assert_true(HAS(dests[i], "marker-due") && HAS(dests[i], "sync-tre"));
     }
-    assert(recorder_has(&rec, "DEBUG|SYNC|[SYNC] sync-uno"));
-    assert(recorder_has(&rec, "DEBUG|MARKER|[MARKER] marker-due"));
-    assert(recorder_has(&rec, "DEBUG|SYNC|[SYNC] sync-tre"));
-    assert(!recorder_has(&rec, "DEBUG|SYNC|[SYNC] sync-due-NASCOSTO"));
-    assert(recorder_count(&rec) == 4);  /* solo i 4 messaggi passati dal filtro ("avviata" precede il sink) */
+    g_assert_true(recorder_has(&rec, "DEBUG|SYNC|[SYNC] sync-uno"));
+    g_assert_true(recorder_has(&rec, "DEBUG|MARKER|[MARKER] marker-due"));
+    g_assert_true(recorder_has(&rec, "DEBUG|SYNC|[SYNC] sync-tre"));
+    g_assert_false(recorder_has(&rec, "DEBUG|SYNC|[SYNC] sync-due-NASCOSTO"));
+    g_assert_cmpint(recorder_count(&rec), ==, 4);  /* solo i 4 messaggi passati dal filtro ("avviata" precede il sink) */
 
     g_free(file);
     g_free(err);
@@ -201,26 +200,26 @@ test_legacy_mapping_and_errors(const char *dir)
     Recorder rec;
     recorder_init(&rec);
 
-    assert(logger_init(log_path, TRUE, NULL));
+    g_assert_true(logger_init(log_path, TRUE, NULL));
     guint sink = logger_add_sink(recorder_sink, &rec);
 
     /* Tutto abilitato: modulo e livello corretti per ogni funzione. */
     recorder_clear(&rec);
     log_one_of_each();
-    assert(recorder_has(&rec, "INFO|USER|[AZIONE UTENTE] u"));
-    assert(recorder_has(&rec, "INFO|VIDEO|[VIDEO 1] v"));
-    assert(recorder_has(&rec, "INFO|VIDEO|[VIDEO 1] Stato riproduzione: playing"));
-    assert(recorder_has(&rec, "INFO|VIDEO|[VIDEO 1] Timeline seek: 00:01 (1000ms)"));
-    assert(recorder_has(&rec, "INFO|EXPORT|\xe2\x9c\x93 Esportazione completata: clip"));
-    assert(recorder_has(&rec, "INFO|EXPORT|[EXPORT] e"));
-    assert(recorder_has(&rec, "DEBUG|SYNC|[SYNC] s"));
-    assert(recorder_has(&rec, "DEBUG|MARKER|[MARKER] m"));
-    assert(recorder_has(&rec, "DEBUG|GST|[GST] g"));
-    assert(recorder_has(&rec, "DEBUG|UI|[UI] i"));
-    assert(recorder_has(&rec, "ERROR|APP|err"));
-    assert(recorder_has(&rec, "ERROR|APP|dettaglio"));
-    assert(recorder_count(&rec) == 12);
-    assert(rec.ts_ok == 12);  /* timestamp nel formato del file */
+    g_assert_true(recorder_has(&rec, "INFO|USER|[AZIONE UTENTE] u"));
+    g_assert_true(recorder_has(&rec, "INFO|VIDEO|[VIDEO 1] v"));
+    g_assert_true(recorder_has(&rec, "INFO|VIDEO|[VIDEO 1] Stato riproduzione: playing"));
+    g_assert_true(recorder_has(&rec, "INFO|VIDEO|[VIDEO 1] Timeline seek: 00:01 (1000ms)"));
+    g_assert_true(recorder_has(&rec, "INFO|EXPORT|\xe2\x9c\x93 Esportazione completata: clip"));
+    g_assert_true(recorder_has(&rec, "INFO|EXPORT|[EXPORT] e"));
+    g_assert_true(recorder_has(&rec, "DEBUG|SYNC|[SYNC] s"));
+    g_assert_true(recorder_has(&rec, "DEBUG|MARKER|[MARKER] m"));
+    g_assert_true(recorder_has(&rec, "DEBUG|GST|[GST] g"));
+    g_assert_true(recorder_has(&rec, "DEBUG|UI|[UI] i"));
+    g_assert_true(recorder_has(&rec, "ERROR|APP|err"));
+    g_assert_true(recorder_has(&rec, "ERROR|APP|dettaglio"));
+    g_assert_cmpint(recorder_count(&rec), ==, 12);
+    g_assert_cmpint(rec.ts_ok, ==, 12);  /* timestamp nel formato del file */
 
     /* Tutti i moduli disabilitati: restano solo gli ERROR (anche ERROR di un modulo disabilitato). */
     for (int m = 0; m < LOGGER_MODULE_COUNT; m++) {
@@ -229,9 +228,9 @@ test_legacy_mapping_and_errors(const char *dir)
     recorder_clear(&rec);
     log_one_of_each();
     log_export("clip-ko", FALSE, "motivo");  /* ERROR del modulo EXPORT, disabilitato */
-    assert(recorder_count(&rec) == 3);
-    assert(recorder_has(&rec, "ERROR|APP|err") && recorder_has(&rec, "ERROR|APP|dettaglio"));
-    assert(recorder_has(&rec, "ERROR|EXPORT|\xe2\x9c\x97 Esportazione fallita: clip-ko - motivo"));
+    g_assert_cmpint(recorder_count(&rec), ==, 3);
+    g_assert_true(recorder_has(&rec, "ERROR|APP|err") && recorder_has(&rec, "ERROR|APP|dettaglio"));
+    g_assert_true(recorder_has(&rec, "ERROR|EXPORT|\xe2\x9c\x97 Esportazione fallita: clip-ko - motivo"));
 
     /* Disabilitando un solo modulo storico spariscono solo le sue funzioni. */
     for (int m = 0; m < LOGGER_MODULE_COUNT; m++) {
@@ -240,19 +239,19 @@ test_legacy_mapping_and_errors(const char *dir)
     logger_set_module_enabled(LOGGER_MODULE_VIDEO, FALSE);
     recorder_clear(&rec);
     log_one_of_each();
-    assert(recorder_count(&rec) == 12 - 3);  /* video_action, playback, timeline_seek */
-    assert(!recorder_has(&rec, "INFO|VIDEO|[VIDEO 1] v"));
+    g_assert_true(recorder_count(&rec) == 12 - 3);  /* video_action, playback, timeline_seek */
+    g_assert_false(recorder_has(&rec, "INFO|VIDEO|[VIDEO 1] v"));
     logger_set_module_enabled(LOGGER_MODULE_USER, FALSE);
     recorder_clear(&rec);
     log_one_of_each();
-    assert(recorder_count(&rec) == 12 - 3 - 1);
-    assert(!recorder_has(&rec, "INFO|USER|[AZIONE UTENTE] u"));
+    g_assert_true(recorder_count(&rec) == 12 - 3 - 1);
+    g_assert_false(recorder_has(&rec, "INFO|USER|[AZIONE UTENTE] u"));
 
     /* logger_init() riporta il filtro al default. */
     logger_remove_sink(sink);
     logger_shutdown();
-    assert(logger_init(NULL, TRUE, NULL));
-    assert(logger_is_module_enabled(LOGGER_MODULE_VIDEO) && logger_is_module_enabled(LOGGER_MODULE_USER));
+    g_assert_true(logger_init(NULL, TRUE, NULL));
+    g_assert_true(logger_is_module_enabled(LOGGER_MODULE_VIDEO) && logger_is_module_enabled(LOGGER_MODULE_USER));
     logger_shutdown();
 
     g_free(log_path);
@@ -270,7 +269,7 @@ test_filter_in_normal_mode_and_no_sink_without_debug(const char *dir)
     recorder_init(&rec);
 
     capture_begin(err_path);
-    assert(logger_init(log_path, FALSE, NULL));
+    g_assert_true(logger_init(log_path, FALSE, NULL));
     guint sink = logger_add_sink(recorder_sink, &rec);
 
     log_user_action("visibile-utente", NULL);
@@ -285,11 +284,11 @@ test_filter_in_normal_mode_and_no_sink_without_debug(const char *dir)
 
     char *file = read_file(log_path);
     char *err = read_file(err_path);
-    assert(strlen(err) == 0);                       /* niente stderr senza debug */
-    assert(recorder_count(&rec) == 0);              /* nessun sink invocato senza debug */
-    assert(HAS(file, "visibile-utente") && HAS(file, "nascosto-export\n"));
-    assert(!HAS(file, "nascosto-export-2"));
-    assert(HAS(file, "errore-sempre"));
+    g_assert_cmpint(strlen(err), ==, 0);                       /* niente stderr senza debug */
+    g_assert_cmpint(recorder_count(&rec), ==, 0);              /* nessun sink invocato senza debug */
+    g_assert_true(HAS(file, "visibile-utente") && HAS(file, "nascosto-export\n"));
+    g_assert_false(HAS(file, "nascosto-export-2"));
+    g_assert_true(HAS(file, "errore-sempre"));
 
     g_free(file);
     g_free(err);
@@ -307,19 +306,19 @@ test_multiple_sinks_and_removal(void)
     recorder_init(&a);
     recorder_init(&b);
 
-    assert(logger_init(NULL, TRUE, NULL));
+    g_assert_true(logger_init(NULL, TRUE, NULL));
     guint ida = logger_add_sink(recorder_sink, &a);
     guint idb = logger_add_sink(recorder_sink, &b);
-    assert(ida > 0 && idb > 0 && ida != idb);
+    g_assert_true(ida > 0 && idb > 0 && ida != idb);
 
     log_sync("uno");
-    assert(recorder_has(&a, "DEBUG|SYNC|[SYNC] uno") && recorder_has(&b, "DEBUG|SYNC|[SYNC] uno"));
+    g_assert_true(recorder_has(&a, "DEBUG|SYNC|[SYNC] uno") && recorder_has(&b, "DEBUG|SYNC|[SYNC] uno"));
 
     logger_remove_sink(ida);
     logger_remove_sink(ida);   /* id già rimosso: no-op */
     logger_remove_sink(9999);  /* id sconosciuto: no-op */
     log_sync("due");
-    assert(!recorder_has(&a, "DEBUG|SYNC|[SYNC] due") && recorder_has(&b, "DEBUG|SYNC|[SYNC] due"));
+    g_assert_true(!recorder_has(&a, "DEBUG|SYNC|[SYNC] due") && recorder_has(&b, "DEBUG|SYNC|[SYNC] due"));
 
     logger_remove_sink(idb);
     logger_shutdown();
@@ -356,16 +355,16 @@ test_reentrant_sink(const char *dir)
     char *log_path = g_build_filename(dir, "reent.log", NULL);
     ReentrantState st = { 0, 0 };
 
-    assert(logger_init(log_path, TRUE, NULL));
+    g_assert_true(logger_init(log_path, TRUE, NULL));
     st.self_id = logger_add_sink(reentrant_sink, &st);
 
     log_sync("originale");
     logger_remove_sink(st.self_id);
     logger_shutdown();
 
-    assert(st.calls == 1);  /* "dal-sink" non è stato recapitato ai sink */
+    g_assert_cmpint(st.calls, ==, 1);  /* "dal-sink" non è stato recapitato ai sink */
     char *file = read_file(log_path);
-    assert(HAS(file, "originale") && HAS(file, "dal-sink"));  /* ma è nel file */
+    g_assert_true(HAS(file, "originale") && HAS(file, "dal-sink"));  /* ma è nel file */
     g_free(file);
     g_free(log_path);
 }
@@ -395,7 +394,7 @@ test_concurrent_logging(void)
     Recorder rec;
     recorder_init(&rec);
 
-    assert(logger_init(NULL, TRUE, NULL));
+    g_assert_true(logger_init(NULL, TRUE, NULL));
     guint sink = logger_add_sink(recorder_sink, &rec);
 
     GThread *threads[N_THREADS];
@@ -409,10 +408,10 @@ test_concurrent_logging(void)
     logger_remove_sink(sink);
     logger_shutdown();
 
-    assert(recorder_count(&rec) == N_THREADS * N_PER_THREAD);  /* nessun messaggio SYNC perso */
+    g_assert_true(recorder_count(&rec) == N_THREADS * N_PER_THREAD);  /* nessun messaggio SYNC perso */
     for (int t = 0; t < N_THREADS; t++) {
         char *last = g_strdup_printf("DEBUG|SYNC|[SYNC] thread-%d-msg-%d", t, N_PER_THREAD - 1);
-        assert(recorder_has(&rec, last));
+        g_assert_true(recorder_has(&rec, last));
         g_free(last);
     }
     g_ptr_array_free(rec.messages, TRUE);
@@ -422,7 +421,7 @@ int
 main(void)
 {
     char *dir = g_dir_make_tmp("syncview-logger-filter-XXXXXX", NULL);
-    assert(dir != NULL);
+    g_assert_nonnull(dir);
 
     test_names_and_defaults();
     test_filter_all_destinations(dir);
@@ -433,7 +432,7 @@ main(void)
     test_concurrent_logging();
 
     char *cmd = g_strdup_printf("rm -rf '%s'", dir);
-    assert(system(cmd) == 0);
+    g_assert_cmpint(system(cmd), ==, 0);
     g_free(cmd);
     g_free(dir);
     return 0;

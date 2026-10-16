@@ -7,7 +7,6 @@
 #include "ui/deps_dialog.h"
 #include "ui/theme.h"
 
-#include <assert.h>
 #include <glib.h>
 #include <glib/gstdio.h>
 #include <gtk/gtk.h>
@@ -114,7 +113,7 @@ W(GtkWidget *dialog, const char *name)
     if (!widget) {
         g_printerr("widget «%s» assente (fase %d)\n", name, syncview_deps_dialog_get_phase(dialog));
     }
-    assert(widget != NULL);
+    g_assert_nonnull(widget);
     return widget;
 }
 
@@ -129,7 +128,7 @@ click(GtkWidget *dialog, const char *name)
 {
     GtkWidget *button = W(dialog, name);
 
-    assert(gtk_widget_get_sensitive(button));
+    g_assert_true(gtk_widget_get_sensitive(button));
     g_signal_emit_by_name(button, "clicked");  /* gtk_widget_activate ritarda il clic di ~250 ms */
 }
 
@@ -223,28 +222,28 @@ test_x_does_not_close_when_a_choice_is_needed(void)
     Done done;
     GtkWidget *dialog = open_dialog(&done, NULL);
 
-    assert(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);  /* manca il sink: nessun video */
+    g_assert_true(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);  /* manca il sink: nessun video */
     gtk_window_close(GTK_WINDOW(dialog));
     spin_for(100);
-    assert(gtk_widget_get_visible(dialog) && !done.called);
-    assert(HAS(label_text(dialog, "status"), "Scegli un'opzione"));
+    g_assert_true(gtk_widget_get_visible(dialog) && !done.called);
+    g_assert_true(HAS(label_text(dialog, "status"), "Scegli un'opzione"));
     DepsState *state = deps_state_load(state_path);
 
-    assert(deps_state_get_declined(state) == NULL);  /* nessuna scelta ricordata */
+    g_assert_null(deps_state_get_declined(state));  /* nessuna scelta ricordata */
     deps_state_free(state);
 
     /* Anche dalla schermata «Installa a mano»: si può solo tornare indietro o scegliere. */
     click(dialog, "manual");
-    assert(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_MANUAL);
+    g_assert_true(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_MANUAL);
     gtk_window_close(GTK_WINDOW(dialog));
     spin_for(100);
-    assert(gtk_widget_get_visible(dialog) && !done.called);
+    g_assert_true(gtk_widget_get_visible(dialog) && !done.called);
 
     /* Un pulsante, invece, è una scelta esplicita e chiude. */
     click(dialog, "back");
     click(dialog, "cancel");
     spin_for(50);
-    assert(done.called && done.outcome == SYNCVIEW_DEPS_OUTCOME_CLOSED);
+    g_assert_true(done.called && done.outcome == SYNCVIEW_DEPS_OUTCOME_CLOSED);
 }
 
 static void
@@ -254,43 +253,43 @@ test_review_shows_exact_plan_and_does_nothing_without_consent(void)
     Done done;
     GtkWidget *dialog = open_dialog(&done, NULL);
 
-    assert(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);
+    g_assert_true(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);
 
     /* Cosa manca, riga per riga. */
-    assert(strcmp(label_text(dialog, "badge:gst-playbin3"), "✓ Installato") == 0);
-    assert(strcmp(label_text(dialog, "badge:gst-gtk4sink"), "Da installare") == 0);
-    assert(strcmp(label_text(dialog, "badge:ffmpeg"), "Da installare") == 0);
-    assert(strcmp(label_text(dialog, "badge:gst-decoder-hevc"), "Da installare") == 0);
+    g_assert_cmpstr(label_text(dialog, "badge:gst-playbin3"), ==, "✓ Installato");
+    g_assert_cmpstr(label_text(dialog, "badge:gst-gtk4sink"), ==, "Da installare");
+    g_assert_cmpstr(label_text(dialog, "badge:ffmpeg"), ==, "Da installare");
+    g_assert_cmpstr(label_text(dialog, "badge:gst-decoder-hevc"), ==, "Da installare");
 
     /* Elenco ESATTO di ciò che verrà installato e avviso sulla password (gestita dal sistema). */
     const char *plan = label_text(dialog, "plan");
 
-    assert(HAS(plan, "pacman") && HAS(plan, "gst-plugin-gtk4") && HAS(plan, "ffmpeg") && HAS(plan, "gst-libav"));
+    g_assert_true(HAS(plan, "pacman") && HAS(plan, "gst-plugin-gtk4") && HAS(plan, "ffmpeg") && HAS(plan, "gst-libav"));
     const char *note = label_text(dialog, "note");
 
-    assert(HAS(note, "password") && HAS(note, "non la vede e non la salva"));
-    assert(HAS(note, "non può riprodurre i video di alcuni formati, o di nessuno"));  /* manca il sink: nessun video senza */
+    g_assert_true(HAS(note, "password") && HAS(note, "non la vede e non la salva"));
+    g_assert_true(HAS(note, "non può riprodurre i video di alcuni formati, o di nessuno"));  /* manca il sink: nessun video senza */
 
     /* Nessuna installazione senza consenso: aspettare non cambia nulla. */
     spin_for(400);
-    assert(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);
-    assert(!g_file_test(fake_log_path, G_FILE_TEST_EXISTS) && !g_file_test(marker_path, G_FILE_TEST_EXISTS));
+    g_assert_true(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);
+    g_assert_true(!g_file_test(fake_log_path, G_FILE_TEST_EXISTS) && !g_file_test(marker_path, G_FILE_TEST_EXISTS));
 
     /* Gli opzionali si possono escludere: il piano cambia di conseguenza. */
     gtk_check_button_set_active(GTK_CHECK_BUTTON(W(dialog, "opt-check")), FALSE);
     plan = label_text(dialog, "plan");
-    assert(HAS(plan, "gst-plugin-gtk4") && HAS(plan, "ffmpeg") && !HAS(plan, "gst-libav"));
-    assert(strcmp(label_text(dialog, "badge:gst-decoder-hevc"), "Opzionale, non installato") == 0);
+    g_assert_true(HAS(plan, "gst-plugin-gtk4") && HAS(plan, "ffmpeg") && !HAS(plan, "gst-libav"));
+    g_assert_cmpstr(label_text(dialog, "badge:gst-decoder-hevc"), ==, "Opzionale, non installato");
 
     /* Annulla: chiude senza ricordare nulla e senza installare. */
     click(dialog, "cancel");
     spin_for(50);
-    assert(done.called && done.outcome == SYNCVIEW_DEPS_OUTCOME_CLOSED);
+    g_assert_true(done.called && done.outcome == SYNCVIEW_DEPS_OUTCOME_CLOSED);
     DepsState *state = deps_state_load(state_path);
 
-    assert(deps_state_get_declined(state) == NULL);
+    g_assert_null(deps_state_get_declined(state));
     deps_state_free(state);
-    assert(!g_file_test(marker_path, G_FILE_TEST_EXISTS));
+    g_assert_false(g_file_test(marker_path, G_FILE_TEST_EXISTS));
 }
 
 static void
@@ -301,27 +300,27 @@ test_install_success_flow(void)
     GtkWidget *dialog = open_dialog(&done, NULL);
 
     click(dialog, "install");
-    assert(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_RUNNING);
-    assert(W(dialog, "cancel-install") != NULL && W(dialog, "output") != NULL);
+    g_assert_true(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_RUNNING);
+    g_assert_true(W(dialog, "cancel-install") != NULL && W(dialog, "output") != NULL);
 
-    assert(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_SUCCESS, 20000));
+    g_assert_true(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_SUCCESS, 20000));
     spin_for(50);
 
     /* argv esatto passato al finto pkexec: gestore + opzioni non interattive + pacchetti dalla tabella interna. */
     char *log = read_file(fake_log_path);
 
-    assert(log && HAS(log, "pacman\n-S\n--noconfirm\n--needed\n"));
-    assert(HAS(log, "gst-plugin-gtk4") && HAS(log, "gst-libav") && HAS(log, "ffmpeg"));
+    g_assert_true(log && HAS(log, "pacman\n-S\n--noconfirm\n--needed\n"));
+    g_assert_true(HAS(log, "gst-plugin-gtk4") && HAS(log, "gst-libav") && HAS(log, "ffmpeg"));
     g_free(log);
 
     /* Ricontrollo finale: tutto a posto, righe verdi, nessun ritorno alla schermata iniziale. */
-    assert(deps_report_is_complete(syncview_deps_dialog_get_report(dialog)));
-    assert(strcmp(label_text(dialog, "badge:gst-gtk4sink"), "✓ Installato") == 0);
-    assert(HAS(label_text(dialog, "banner"), "Tutto pronto"));
+    g_assert_true(deps_report_is_complete(syncview_deps_dialog_get_report(dialog)));
+    g_assert_cmpstr(label_text(dialog, "badge:gst-gtk4sink"), ==, "✓ Installato");
+    g_assert_true(HAS(label_text(dialog, "banner"), "Tutto pronto"));
 
     click(dialog, "close");
     spin_for(50);
-    assert(done.called && done.outcome == SYNCVIEW_DEPS_OUTCOME_INSTALLED);
+    g_assert_true(done.called && done.outcome == SYNCVIEW_DEPS_OUTCOME_INSTALLED);
 }
 
 static void
@@ -347,9 +346,9 @@ test_output_is_streamed_while_running(void)
         g_main_context_iteration(NULL, FALSE);
         g_usleep(1000);
     }
-    assert(text && HAS(text, "scarico i pacchetti") && HAS(text, "installazione completata"));
+    g_assert_true(text && HAS(text, "scarico i pacchetti") && HAS(text, "installazione completata"));
     g_free(text);
-    assert(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_SUCCESS, 20000));
+    g_assert_true(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_SUCCESS, 20000));
     close_dialog(dialog);
 }
 
@@ -361,31 +360,31 @@ test_denied_is_not_retried_automatically(void)
     GtkWidget *dialog = open_dialog(&done, NULL);
 
     click(dialog, "install");
-    assert(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_FAILED, 20000));
-    assert(HAS(label_text(dialog, "banner"), "negata") && HAS(label_text(dialog, "banner"), "non è stato modificato nulla"));
+    g_assert_true(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_FAILED, 20000));
+    g_assert_true(HAS(label_text(dialog, "banner"), "negata") && HAS(label_text(dialog, "banner"), "non è stato modificato nulla"));
     /* Nulla è stato toccato: le righe non dicono «fallita». */
-    assert(strcmp(label_text(dialog, "badge:gst-gtk4sink"), "Non installato") == 0);
+    g_assert_cmpstr(label_text(dialog, "badge:gst-gtk4sink"), ==, "Non installato");
 
     /* Nessun nuovo tentativo da solo: un solo invocazione, anche dopo un'attesa. */
     spin_for(600);
     char *log = read_file(fake_log_path);
 
-    assert(log != NULL);
+    g_assert_nonnull(log);
     int runs = 0;
 
     for (const char *p = log; (p = strstr(p, "--\n")); p += 3) {
         runs++;
     }
-    assert(runs == 1);
+    g_assert_cmpint(runs, ==, 1);
     g_free(log);
-    assert(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_FAILED);
+    g_assert_true(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_FAILED);
 
     /* Si riprova solo su richiesta esplicita: torna alla schermata iniziale e l'utente decide di nuovo. */
     click(dialog, "retry");
-    assert(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);
+    g_assert_true(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);
     g_setenv("FAKE_MODE", "ok", TRUE);
     click(dialog, "install");
-    assert(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_SUCCESS, 20000));
+    g_assert_true(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_SUCCESS, 20000));
     close_dialog(dialog);
 }
 
@@ -397,9 +396,9 @@ test_failure_offers_manual_table(void)
     GtkWidget *dialog = open_dialog(&done, NULL);
 
     click(dialog, "install");
-    assert(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_FAILED, 20000));
-    assert(HAS(label_text(dialog, "banner"), "Installazione fallita") && HAS(label_text(dialog, "banner"), "pacchetto non trovato"));
-    assert(strcmp(label_text(dialog, "badge:gst-gtk4sink"), "✕ Installazione fallita") == 0);
+    g_assert_true(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_FAILED, 20000));
+    g_assert_true(HAS(label_text(dialog, "banner"), "Installazione fallita") && HAS(label_text(dialog, "banner"), "pacchetto non trovato"));
+    g_assert_cmpstr(label_text(dialog, "badge:gst-gtk4sink"), ==, "✕ Installazione fallita");
 
     /* Tabella «installazione manuale» con un comando per ogni sistema; il sistema in uso (pacman) è preselezionato. */
     const char *oses[] = { "apt-get", "pacman", "dnf", "zypper", "windows", "macos" };
@@ -407,24 +406,24 @@ test_failure_offers_manual_table(void)
     for (size_t i = 0; i < G_N_ELEMENTS(oses); i++) {
         char *name = g_strdup_printf("os:%s", oses[i]);
 
-        assert(syncview_deps_dialog_get_widget(dialog, name) != NULL);
+        g_assert_nonnull(syncview_deps_dialog_get_widget(dialog, name));
         g_free(name);
     }
     GtkWidget *pacman_row = W(dialog, "os:pacman");
 
-    assert(gtk_list_box_row_is_selected(GTK_LIST_BOX_ROW(pacman_row)));
+    g_assert_true(gtk_list_box_row_is_selected(GTK_LIST_BOX_ROW(pacman_row)));
     const char *command = g_object_get_data(G_OBJECT(pacman_row), "copy-text");
 
-    assert(command && HAS(command, "sudo pacman -S") && HAS(command, "gst-plugin-gtk4"));
+    g_assert_true(command && HAS(command, "sudo pacman -S") && HAS(command, "gst-plugin-gtk4"));
     const char *apt = g_object_get_data(G_OBJECT(W(dialog, "os:apt-get")), "copy-text");
 
-    assert(apt && HAS(apt, "sudo apt install") && HAS(apt, "gstreamer1.0-gtk4"));
-    assert(W(dialog, "copy") != NULL && W(dialog, "retry") != NULL);
+    g_assert_true(apt && HAS(apt, "sudo apt install") && HAS(apt, "gstreamer1.0-gtk4"));
+    g_assert_true(W(dialog, "copy") != NULL && W(dialog, "retry") != NULL);
 
     /* «Continua senza» dopo un fallimento: si ricorda la scelta. */
     click(dialog, "continue");
     spin_for(50);
-    assert(done.called && done.outcome == SYNCVIEW_DEPS_OUTCOME_CONTINUED_WITHOUT);
+    g_assert_true(done.called && done.outcome == SYNCVIEW_DEPS_OUTCOME_CONTINUED_WITHOUT);
 }
 
 static void
@@ -436,21 +435,21 @@ test_cancel_while_running_and_close_request(void)
 
     click(dialog, "install");
     spin_for(500);  /* il finto pkexec è partito e dorme */
-    assert(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_RUNNING);
+    g_assert_true(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_RUNNING);
 
     /* Chiudere la finestra durante l'installazione non la interrompe a metà: chiede l'annullamento e resta aperta. */
     gtk_window_close(GTK_WINDOW(dialog));
-    assert(gtk_widget_get_visible(dialog) && !done.called);
-    assert(HAS(label_text(dialog, "status"), "Annullamento richiesto"));  /* subito: poi il passo termina e cambia schermata */
-    assert(!gtk_widget_get_sensitive(W(dialog, "cancel-install")));
+    g_assert_true(gtk_widget_get_visible(dialog) && !done.called);
+    g_assert_true(HAS(label_text(dialog, "status"), "Annullamento richiesto"));  /* subito: poi il passo termina e cambia schermata */
+    g_assert_false(gtk_widget_get_sensitive(W(dialog, "cancel-install")));
     spin_for(100);
-    assert(gtk_widget_get_visible(dialog) && !done.called);
+    g_assert_true(gtk_widget_get_visible(dialog) && !done.called);
 
-    assert(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_FAILED, 20000));
-    assert(HAS(label_text(dialog, "banner"), "annullata"));
-    assert(strcmp(label_text(dialog, "badge:gst-gtk4sink"), "Non installato") == 0);  /* annullata: nulla toccato */
+    g_assert_true(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_FAILED, 20000));
+    g_assert_true(HAS(label_text(dialog, "banner"), "annullata"));
+    g_assert_cmpstr(label_text(dialog, "badge:gst-gtk4sink"), ==, "Non installato");  /* annullata: nulla toccato */
     close_dialog(dialog);
-    assert(done.called && done.outcome == SYNCVIEW_DEPS_OUTCOME_CLOSED);
+    g_assert_true(done.called && done.outcome == SYNCVIEW_DEPS_OUTCOME_CLOSED);
 }
 
 static void
@@ -461,8 +460,8 @@ test_manual_path_and_recheck(void)
     GtkWidget *dialog = open_dialog(&done, NULL);
 
     click(dialog, "manual");
-    assert(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_MANUAL);
-    assert(W(dialog, "os:pacman") != NULL && W(dialog, "recheck") != NULL && W(dialog, "back") != NULL);
+    g_assert_true(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_MANUAL);
+    g_assert_true(W(dialog, "os:pacman") != NULL && W(dialog, "recheck") != NULL && W(dialog, "back") != NULL);
 
     /* «Ricontrolla» non cambia nulla finché manca qualcosa: resta nella schermata d'inizio. */
     gint before = g_atomic_int_get(&check_calls);
@@ -475,14 +474,14 @@ test_manual_path_and_recheck(void)
         g_usleep(1000);
     }
     spin_for(200);
-    assert(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);
+    g_assert_true(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);
 
     /* Installato «a mano» nel frattempo (il marcatore): il ricontrollo trova tutto a posto. */
     click(dialog, "manual");
-    assert(g_file_set_contents(marker_path, "x", -1, NULL));
+    g_assert_true(g_file_set_contents(marker_path, "x", -1, NULL));
     click(dialog, "recheck");
-    assert(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_ALL_OK, 10000));
-    assert(HAS(label_text(dialog, "banner"), "a posto"));
+    g_assert_true(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_ALL_OK, 10000));
+    g_assert_true(HAS(label_text(dialog, "banner"), "a posto"));
     close_dialog(dialog);
 }
 
@@ -523,42 +522,42 @@ test_continue_without_is_remembered_across_startups(void)
     wait_check_finished(before);
     GtkWidget *dialog = syncview_deps_dialog_find(GTK_WINDOW(parent));
 
-    assert(dialog != NULL && syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);
+    g_assert_true(dialog != NULL && syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);
 
     /* Un secondo controllo con il dialogo già aperto non ne apre un altro. */
     before = g_atomic_int_get(&check_calls);
     syncview_deps_check_and_show(GTK_WINDOW(parent), SYNCVIEW_DEPS_SHOW_STARTUP, &options);
     spin_for(300);
-    assert(syncview_deps_dialog_find(GTK_WINDOW(parent)) == dialog);
+    g_assert_true(syncview_deps_dialog_find(GTK_WINDOW(parent)) == dialog);
 
     click(dialog, "continue");
     spin_for(100);
-    assert(done.called && done.outcome == SYNCVIEW_DEPS_OUTCOME_CONTINUED_WITHOUT);
-    assert(syncview_deps_dialog_find(GTK_WINDOW(parent)) == NULL);
+    g_assert_true(done.called && done.outcome == SYNCVIEW_DEPS_OUTCOME_CONTINUED_WITHOUT);
+    g_assert_null(syncview_deps_dialog_find(GTK_WINDOW(parent)));
 
     /* Avvio successivo, stessa situazione: scelta rispettata, nessuna finestra. */
     before = g_atomic_int_get(&check_calls);
     syncview_deps_check_and_show(GTK_WINDOW(parent), SYNCVIEW_DEPS_SHOW_STARTUP, &options);
     wait_check_finished(before);
-    assert(syncview_deps_dialog_find(GTK_WINDOW(parent)) == NULL);
+    g_assert_null(syncview_deps_dialog_find(GTK_WINDOW(parent)));
 
     /* Ma un errore di plugin mancante nel player riapre comunque la finestra (qualcosa manca davvero). */
     before = g_atomic_int_get(&check_calls);
     syncview_deps_check_and_show(GTK_WINDOW(parent), SYNCVIEW_DEPS_SHOW_AFTER_ERROR, &options);
     wait_check_finished(before);
     dialog = syncview_deps_dialog_find(GTK_WINDOW(parent));
-    assert(dialog != NULL);
+    g_assert_nonnull(dialog);
     close_dialog(dialog);
 
     /* Se l'insieme dei componenti mancanti cambia, la richiesta si ripresenta: qui si «risolve» tutto → mai più richieste. */
-    assert(g_file_set_contents(marker_path, "x", -1, NULL));
+    g_assert_true(g_file_set_contents(marker_path, "x", -1, NULL));
     before = g_atomic_int_get(&check_calls);
     syncview_deps_check_and_show(GTK_WINDOW(parent), SYNCVIEW_DEPS_SHOW_STARTUP, &options);
     wait_check_finished(before);
-    assert(syncview_deps_dialog_find(GTK_WINDOW(parent)) == NULL);
+    g_assert_null(syncview_deps_dialog_find(GTK_WINDOW(parent)));
     DepsState *state = deps_state_load(state_path);
 
-    assert(deps_state_get_declined(state) == NULL);  /* tutto a posto: la vecchia scelta è stata dimenticata */
+    g_assert_null(deps_state_get_declined(state));  /* tutto a posto: la vecchia scelta è stata dimenticata */
     deps_state_free(state);
 
     /* Voce di menu «Verifica dipendenze» con tutto a posto: la finestra c'è comunque (ALL_OK). */
@@ -566,7 +565,7 @@ test_continue_without_is_remembered_across_startups(void)
     syncview_deps_check_and_show(GTK_WINDOW(parent), SYNCVIEW_DEPS_SHOW_USER_REQUESTED, &options);
     wait_check_finished(before);
     dialog = syncview_deps_dialog_find(GTK_WINDOW(parent));
-    assert(dialog != NULL && syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_ALL_OK);
+    g_assert_true(dialog != NULL && syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_ALL_OK);
     close_dialog(dialog);
     gtk_window_destroy(GTK_WINDOW(parent));
 }
@@ -584,7 +583,7 @@ test_declined_set_changes_prompt_again(void)
     /* Scelta ricordata per un insieme diverso da quello attuale (es. prima mancava solo ffmpeg): ora manca altro → si chiede. */
     DepsState *state = deps_state_load(state_path);
 
-    assert(g_file_set_contents(state_path, "{\"version\":1,\"declined_signature\":\"ffmpeg\",\"last_check_unix\":1}", -1, NULL));
+    g_assert_true(g_file_set_contents(state_path, "{\"version\":1,\"declined_signature\":\"ffmpeg\",\"last_check_unix\":1}", -1, NULL));
     deps_state_free(state);
     gint before = g_atomic_int_get(&check_calls);
 
@@ -592,7 +591,7 @@ test_declined_set_changes_prompt_again(void)
     wait_check_finished(before);
     GtkWidget *dialog = syncview_deps_dialog_find(GTK_WINDOW(parent));
 
-    assert(dialog != NULL);
+    g_assert_nonnull(dialog);
     close_dialog(dialog);
     gtk_window_destroy(GTK_WINDOW(parent));
 }
@@ -623,7 +622,7 @@ save_png(GtkWidget *dialog, const char *dir, const char *name)
     GdkTexture *texture = gsk_renderer_render_texture(renderer, node, NULL);
     char *file = g_strdup_printf("%s/%s.png", dir, name);
 
-    assert(texture != NULL && gdk_texture_save_to_png(texture, file));
+    g_assert_true(texture != NULL && gdk_texture_save_to_png(texture, file));
     g_printerr("immagine: %s (%dx%d)\n", file, w, h);
     g_free(file);
     g_object_unref(texture);
@@ -651,7 +650,7 @@ take_screenshots(const char *dir)
         g_snprintf(name, sizeof name, "deps-2-running-%s", theme);
         save_png(dialog, dir, name);
         click(dialog, "cancel-install");
-        assert(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_FAILED, 20000));
+        g_assert_true(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_FAILED, 20000));
         spin_for(300);
         g_snprintf(name, sizeof name, "deps-3-cancelled-%s", theme);
         save_png(dialog, dir, name);
@@ -660,7 +659,7 @@ take_screenshots(const char *dir)
         fake_reset("fail");
         dialog = open_dialog(&done, NULL);
         click(dialog, "install");
-        assert(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_FAILED, 20000));
+        g_assert_true(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_FAILED, 20000));
         spin_for(300);
         g_snprintf(name, sizeof name, "deps-4-failed-%s", theme);
         save_png(dialog, dir, name);
@@ -669,7 +668,7 @@ take_screenshots(const char *dir)
         fake_reset("ok");
         dialog = open_dialog(&done, NULL);
         click(dialog, "install");
-        assert(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_SUCCESS, 20000));
+        g_assert_true(spin_until_phase(dialog, SYNCVIEW_DEPS_DIALOG_SUCCESS, 20000));
         spin_for(300);
         g_snprintf(name, sizeof name, "deps-5-success-%s", theme);
         save_png(dialog, dir, name);
@@ -697,8 +696,8 @@ setup_fake_pkexec(void)
         "esac\n"
         "exit 3\n";
 
-    assert(g_file_set_contents(fake_pkexec_path, script, -1, NULL));
-    assert(g_chmod(fake_pkexec_path, 0755) == 0);
+    g_assert_true(g_file_set_contents(fake_pkexec_path, script, -1, NULL));
+    g_assert_cmpint(g_chmod(fake_pkexec_path, 0755), ==, 0);
     g_setenv("FAKE_LOG", fake_log_path, TRUE);
     g_setenv("FAKE_MARKER", marker_path, TRUE);
 }
@@ -736,7 +735,7 @@ main(void)
     g_unsetenv("SYNCVIEW_DEPS_FAKE_MISSING");
 
     tmp_dir = g_dir_make_tmp("syncview-depsdlg-XXXXXX", NULL);
-    assert(tmp_dir != NULL);
+    g_assert_nonnull(tmp_dir);
     setup_fake_pkexec();
 
     if (g_getenv("SYNCVIEW_TEST_SCREENSHOTS")) {
@@ -760,10 +759,10 @@ main(void)
         g_main_context_iteration(NULL, FALSE);
         g_usleep(1000);
     }
-    assert(syncview_deps_active_jobs() == 0);
+    g_assert_cmpint(syncview_deps_active_jobs(), ==, 0);
 
     char *cmd = g_strdup_printf("rm -rf '%s'", tmp_dir);
-    assert(system(cmd) == 0);
+    g_assert_cmpint(system(cmd), ==, 0);
     g_free(cmd);
     return 0;
 }

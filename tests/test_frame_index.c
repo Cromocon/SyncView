@@ -6,7 +6,7 @@
 
 #include "vfr_clip.h"
 
-#include <assert.h>
+#include <glib.h>
 #include <glib/gstdio.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,17 +36,17 @@ test_irregular_detection(void)
     gint64 *b = make_pts(200, rounded_30);
     gint64 *c = make_pts(200, irregular);
 
-    assert(!frame_index_timestamps_irregular(a, 200));
-    assert(!frame_index_timestamps_irregular(b, 200));  /* l'arrotondamento al ms non è irregolarità */
-    assert(frame_index_timestamps_irregular(c, 200));
-    assert(!frame_index_timestamps_irregular(c, FRAME_INDEX_MIN_FRAMES - 1));  /* troppo pochi per decidere */
-    assert(!frame_index_timestamps_irregular(NULL, 0));
+    g_assert_false(frame_index_timestamps_irregular(a, 200));
+    g_assert_false(frame_index_timestamps_irregular(b, 200));  /* l'arrotondamento al ms non è irregolarità */
+    g_assert_true(frame_index_timestamps_irregular(c, 200));
+    g_assert_false(frame_index_timestamps_irregular(c, FRAME_INDEX_MIN_FRAMES - 1));  /* troppo pochi per decidere */
+    g_assert_false(frame_index_timestamps_irregular(NULL, 0));
 
     /* L'ordine di arrivo (frame B) non conta. */
     gint64 t = c[10];
     c[10] = c[20];
     c[20] = t;
-    assert(frame_index_timestamps_irregular(c, 200));
+    g_assert_true(frame_index_timestamps_irregular(c, 200));
 
     g_free(a);
     g_free(b);
@@ -60,18 +60,18 @@ test_index_basics(void)
     pts[0] = 40; pts[1] = 0; pts[2] = 40; pts[3] = 100; pts[4] = 52; pts[5] = 77;  /* disordinati, con un doppione */
     FrameIndex *index = frame_index_new(pts, 6);
 
-    assert(index->n == 5);
-    assert(index->pts[0] == 0 && index->pts[1] == 40 && index->pts[2] == 52 && index->pts[3] == 77 && index->pts[4] == 100);
-    assert(frame_index_start(index, 2) == 52 && frame_index_end(index, 2) == 77);
-    assert(frame_index_end(index, 4) == 100 + (100 - 77));  /* l'ultimo frame dura quanto il penultimo intervallo */
+    g_assert_cmpint(index->n, ==, 5);
+    g_assert_true(index->pts[0] == 0 && index->pts[1] == 40 && index->pts[2] == 52 && index->pts[3] == 77 && index->pts[4] == 100);
+    g_assert_true(frame_index_start(index, 2) == 52 && frame_index_end(index, 2) == 77);
+    g_assert_true(frame_index_end(index, 4) == 100 + (100 - 77));  /* l'ultimo frame dura quanto il penultimo intervallo */
 
-    assert(frame_index_find(index, -5) == 0);
-    assert(frame_index_find(index, 0) == 0);
-    assert(frame_index_find(index, 39) == 0);
-    assert(frame_index_find(index, 40) == 1);
-    assert(frame_index_find(index, 76) == 2);
-    assert(frame_index_find(index, 77) == 3);
-    assert(frame_index_find(index, 5000) == 4);
+    g_assert_cmpint(frame_index_find(index, -5), ==, 0);
+    g_assert_cmpint(frame_index_find(index, 0), ==, 0);
+    g_assert_cmpint(frame_index_find(index, 39), ==, 0);
+    g_assert_cmpint(frame_index_find(index, 40), ==, 1);
+    g_assert_cmpint(frame_index_find(index, 76), ==, 2);
+    g_assert_cmpint(frame_index_find(index, 77), ==, 3);
+    g_assert_cmpint(frame_index_find(index, 5000), ==, 4);
     frame_index_free(index);
     frame_index_free(NULL);
 }
@@ -82,10 +82,10 @@ test_empty_index(void)
     /* Indice vuoto (nessun frame letto): nessuna lettura fuori dall'array. */
     FrameIndex *index = frame_index_new(g_new(gint64, 1), 0);
 
-    assert(index->n == 0);
-    assert(frame_index_start(index, 0) == 0);
-    assert(frame_index_start(index, 5) == 0);
-    assert(frame_index_find(index, 100) == 0);
+    g_assert_cmpint(index->n, ==, 0);
+    g_assert_cmpint(frame_index_start(index, 0), ==, 0);
+    g_assert_cmpint(frame_index_start(index, 5), ==, 0);
+    g_assert_cmpint(frame_index_find(index, 100), ==, 0);
     frame_index_free(index);
 }
 
@@ -120,7 +120,7 @@ make_two_video_streams(const char *dir, int frames)
         "videotestsrc name=b num-buffers=%d ! video/x-raw,width=160,height=120,framerate=25/1 ! videoconvert ! vp8enc keyframe-max-dist=10 ! mux.",
         frames, frames);
     GstElement *pipeline = gst_parse_launch(desc, NULL);
-    assert(pipeline);
+    g_assert_true(pipeline);
     GstElement *out = gst_bin_get_by_name(GST_BIN(pipeline), "out");
     g_object_set(out, "location", path, NULL);
     gst_object_unref(out);
@@ -137,7 +137,7 @@ make_two_video_streams(const char *dir, int frames)
     gst_element_set_state(pipeline, GST_STATE_PLAYING);
     GstBus *bus = gst_element_get_bus(pipeline);
     GstMessage *msg = gst_bus_timed_pop_filtered(bus, 30 * GST_SECOND, GST_MESSAGE_EOS | GST_MESSAGE_ERROR);
-    assert(msg && GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS);
+    g_assert_true(msg && GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS);
     gst_message_unref(msg);
     gst_object_unref(bus);
     gst_element_set_state(pipeline, GST_STATE_NULL);
@@ -153,10 +153,10 @@ test_scan(const char *dir)
     char *vfr = make_vfr_video(dir, "vfr.webm", 120);
     FrameIndex *index = frame_index_scan(vfr, NULL);
 
-    assert(index != NULL);
-    assert(index->n == 120);
+    g_assert_nonnull(index);
+    g_assert_cmpint(index->n, ==, 120);
     for (guint i = 0; i < index->n; i++) {
-        assert(llabs(index->pts[i] - vfr_frame_start_ns(i)) <= GST_MSECOND);
+        g_assert_true(llabs(index->pts[i] - vfr_frame_start_ns(i)) <= GST_MSECOND);
     }
     frame_index_free(index);
 
@@ -164,15 +164,15 @@ test_scan(const char *dir)
      * l'indice contiene al più i frame presenti e mai timestamp inventati. */
     gchar *content = NULL;
     gsize len = 0;
-    assert(g_file_get_contents(vfr, &content, &len, NULL));
+    g_assert_true(g_file_get_contents(vfr, &content, &len, NULL));
     char *cut = g_build_filename(dir, "cut.webm", NULL);
-    assert(g_file_set_contents(cut, content, (gssize)(len / 2), NULL));
+    g_assert_true(g_file_set_contents(cut, content, (gssize)(len / 2), NULL));
     FrameIndex *partial = frame_index_scan(cut, NULL);
     fprintf(stderr, "file troncato: indice %s (%u frame)\n", partial ? "presente" : "assente", partial ? partial->n : 0);
     if (partial) {
-        assert(partial->n < 120);
+        g_assert_true(partial->n < 120);
         for (guint i = 0; i < partial->n; i++) {
-            assert(llabs(partial->pts[i] - vfr_frame_start_ns(i)) <= GST_MSECOND);
+            g_assert_true(llabs(partial->pts[i] - vfr_frame_start_ns(i)) <= GST_MSECOND);
         }
         frame_index_free(partial);
     }
@@ -182,34 +182,34 @@ test_scan(const char *dir)
     /* Due tracce video: i frame sono quelli della prima, non la somma. */
     char *two = make_two_video_streams(dir, 120);
     FrameIndex *two_index = frame_index_scan(two, NULL);
-    assert(two_index != NULL);
+    g_assert_nonnull(two_index);
     fprintf(stderr, "due tracce video: %u frame\n", two_index->n);
-    assert(two_index->n == 120);
+    g_assert_cmpint(two_index->n, ==, 120);
     frame_index_free(two_index);
     g_free(two);
 
     /* Annullata subito: niente indice. */
     gint cancelled = 1;
-    assert(frame_index_scan(vfr, &cancelled) == NULL);
+    g_assert_null(frame_index_scan(vfr, &cancelled));
 
     /* Framerate costante: nessun indice (la lettura si ferma dopo i primi frame). */
     char *cfr = g_build_filename(dir, "cfr.webm", NULL);
     char *desc = g_strdup_printf("videotestsrc num-buffers=120 ! video/x-raw,width=160,height=120,framerate=25/1 ! videoconvert ! "
                                  "vp8enc ! webmmux ! filesink location=\"%s\"", cfr);
     GstElement *pipeline = gst_parse_launch(desc, NULL);
-    assert(pipeline);
+    g_assert_true(pipeline);
     gst_element_set_state(pipeline, GST_STATE_PLAYING);
     GstBus *bus = gst_element_get_bus(pipeline);
     GstMessage *msg = gst_bus_timed_pop_filtered(bus, 30 * GST_SECOND, GST_MESSAGE_EOS | GST_MESSAGE_ERROR);
-    assert(msg && GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS);
+    g_assert_true(msg && GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS);
     gst_message_unref(msg);
     gst_object_unref(bus);
     gst_element_set_state(pipeline, GST_STATE_NULL);
     gst_object_unref(pipeline);
-    assert(frame_index_scan(cfr, NULL) == NULL);
+    g_assert_null(frame_index_scan(cfr, NULL));
 
     /* File inesistente: nessun indice, nessun crash. */
-    assert(frame_index_scan("/nonexistent/video.webm", NULL) == NULL);
+    g_assert_null(frame_index_scan("/nonexistent/video.webm", NULL));
 
     g_free(desc);
     g_free(cfr);
@@ -238,7 +238,7 @@ main(void)
 
     GError *error = NULL;
     char *dir = g_dir_make_tmp("syncview-frame-index-XXXXXX", &error);
-    assert(dir != NULL);
+    g_assert_nonnull(dir);
     test_scan(dir);
 
     GDir *d = g_dir_open(dir, 0, NULL);

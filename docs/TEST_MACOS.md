@@ -42,7 +42,7 @@ unset CI
 meson test -C build --print-errorlogs
 ```
 
-- [ ] Esito atteso: **23 test: tutti OK tranne `real_clips`**, che è `SKIP` se non gli dai `SYNCVIEW_TEST_CLIPS` (vedi sotto). Nessun `SKIP` su `video_player`, `main_window` e `deps_dialog`: se ci sono, manca `gtk4paintablesink` (vedi sopra).
+- [ ] Esito atteso: **22 test: tutti OK tranne `real_clips`**, che è `SKIP` se non gli dai `SYNCVIEW_TEST_CLIPS` (vedi sotto). Nessun `SKIP` su `video_player`, `main_window` e `deps_dialog`: se ci sono, manca `gtk4paintablesink` (vedi sopra).
 - [ ] **`main_window`** (problema aperto, il più importante): sul runner CI il caricamento di un video agganciato alla finestra non termina (la pipeline resta ferma dopo `READY → PAUSED`). Se qui passa, il problema è solo del runner; se fallisce, allega il log (la riga `attesa dello stato … scaduta` e i messaggi `[GST]`).
 - [ ] **`video_player`**: con un display reale girano anche le verifiche sul frame clock (polling della posizione, ticker, tempo che avanza). In CI sono saltate. Messaggi «frame clock irregolare/assente» = il frame clock non batte: segnalalo.
 - [ ] Ripeti `meson test -C build video_player` altre 2 volte: nessun test intermittente.

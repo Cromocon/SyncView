@@ -8,7 +8,7 @@
 #include "core/logger.h"
 #include "zip_builder.h"
 
-#include <assert.h>
+#include <glib.h>
 #include <glib/gstdio.h>
 #include <libsoup/soup.h>
 #include <signal.h>
@@ -30,7 +30,7 @@ new_dir(const char *prefix)
 {
     char *dir = g_strdup_printf("%s/%s-%d", root, prefix, counter++);
 
-    assert(g_mkdir_with_parents(dir, 0700) == 0);
+    g_assert_cmpint(g_mkdir_with_parents(dir, 0700), ==, 0);
     return dir;
 }
 
@@ -128,7 +128,7 @@ write_os_release(const char *id, const char *version)
     char *path = g_strdup_printf("%s/os-release-%d", root, counter++);
     char *text = g_strdup_printf("NAME=\"Test\"\nID=%s\nVERSION_ID=\"%s\"\n", id, version);
 
-    assert(g_file_set_contents(path, text, -1, NULL));
+    g_assert_true(g_file_set_contents(path, text, -1, NULL));
     g_free(text);
     return path;
 }
@@ -143,36 +143,36 @@ test_manifest(void)
     const DepArtifact *all = NULL;
     size_t n = dep_manifest_all(&all);
 
-    assert(n >= 3);
+    g_assert_true(n >= 3);
     for (size_t i = 0; i < n; i++) {
-        assert(dep_artifact_is_well_formed(&all[i]));  /* https, SHA-256 di 64 cifre minuscole, nome file semplice */
+        g_assert_true(dep_artifact_is_well_formed(&all[i]));  /* https, SHA-256 di 64 cifre minuscole, nome file semplice */
     }
-    assert(dep_manifest_find("gstreamer-official-installer", DEPS_PLATFORM_WINDOWS, "x86_64") != NULL);
-    assert(dep_manifest_find("gstreamer-official-installer", DEPS_PLATFORM_WINDOWS, "arm64") != NULL);
-    assert(dep_manifest_find("gstreamer-official-installer", DEPS_PLATFORM_MACOS, "universal") != NULL);
-    assert(dep_manifest_find("gstreamer-official-installer", DEPS_PLATFORM_LINUX, "x86_64") == NULL);  /* su Linux niente installer */
-    assert(dep_manifest_find("non-esiste", DEPS_PLATFORM_WINDOWS, "x86_64") == NULL);
-    assert(dep_manifest_gstreamer_installer(DEPS_PLATFORM_WINDOWS) != NULL);
-    assert(dep_manifest_gstreamer_installer(DEPS_PLATFORM_MACOS) != NULL);
-    assert(dep_manifest_gstreamer_installer(DEPS_PLATFORM_LINUX) == NULL);
+    g_assert_nonnull(dep_manifest_find("gstreamer-official-installer", DEPS_PLATFORM_WINDOWS, "x86_64"));
+    g_assert_nonnull(dep_manifest_find("gstreamer-official-installer", DEPS_PLATFORM_WINDOWS, "arm64"));
+    g_assert_nonnull(dep_manifest_find("gstreamer-official-installer", DEPS_PLATFORM_MACOS, "universal"));
+    g_assert_null(dep_manifest_find("gstreamer-official-installer", DEPS_PLATFORM_LINUX, "x86_64"));  /* su Linux niente installer */
+    g_assert_null(dep_manifest_find("non-esiste", DEPS_PLATFORM_WINDOWS, "x86_64"));
+    g_assert_nonnull(dep_manifest_gstreamer_installer(DEPS_PLATFORM_WINDOWS));
+    g_assert_nonnull(dep_manifest_gstreamer_installer(DEPS_PLATFORM_MACOS));
+    g_assert_null(dep_manifest_gstreamer_installer(DEPS_PLATFORM_LINUX));
 
     /* Voci mal formate sono riconosciute come tali. */
     DepArtifact bad = *dep_manifest_gstreamer_installer(DEPS_PLATFORM_WINDOWS);
 
     bad.url = "http://example.com/x.exe";
-    assert(!dep_artifact_is_well_formed(&bad));
+    g_assert_false(dep_artifact_is_well_formed(&bad));
     bad = *dep_manifest_gstreamer_installer(DEPS_PLATFORM_WINDOWS);
     bad.sha256 = "ABCD";
-    assert(!dep_artifact_is_well_formed(&bad));
+    g_assert_false(dep_artifact_is_well_formed(&bad));
     bad = *dep_manifest_gstreamer_installer(DEPS_PLATFORM_WINDOWS);
     bad.sha256 = "032FC6062B8539838FC8DA22589CB9B24C5D820BAA7F8CC160AF9EA08395BADF";  /* maiuscole */
-    assert(!dep_artifact_is_well_formed(&bad));
+    g_assert_false(dep_artifact_is_well_formed(&bad));
     bad = *dep_manifest_gstreamer_installer(DEPS_PLATFORM_WINDOWS);
     bad.filename = "../evil.exe";
-    assert(!dep_artifact_is_well_formed(&bad));
+    g_assert_false(dep_artifact_is_well_formed(&bad));
     bad = *dep_manifest_gstreamer_installer(DEPS_PLATFORM_WINDOWS);
     bad.size_bytes = 0;
-    assert(!dep_artifact_is_well_formed(&bad));
+    g_assert_false(dep_artifact_is_well_formed(&bad));
 }
 
 /* ------------------------------------------------------------------ */
@@ -185,13 +185,13 @@ expect_argv(const char *manager, const char *const *packages, const char *const 
     GError *error = NULL;
     char **argv = dep_installer_build_package_argv(manager, packages, &error);
 
-    assert(argv != NULL && error == NULL);
+    g_assert_true(argv != NULL && error == NULL);
     size_t i = 0;
 
     for (; expected[i]; i++) {
-        assert(argv[i] != NULL && strcmp(argv[i], expected[i]) == 0);
+        g_assert_true(argv[i] != NULL && strcmp(argv[i], expected[i]) == 0);
     }
-    assert(argv[i] == NULL);  /* né un argomento in più */
+    g_assert_null(argv[i]);  /* né un argomento in più */
     g_strfreev(argv);
 }
 
@@ -200,8 +200,8 @@ expect_invalid(const char *manager, const char *const *packages)
 {
     GError *error = NULL;
 
-    assert(dep_installer_build_package_argv(manager, packages, &error) == NULL);
-    assert(error_is(error, DEP_INSTALLER_ERROR_INVALID));
+    g_assert_null(dep_installer_build_package_argv(manager, packages, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_INVALID));
     g_error_free(error);
 }
 
@@ -274,18 +274,18 @@ test_plan_linux_packages(void)
     GError *error = NULL;
     DepPlan *plan = dep_plan_new(report, NULL, &error);
 
-    assert(plan && !error);
-    assert(dep_plan_step_count(plan) == 1);
+    g_assert_true(plan && !error);
+    g_assert_cmpint(dep_plan_step_count(plan), ==, 1);
 
     const DepStep *step = dep_plan_step(plan, 0);
 
-    assert(step->kind == DEP_STEP_SYSTEM_PACKAGES && step->needs_elevation && !step->third_party);
-    assert(strcmp(step->argv[0], "pacman") == 0 && strcmp(step->argv[4], "gst-plugin-gtk4") == 0 && step->argv[5] == NULL);
-    assert(dep_plan_needs_elevation(plan) && !dep_plan_has_third_party(plan) && dep_plan_download_bytes(plan) == 0);
+    g_assert_true(step->kind == DEP_STEP_SYSTEM_PACKAGES && step->needs_elevation && !step->third_party);
+    g_assert_true(strcmp(step->argv[0], "pacman") == 0 && strcmp(step->argv[4], "gst-plugin-gtk4") == 0 && step->argv[5] == NULL);
+    g_assert_true(dep_plan_needs_elevation(plan) && !dep_plan_has_third_party(plan) && dep_plan_download_bytes(plan) == 0);
 
     char *text = dep_plan_describe(plan);
 
-    assert(HAS(text, "gst-plugin-gtk4") && HAS(text, "pacman") && HAS(text, "password di amministratore"));
+    g_assert_true(HAS(text, "gst-plugin-gtk4") && HAS(text, "pacman") && HAS(text, "password di amministratore"));
     g_free(text);
     dep_plan_free(plan);
     deps_report_free(report);
@@ -294,8 +294,8 @@ test_plan_linux_packages(void)
     fake_free(f);
     f = fake_new("pacman", NULL);
     report = make_report(DEPS_PLATFORM_LINUX, f);
-    assert(dep_plan_new(report, NULL, &error) == NULL);
-    assert(error_is(error, DEP_INSTALLER_ERROR_NOTHING_TO_DO));
+    g_assert_null(dep_plan_new(report, NULL, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_NOTHING_TO_DO));
     g_clear_error(&error);
     deps_report_free(report);
     fake_free(f);
@@ -305,7 +305,7 @@ test_plan_linux_packages(void)
 
     f = fake_new("pacman", missing_hevc);
     report = make_report(DEPS_PLATFORM_LINUX, f);
-    assert(dep_plan_new(report, NULL, &error) == NULL);
+    g_assert_null(dep_plan_new(report, NULL, &error));
     g_clear_error(&error);
     deps_report_free(report);
     fake_free(f);
@@ -313,8 +313,8 @@ test_plan_linux_packages(void)
     /* Nessun gestore riconosciuto: solo istruzioni, il piano è vuoto. */
     f = fake_new(NULL, missing);
     report = make_report(DEPS_PLATFORM_LINUX, f);
-    assert(dep_plan_new(report, NULL, &error) == NULL);
-    assert(error_is(error, DEP_INSTALLER_ERROR_NOTHING_TO_DO));
+    g_assert_null(dep_plan_new(report, NULL, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_NOTHING_TO_DO));
     g_clear_error(&error);
     deps_report_free(report);
     fake_free(f);
@@ -333,18 +333,18 @@ test_plan_platform_installer(void)
         DepPlan *plan = dep_plan_new(report, NULL, &error);
 
         /* Due componenti mancanti, ma UN solo passo: l'installer ufficiale. */
-        assert(plan && dep_plan_step_count(plan) == 1);
+        g_assert_true(plan && dep_plan_step_count(plan) == 1);
 
         const DepStep *step = dep_plan_step(plan, 0);
         const DepArtifact *expected = dep_manifest_gstreamer_installer(platforms[i]);
 
-        assert(step->kind == DEP_STEP_PLATFORM_INSTALLER && step->artifact == expected && step->needs_elevation);
-        assert(!step->third_party && step->download_bytes == expected->size_bytes);
-        assert(dep_plan_download_bytes(plan) == expected->size_bytes);
+        g_assert_true(step->kind == DEP_STEP_PLATFORM_INSTALLER && step->artifact == expected && step->needs_elevation);
+        g_assert_true(!step->third_party && step->download_bytes == expected->size_bytes);
+        g_assert_true(dep_plan_download_bytes(plan) == expected->size_bytes);
 
         char *text = dep_plan_describe(plan);
 
-        assert(HAS(text, expected->url) && HAS(text, expected->sha256) && HAS(text, " MB") && HAS(text, "password di amministratore"));
+        g_assert_true(HAS(text, expected->url) && HAS(text, expected->sha256) && HAS(text, " MB") && HAS(text, "password di amministratore"));
         g_free(text);
         dep_plan_free(plan);
         deps_report_free(report);
@@ -358,8 +358,8 @@ test_plan_platform_installer(void)
     g_hash_table_remove(f->programs, "ffmpeg");
     DepsReport *report = make_report(DEPS_PLATFORM_WINDOWS, f);
 
-    assert(dep_plan_new(report, NULL, &error) == NULL);
-    assert(error_is(error, DEP_INSTALLER_ERROR_NOTHING_TO_DO));
+    g_assert_null(dep_plan_new(report, NULL, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_NOTHING_TO_DO));
     g_clear_error(&error);
     deps_report_free(report);
     fake_free(f);
@@ -376,8 +376,8 @@ test_plan_third_party_repositories(void)
     /* Senza il consenso dedicato: nessun passo di terze parti (e nient'altro da installare). */
     DepPlanOptions options = { FALSE, FALSE, fedora };
 
-    assert(dep_plan_new(report, &options, &error) == NULL);
-    assert(error_is(error, DEP_INSTALLER_ERROR_NOTHING_TO_DO));
+    g_assert_null(dep_plan_new(report, &options, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_NOTHING_TO_DO));
     g_clear_error(&error);
 
     /* Con il consenso: repository RPM Fusion + gstreamer1-libav, entrambi marcati di terze parti. */
@@ -391,20 +391,20 @@ test_plan_third_party_repositories(void)
         g_printerr("piano inatteso (%s), passi=%zu\n%s\n", error ? error->message : "ok", dep_plan_step_count(plan), dump);
         g_free(dump);
     }
-    assert(plan && dep_plan_step_count(plan) == 2 && dep_plan_has_third_party(plan));
+    g_assert_true(plan && dep_plan_step_count(plan) == 2 && dep_plan_has_third_party(plan));
 
     const DepStep *repo = dep_plan_step(plan, 0), *packages = dep_plan_step(plan, 1);
 
-    assert(repo->kind == DEP_STEP_ADD_REPOSITORY && repo->third_party && repo->needs_elevation);
-    assert(strcmp(repo->argv[0], "dnf") == 0 && strcmp(repo->argv[1], "install") == 0 && strcmp(repo->argv[2], "-y") == 0);
-    assert(strcmp(repo->argv[3], "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-40.noarch.rpm") == 0);
-    assert(repo->argv[4] == NULL);
-    assert(packages->kind == DEP_STEP_SYSTEM_PACKAGES && packages->third_party);
-    assert(strcmp(packages->argv[3], "gstreamer1-libav") == 0 && packages->argv[4] == NULL);
+    g_assert_true(repo->kind == DEP_STEP_ADD_REPOSITORY && repo->third_party && repo->needs_elevation);
+    g_assert_true(strcmp(repo->argv[0], "dnf") == 0 && strcmp(repo->argv[1], "install") == 0 && strcmp(repo->argv[2], "-y") == 0);
+    g_assert_cmpstr(repo->argv[3], ==, "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-40.noarch.rpm");
+    g_assert_null(repo->argv[4]);
+    g_assert_true(packages->kind == DEP_STEP_SYSTEM_PACKAGES && packages->third_party);
+    g_assert_true(strcmp(packages->argv[3], "gstreamer1-libav") == 0 && packages->argv[4] == NULL);
 
     char *text = dep_plan_describe(plan);
 
-    assert(HAS(text, "terze parti") && HAS(text, "non è garantito") && HAS(text, "RPM Fusion"));
+    g_assert_true(HAS(text, "terze parti") && HAS(text, "non è garantito") && HAS(text, "RPM Fusion"));
     g_free(text);
     dep_plan_free(plan);
 
@@ -416,8 +416,8 @@ test_plan_third_party_repositories(void)
 
     for (size_t i = 0; i < G_N_ELEMENTS(paths); i++) {
         options.os_release_path = paths[i];
-        assert(dep_plan_new(report, &options, &error) == NULL);
-        assert(error_is(error, DEP_INSTALLER_ERROR_NOTHING_TO_DO));
+        g_assert_null(dep_plan_new(report, &options, &error));
+        g_assert_true(error_is(error, DEP_INSTALLER_ERROR_NOTHING_TO_DO));
         g_clear_error(&error);
     }
 
@@ -503,8 +503,8 @@ setup_fake_pkexec(void)
         "esac\n"
         "exit 3\n";
 
-    assert(g_file_set_contents(fake_pkexec_path, script, -1, NULL));
-    assert(g_chmod(fake_pkexec_path, 0755) == 0);
+    g_assert_true(g_file_set_contents(fake_pkexec_path, script, -1, NULL));
+    g_assert_cmpint(g_chmod(fake_pkexec_path, 0755), ==, 0);
     g_setenv("FAKE_LOG", fake_log_path, TRUE);
     g_setenv("FAKE_PID", fake_pid_path, TRUE);
 }
@@ -551,7 +551,7 @@ linux_plan(void)
     DepsReport *report = make_report(DEPS_PLATFORM_LINUX, f);
     DepPlan *plan = dep_plan_new(report, NULL, NULL);
 
-    assert(plan != NULL);
+    g_assert_nonnull(plan);
     deps_report_free(report);
     fake_free(f);
     return plan;
@@ -571,24 +571,24 @@ test_run_with_fake_pkexec(void)
 
     /* Successo: argv esatto (pkexec + gestore + opzioni + pacchetti), output in tempo reale, eventi nell'ordine giusto. */
     fake_reset("ok");
-    assert(dep_installer_run(plan, &options, &error) && error == NULL);
+    g_assert_true(dep_installer_run(plan, &options, &error) && error == NULL);
 
     char *log = fake_log();
 
-    assert(log && strcmp(log, "pacman\n-S\n--noconfirm\n--needed\ngst-plugin-gtk4\n--\n") == 0);
+    g_assert_true(log && strcmp(log, "pacman\n-S\n--noconfirm\n--needed\ngst-plugin-gtk4\n--\n") == 0);
     g_free(log);
-    assert(rec->events->len == 4);
-    assert(strcmp(g_ptr_array_index(rec->events, 0), "start:0/1:") == 0);
-    assert(strcmp(g_ptr_array_index(rec->events, 1), "out:0/1:scarico i pacchetti") == 0);
-    assert(strcmp(g_ptr_array_index(rec->events, 2), "out:0/1:installazione completata") == 0);
-    assert(strcmp(g_ptr_array_index(rec->events, 3), "end:0/1:") == 0);
-    assert(fake_process_gone());
+    g_assert_cmpint(rec->events->len, ==, 4);
+    g_assert_cmpstr(g_ptr_array_index(rec->events, 0), ==, "start:0/1:");
+    g_assert_cmpstr(g_ptr_array_index(rec->events, 1), ==, "out:0/1:scarico i pacchetti");
+    g_assert_cmpstr(g_ptr_array_index(rec->events, 2), ==, "out:0/1:installazione completata");
+    g_assert_cmpstr(g_ptr_array_index(rec->events, 3), ==, "end:0/1:");
+    g_assert_true(fake_process_gone());
 
     /* Errore del gestore: codice e ultime righe nel messaggio. */
     fake_reset("fail");
-    assert(!dep_installer_run(plan, &options, &error));
-    assert(error_is(error, DEP_INSTALLER_ERROR_FAILED));
-    assert(HAS(error->message, "codice 1") && HAS(error->message, "pacchetto non trovato") && HAS(error->message, "transazione annullata"));
+    g_assert_false(dep_installer_run(plan, &options, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_FAILED));
+    g_assert_true(HAS(error->message, "codice 1") && HAS(error->message, "pacchetto non trovato") && HAS(error->message, "transazione annullata"));
     g_clear_error(&error);
 
     /* Autorizzazione negata (126) o finestra chiusa (127): DENIED, un solo tentativo (nessun nuovo giro automatico). */
@@ -596,13 +596,13 @@ test_run_with_fake_pkexec(void)
 
     for (size_t i = 0; i < G_N_ELEMENTS(modes); i++) {
         fake_reset(modes[i]);
-        assert(!dep_installer_run(plan, &options, &error));
-        assert(error_is(error, DEP_INSTALLER_ERROR_DENIED));
-        assert(HAS(error->message, "nessuna modifica"));
+        g_assert_false(dep_installer_run(plan, &options, &error));
+        g_assert_true(error_is(error, DEP_INSTALLER_ERROR_DENIED));
+        g_assert_true(HAS(error->message, "nessuna modifica"));
         g_clear_error(&error);
 
         log = fake_log();
-        assert(log && strcmp(log, "pacman\n-S\n--noconfirm\n--needed\ngst-plugin-gtk4\n--\n") == 0);  /* lanciato UNA volta */
+        g_assert_true(log && strcmp(log, "pacman\n-S\n--noconfirm\n--needed\ngst-plugin-gtk4\n--\n") == 0);  /* lanciato UNA volta */
         g_free(log);
     }
 
@@ -614,13 +614,13 @@ test_run_with_fake_pkexec(void)
     char *path_with_fake = g_strdup_printf("%s:%s", root, saved_path);
     char *fake_named_pkexec = g_strdup_printf("%s/pkexec", root);
 
-    assert(g_file_set_contents(fake_named_pkexec, "#!/bin/sh\necho phished >> \"$FAKE_LOG\"\n", -1, NULL));
-    assert(g_chmod(fake_named_pkexec, 0755) == 0);
+    g_assert_true(g_file_set_contents(fake_named_pkexec, "#!/bin/sh\necho phished >> \"$FAKE_LOG\"\n", -1, NULL));
+    g_assert_cmpint(g_chmod(fake_named_pkexec, 0755), ==, 0);
     g_setenv("PATH", path_with_fake, TRUE);
     no_elevation.system_dirs = no_dirs;
     fake_reset("ok");
-    assert(!dep_installer_run(plan, &no_elevation, &error));
-    assert(error_is(error, DEP_INSTALLER_ERROR_NO_ELEVATION));
+    g_assert_false(dep_installer_run(plan, &no_elevation, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_NO_ELEVATION));
     g_clear_error(&error);
 
     g_setenv("PATH", saved_path, TRUE);
@@ -628,14 +628,14 @@ test_run_with_fake_pkexec(void)
     g_free(path_with_fake);
     g_remove(fake_named_pkexec);
     g_free(fake_named_pkexec);
-    assert(fake_log() == NULL);
+    g_assert_null(fake_log());
 
     /* Programma di elevazione che non esiste (percorso sbagliato): FAILED, nessun crash. */
     DepRunOptions wrong = { 0 };
 
     wrong.elevation_program = "/nonexistent/pkexec";
-    assert(!dep_installer_run(plan, &wrong, &error));
-    assert(error_is(error, DEP_INSTALLER_ERROR_FAILED));
+    g_assert_false(dep_installer_run(plan, &wrong, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_FAILED));
     g_clear_error(&error);
 
     recorder_free(rec);
@@ -648,13 +648,13 @@ test_system_program_trust(void)
     /* Un file dell'utente (nostro uid, in una cartella temporanea) non è mai affidabile. */
     char *own = g_strdup_printf("%s/own-tool", root);
 
-    assert(g_file_set_contents(own, "#!/bin/sh\n", -1, NULL));
-    assert(g_chmod(own, 0755) == 0);
+    g_assert_true(g_file_set_contents(own, "#!/bin/sh\n", -1, NULL));
+    g_assert_cmpint(g_chmod(own, 0755), ==, 0);
     if (geteuid() != 0) {
         const char *const own_dirs[] = { root, NULL };
 
-        assert(!dep_installer_is_trusted_executable(own));
-        assert(dep_installer_find_system_program("own-tool", own_dirs) == NULL);
+        g_assert_false(dep_installer_is_trusted_executable(own));
+        g_assert_null(dep_installer_find_system_program("own-tool", own_dirs));
     }
     g_remove(own);
     g_free(own);
@@ -662,18 +662,18 @@ test_system_program_trust(void)
     /* Casi sempre non affidabili: inesistente, cartella, NULL, nome con separatori. */
     const char *const sh_dirs[] = { "/usr/bin", NULL };
 
-    assert(!dep_installer_is_trusted_executable("/nonexistent/pkexec"));
-    assert(!dep_installer_is_trusted_executable("/usr"));
-    assert(!dep_installer_is_trusted_executable(NULL));
-    assert(dep_installer_find_system_program("../bin/sh", sh_dirs) == NULL);
-    assert(dep_installer_find_system_program("a/b", sh_dirs) == NULL);
+    g_assert_false(dep_installer_is_trusted_executable("/nonexistent/pkexec"));
+    g_assert_false(dep_installer_is_trusted_executable("/usr"));
+    g_assert_false(dep_installer_is_trusted_executable(NULL));
+    g_assert_null(dep_installer_find_system_program("../bin/sh", sh_dirs));
+    g_assert_null(dep_installer_find_system_program("a/b", sh_dirs));
 
     /* Un vero programma di root in una cartella di sistema passa e si ottiene il percorso assoluto. */
     const char *const sys_dirs[] = { "/nonexistent", "/usr/bin", "/bin", NULL };
     char *sh = dep_installer_find_system_program("sh", sys_dirs);
 
-    assert(sh && g_path_is_absolute(sh));
-    assert(dep_installer_is_trusted_executable(sh));
+    g_assert_true(sh && g_path_is_absolute(sh));
+    g_assert_true(dep_installer_is_trusted_executable(sh));
     g_free(sh);
 }
 
@@ -698,11 +698,11 @@ test_cancel_and_timeout(void)
 
     fake_reset("hang");
     g_timer_start(timer);
-    assert(!dep_installer_run(plan, &options, &error));
-    assert(error_is(error, DEP_INSTALLER_ERROR_CANCELLED));
-    assert(g_timer_elapsed(timer, NULL) < 10.0);  /* non ha atteso i 30 secondi del processo finto */
-    assert(fake_process_gone());
-    assert(!recorder_has(rec, "end:"));  /* il passo non risulta concluso */
+    g_assert_false(dep_installer_run(plan, &options, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_CANCELLED));
+    g_assert_true(g_timer_elapsed(timer, NULL) < 10.0);  /* non ha atteso i 30 secondi del processo finto */
+    g_assert_true(fake_process_gone());
+    g_assert_false(recorder_has(rec, "end:"));  /* il passo non risulta concluso */
     g_clear_error(&error);
     g_object_unref(cancel);
     recorder_free(rec);
@@ -715,9 +715,9 @@ test_cancel_and_timeout(void)
     pre.elevation_program = fake_pkexec_path;
     pre.cancellable = cancel;
     fake_reset("ok");
-    assert(!dep_installer_run(plan, &pre, &error));
-    assert(error_is(error, DEP_INSTALLER_ERROR_CANCELLED));
-    assert(fake_log() == NULL);
+    g_assert_false(dep_installer_run(plan, &pre, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_CANCELLED));
+    g_assert_null(fake_log());
     g_clear_error(&error);
     g_object_unref(cancel);
 
@@ -728,10 +728,10 @@ test_cancel_and_timeout(void)
     timeout.step_timeout_seconds = 1;
     fake_reset("hang");
     g_timer_start(timer);
-    assert(!dep_installer_run(plan, &timeout, &error));
-    assert(error_is(error, DEP_INSTALLER_ERROR_TIMEOUT));
-    assert(g_timer_elapsed(timer, NULL) < 10.0);
-    assert(fake_process_gone());
+    g_assert_false(dep_installer_run(plan, &timeout, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_TIMEOUT));
+    g_assert_true(g_timer_elapsed(timer, NULL) < 10.0);
+    g_assert_true(fake_process_gone());
     g_clear_error(&error);
 
     g_timer_destroy(timer);
@@ -748,7 +748,7 @@ test_third_party_consent_is_enforced_at_run(void)
     GError *error = NULL;
     DepPlan *plan = dep_plan_new(report, &plan_options, &error);
 
-    assert(plan != NULL);
+    g_assert_nonnull(plan);
 
     DepRunOptions options = { 0 };
 
@@ -756,28 +756,28 @@ test_third_party_consent_is_enforced_at_run(void)
 
     /* Il piano c'è, ma senza il consenso dedicato nell'esecuzione non parte NULLA. */
     fake_reset("ok");
-    assert(!dep_installer_run(plan, &options, &error));
-    assert(error_is(error, DEP_INSTALLER_ERROR_CONSENT));
+    g_assert_false(dep_installer_run(plan, &options, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_CONSENT));
     g_clear_error(&error);
-    assert(fake_log() == NULL);
+    g_assert_null(fake_log());
 
     /* Con il consenso: i due comandi, nell'ordine (prima il repository, poi i pacchetti). */
     options.consent_third_party = TRUE;
-    assert(dep_installer_run(plan, &options, &error));
+    g_assert_true(dep_installer_run(plan, &options, &error));
 
     char *log = fake_log();
 
-    assert(log && strcmp(log, "dnf\ninstall\n-y\nhttps://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-41.noarch.rpm\n--\n"
+    g_assert_true(log && strcmp(log, "dnf\ninstall\n-y\nhttps://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-41.noarch.rpm\n--\n"
                               "dnf\ninstall\n-y\ngstreamer1-libav\n--\n") == 0);
     g_free(log);
 
     /* Se il primo passo fallisce, il secondo non parte. */
     fake_reset("fail");
-    assert(!dep_installer_run(plan, &options, &error));
-    assert(error_is(error, DEP_INSTALLER_ERROR_FAILED));
+    g_assert_false(dep_installer_run(plan, &options, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_FAILED));
     g_clear_error(&error);
     log = fake_log();
-    assert(log && strstr(log, "gstreamer1-libav") == NULL);  /* solo il repository è stato tentato */
+    g_assert_true(log && strstr(log, "gstreamer1-libav") == NULL);  /* solo il repository è stato tentato */
     g_free(log);
 
     g_free(fedora);
@@ -794,19 +794,19 @@ test_recheck_after_install(void)
     FakeSystem *f = fake_new("pacman", missing);
     DepsReport *before = make_report(DEPS_PLATFORM_LINUX, f);
 
-    assert(!deps_report_can_play(before));
+    g_assert_false(deps_report_can_play(before));
 
     DepPlan *plan = dep_plan_new(before, NULL, NULL);
     DepRunOptions options = { 0 };
 
     options.elevation_program = fake_pkexec_path;
     fake_reset("ok");
-    assert(dep_installer_run(plan, &options, NULL));
+    g_assert_true(dep_installer_run(plan, &options, NULL));
     g_hash_table_remove_all(f->missing_elements);  /* il pacchetto adesso c'è */
 
     DepsReport *after = make_report(DEPS_PLATFORM_LINUX, f);
 
-    assert(deps_report_can_play(after) && deps_report_is_complete(after));
+    g_assert_true(deps_report_can_play(after) && deps_report_is_complete(after));
     deps_report_free(after);
     dep_plan_free(plan);
     deps_report_free(before);
@@ -918,7 +918,7 @@ server_thread(gpointer data)
     GError *error = NULL;
 
     soup_server_add_handler(s, "/", server_handler, NULL, NULL);
-    assert(soup_server_listen_local(s, 0, SOUP_SERVER_LISTEN_IPV4_ONLY, &error));
+    g_assert_true(soup_server_listen_local(s, 0, SOUP_SERVER_LISTEN_IPV4_ONLY, &error));
 
     GSList *uris = soup_server_get_uris(s);
 
@@ -1046,42 +1046,42 @@ test_download_ok_and_reuse(void)
     options.progress = record;
     options.user_data = rec;
 
-    assert(dep_installer_download(&a, dest, &options, &error) && error == NULL);
-    assert(g_file_test(dest, G_FILE_TEST_IS_REGULAR));
+    g_assert_true(dep_installer_download(&a, dest, &options, &error) && error == NULL);
+    g_assert_true(g_file_test(dest, G_FILE_TEST_IS_REGULAR));
 
     char *part = g_strconcat(dest, ".part", NULL);
 
-    assert(!g_file_test(part, G_FILE_TEST_EXISTS));
+    g_assert_false(g_file_test(part, G_FILE_TEST_EXISTS));
     g_free(part);
-    assert(recorder_has(rec, "dl:") && recorder_has(rec, "verify:"));
+    g_assert_true(recorder_has(rec, "dl:") && recorder_has(rec, "verify:"));
 
     /* Contenuto identico. */
     gsize size;
     char *contents = NULL;
 
-    assert(g_file_get_contents(dest, &contents, &size, NULL) && size == 300 * 1024);
+    g_assert_true(g_file_get_contents(dest, &contents, &size, NULL) && size == 300 * 1024);
     g_free(contents);
 
     /* Già scaricato e corretto: nessuna nuova richiesta di rete. */
     gint before = g_atomic_int_get(&server.requests);
 
-    assert(dep_installer_download(&a, dest, &options, &error));
-    assert(g_atomic_int_get(&server.requests) == before);
+    g_assert_true(dep_installer_download(&a, dest, &options, &error));
+    g_assert_true(g_atomic_int_get(&server.requests) == before);
 
     /* Senza Content-Length (chunked) funziona lo stesso, verificando alla fine. */
     g_remove(dest);
     char *keep2[2];
     DepArtifact chunked = make_artifact("/chunked", server.body, DEP_ARTIFACT_PLATFORM_INSTALLER, keep2);
 
-    assert(dep_installer_download(&chunked, dest, &options, &error));
+    g_assert_true(dep_installer_download(&chunked, dest, &options, &error));
     g_free(keep2[0]);
     g_free(keep2[1]);
 
     /* File presente ma corrotto: viene riscaricato. */
-    assert(g_file_set_contents(dest, "corrotto", -1, NULL));
-    assert(dep_installer_download(&a, dest, &options, &error));
-    assert(g_atomic_int_get(&server.requests) > before);
-    assert(g_file_get_contents(dest, &contents, &size, NULL) && size == 300 * 1024);
+    g_assert_true(g_file_set_contents(dest, "corrotto", -1, NULL));
+    g_assert_true(dep_installer_download(&a, dest, &options, &error));
+    g_assert_true(g_atomic_int_get(&server.requests) > before);
+    g_assert_true(g_file_get_contents(dest, &contents, &size, NULL) && size == 300 * 1024);
     g_free(contents);
 
     recorder_free(rec);
@@ -1107,13 +1107,13 @@ expect_download_fails(const char *path, GBytes *content, const char *tweak, DepI
     } else if (tweak && strcmp(tweak, "size") == 0) {
         a.size_bytes += 5;
     }
-    assert(!dep_installer_download(&a, dest, &options, &error));
-    assert(error_is(error, code));
+    g_assert_false(dep_installer_download(&a, dest, &options, &error));
+    g_assert_true(error_is(error, code));
     if (message_part && !HAS(error->message, message_part)) {
         g_printerr("messaggio inatteso: %s (atteso «%s»)\n", error->message, message_part);
         abort();
     }
-    assert(no_residue(dest));  /* né il file né un .part */
+    g_assert_true(no_residue(dest));  /* né il file né un .part */
     g_clear_error(&error);
     g_free(keep[0]);
     g_free(keep[1]);
@@ -1140,8 +1140,8 @@ test_download_rejections(void)
     GError *error = NULL;
     gint before = g_atomic_int_get(&server.requests);
 
-    assert(!dep_installer_download(&a, dest, &strict, &error));  /* http su loopback senza consenso di prova */
-    assert(error_is(error, DEP_INSTALLER_ERROR_DOWNLOAD) && HAS(error->message, "https"));
+    g_assert_false(dep_installer_download(&a, dest, &strict, &error));  /* http su loopback senza consenso di prova */
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_DOWNLOAD) && HAS(error->message, "https"));
     g_clear_error(&error);
 
     const char *bad_urls[] = { "http://example.com/x.exe", "ftp://example.com/x.exe", "file:///etc/passwd", "gopher://x/y", "javascript:alert(1)" };
@@ -1152,21 +1152,21 @@ test_download_rejections(void)
         DepArtifact b = a;
 
         b.url = bad_urls[i];
-        assert(!dep_installer_download(&b, dest, &loose, &error));
-        assert(error_is(error, DEP_INSTALLER_ERROR_DOWNLOAD));
+        g_assert_false(dep_installer_download(&b, dest, &loose, &error));
+        g_assert_true(error_is(error, DEP_INSTALLER_ERROR_DOWNLOAD));
         g_clear_error(&error);
     }
-    assert(g_atomic_int_get(&server.requests) == before);  /* nessuna richiesta è partita */
-    assert(no_residue(dest));
+    g_assert_true(g_atomic_int_get(&server.requests) == before);  /* nessuna richiesta è partita */
+    g_assert_true(no_residue(dest));
 
     /* Server irraggiungibile: errore di rete pulito. */
     DepArtifact down = a;
 
     down.url = "http://127.0.0.1:1/x";
-    assert(!dep_installer_download(&down, dest, &loose, &error));
-    assert(error_is(error, DEP_INSTALLER_ERROR_DOWNLOAD));
+    g_assert_false(dep_installer_download(&down, dest, &loose, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_DOWNLOAD));
     g_clear_error(&error);
-    assert(no_residue(dest));
+    g_assert_true(no_residue(dest));
 
     g_free(keep[0]);
     g_free(keep[1]);
@@ -1189,9 +1189,9 @@ test_download_already_cancelled(void)
     options.allow_loopback_http = TRUE;
     options.cancellable = cancel;
     g_cancellable_cancel(cancel);  /* già annullato prima di partire */
-    assert(!dep_installer_download(&a, dest, &options, &error));
-    assert(error_is(error, DEP_INSTALLER_ERROR_CANCELLED));
-    assert(no_residue(dest));
+    g_assert_false(dep_installer_download(&a, dest, &options, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_CANCELLED));
+    g_assert_true(no_residue(dest));
     g_clear_error(&error);
     (void)before;
 
@@ -1231,10 +1231,10 @@ test_download_oversize_stops_early(void)
     options.allow_loopback_http = TRUE;
     options.progress = track_max_bytes;
     options.user_data = &max;
-    assert(!dep_installer_download(&a, dest, &options, &error));
-    assert(error_is(error, DEP_INSTALLER_ERROR_VERIFY) && HAS(error->message, "più dati"));
-    assert(max.max_reported <= a.size_bytes);  /* non ha letto oltre la dimensione attesa */
-    assert(no_residue(dest));
+    g_assert_false(dep_installer_download(&a, dest, &options, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_VERIFY) && HAS(error->message, "più dati"));
+    g_assert_true(max.max_reported <= a.size_bytes);  /* non ha letto oltre la dimensione attesa */
+    g_assert_true(no_residue(dest));
     g_clear_error(&error);
     g_free(keep[0]);
     g_free(keep[1]);
@@ -1276,10 +1276,10 @@ test_download_cancel_midway(void)
     options.progress = cancel_at_progress;
     options.user_data = &at;
 
-    assert(!dep_installer_download(&a, dest, &options, &error));
-    assert(at.fired);  /* l'annullamento è avvenuto davvero a metà download */
-    assert(error_is(error, DEP_INSTALLER_ERROR_CANCELLED));
-    assert(no_residue(dest));  /* niente file né .part */
+    g_assert_false(dep_installer_download(&a, dest, &options, &error));
+    g_assert_true(at.fired);  /* l'annullamento è avvenuto davvero a metà download */
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_CANCELLED));
+    g_assert_true(no_residue(dest));  /* niente file né .part */
     g_clear_error(&error);
 
     g_object_unref(cancel);
@@ -1344,7 +1344,7 @@ test_platform_installer_flow(void)
     Recorder *rec = recorder_new();
     DepPlan *plan = dep_plan_new_for_artifact(&a, &error);
 
-    assert(plan && dep_plan_step(plan, 0)->kind == DEP_STEP_PLATFORM_INSTALLER && dep_plan_step(plan, 0)->needs_elevation);
+    g_assert_true(plan && dep_plan_step(plan, 0)->kind == DEP_STEP_PLATFORM_INSTALLER && dep_plan_step(plan, 0)->needs_elevation);
     options.deps_dir = deps;
     options.allow_loopback_http = TRUE;
     options.run_installer = spy_installer;
@@ -1353,17 +1353,17 @@ test_platform_installer_flow(void)
     options.user_data = rec;
 
     /* Successo: scaricato, verificato, poi (solo allora) lanciato; il file scaricato viene tolto. */
-    assert(dep_installer_run(plan, &options, &error));
-    assert(spy.calls == 1 && spy.file_existed && spy.seen_size == 300 * 1024);
-    assert(HAS(spy.seen_path, "downloads") && HAS(spy.seen_path, "prova.bin"));
-    assert(!g_file_test(spy.seen_path, G_FILE_TEST_EXISTS));
+    g_assert_true(dep_installer_run(plan, &options, &error));
+    g_assert_true(spy.calls == 1 && spy.file_existed && spy.seen_size == 300 * 1024);
+    g_assert_true(HAS(spy.seen_path, "downloads") && HAS(spy.seen_path, "prova.bin"));
+    g_assert_false(g_file_test(spy.seen_path, G_FILE_TEST_EXISTS));
 
     /* Autorizzazione negata dal sistema: l'esito è DENIED, il file scaricato non resta, nessun nuovo tentativo. */
     spy.deny = TRUE;
-    assert(!dep_installer_run(plan, &options, &error));
-    assert(error_is(error, DEP_INSTALLER_ERROR_DENIED));
+    g_assert_false(dep_installer_run(plan, &options, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_DENIED));
     g_clear_error(&error);
-    assert(spy.calls == 2 && !g_file_test(spy.seen_path, G_FILE_TEST_EXISTS));
+    g_assert_true(spy.calls == 2 && !g_file_test(spy.seen_path, G_FILE_TEST_EXISTS));
 
     /* Hash sbagliato: l'installer NON viene mai lanciato. */
     DepArtifact tampered = a;
@@ -1372,33 +1372,33 @@ test_platform_installer_flow(void)
     dep_plan_free(plan);
     plan = dep_plan_new_for_artifact(&tampered, &error);
     spy.deny = FALSE;
-    assert(!dep_installer_run(plan, &options, &error));
-    assert(error_is(error, DEP_INSTALLER_ERROR_VERIFY));
+    g_assert_false(dep_installer_run(plan, &options, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_VERIFY));
     g_clear_error(&error);
-    assert(spy.calls == 2);  /* invariato */
+    g_assert_cmpint(spy.calls, ==, 2);  /* invariato */
 
     /* Voci non valide nel piano. */
     DepArtifact bad_name = a;
 
     bad_name.filename = "../fuori.exe";
     dep_plan_free(plan);
-    assert(dep_plan_new_for_artifact(&bad_name, &error) == NULL);
-    assert(error_is(error, DEP_INSTALLER_ERROR_INVALID));
+    g_assert_null(dep_plan_new_for_artifact(&bad_name, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_INVALID));
     g_clear_error(&error);
-    assert(dep_plan_new_for_artifact(NULL, &error) == NULL);
+    g_assert_null(dep_plan_new_for_artifact(NULL, &error));
     g_clear_error(&error);
 
     /* Stesse regole della strada normale: SHA-256 non esadecimale/maiuscolo, install_subdir sospetta. */
     DepArtifact bad_hash = a;
 
     bad_hash.sha256 = "zz11111111111111111111111111111111111111111111111111111111111111";  /* 64 caratteri, non hex */
-    assert(dep_plan_new_for_artifact(&bad_hash, &error) == NULL && error_is(error, DEP_INSTALLER_ERROR_INVALID));
+    g_assert_true(dep_plan_new_for_artifact(&bad_hash, &error) == NULL && error_is(error, DEP_INSTALLER_ERROR_INVALID));
     g_clear_error(&error);
 
     DepArtifact upper_hash = a;
 
     upper_hash.sha256 = "ABCDEF1111111111111111111111111111111111111111111111111111111111";
-    assert(dep_plan_new_for_artifact(&upper_hash, &error) == NULL && error_is(error, DEP_INSTALLER_ERROR_INVALID));
+    g_assert_true(dep_plan_new_for_artifact(&upper_hash, &error) == NULL && error_is(error, DEP_INSTALLER_ERROR_INVALID));
     g_clear_error(&error);
 
     const char *bad_subdirs[] = { "", "..", "a/../b", "a/b", "/abs", "a\\b", NULL };
@@ -1408,7 +1408,7 @@ test_platform_installer_flow(void)
 
         bad_dir.kind = DEP_ARTIFACT_ARCHIVE;
         bad_dir.install_subdir = bad_subdirs[i];  /* l'ultimo è NULL */
-        assert(dep_plan_new_for_artifact(&bad_dir, &error) == NULL && error_is(error, DEP_INSTALLER_ERROR_INVALID));
+        g_assert_true(dep_plan_new_for_artifact(&bad_dir, &error) == NULL && error_is(error, DEP_INSTALLER_ERROR_INVALID));
         g_clear_error(&error);
     }
 
@@ -1416,7 +1416,7 @@ test_platform_installer_flow(void)
 
     good_dir.kind = DEP_ARTIFACT_ARCHIVE;
     plan = dep_plan_new_for_artifact(&good_dir, &error);
-    assert(plan != NULL);
+    g_assert_nonnull(plan);
     dep_plan_free(plan);
 
     /* Un hook che restituisce FALSE senza impostare l'errore non manda in crash l'esecuzione. */
@@ -1424,9 +1424,9 @@ test_platform_installer_flow(void)
 
     silent.run_installer = silent_failing_installer;
     plan = dep_plan_new_for_artifact(&a, &error);
-    assert(plan != NULL);
-    assert(!dep_installer_run(plan, &silent, &error));
-    assert(error_is(error, DEP_INSTALLER_ERROR_FAILED));
+    g_assert_nonnull(plan);
+    g_assert_false(dep_installer_run(plan, &silent, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_FAILED));
     g_clear_error(&error);
     dep_plan_free(plan);
 
@@ -1452,16 +1452,16 @@ test_archive_install_flow(void)
 
     DepPlan *plan = dep_plan_new_for_artifact(&good, &error);
 
-    assert(plan && dep_plan_step(plan, 0)->kind == DEP_STEP_ARCHIVE && !dep_plan_step(plan, 0)->needs_elevation);
-    assert(dep_installer_run(plan, &options, &error));  /* senza privilegi */
+    g_assert_true(plan && dep_plan_step(plan, 0)->kind == DEP_STEP_ARCHIVE && !dep_plan_step(plan, 0)->needs_elevation);
+    g_assert_true(dep_installer_run(plan, &options, &error));  /* senza privilegi */
 
     /* Estratto in <deps>/bin con strip 1 (la cartella «ffmpeg-1.0» sparisce), eseguibile, senza residui. */
     char *tool = g_build_filename(deps, "bin", "bin", "ffmpeg", NULL);
     char *notes = g_build_filename(deps, "bin", "LEGGIMI.txt", NULL);
 
-    assert(g_file_test(tool, G_FILE_TEST_IS_REGULAR) && g_file_test(notes, G_FILE_TEST_IS_REGULAR));
+    g_assert_true(g_file_test(tool, G_FILE_TEST_IS_REGULAR) && g_file_test(notes, G_FILE_TEST_IS_REGULAR));
 #ifdef G_OS_UNIX
-    assert(g_access(tool, X_OK) == 0);
+    g_assert_cmpint(g_access(tool, X_OK), ==, 0);
 #endif
     GDir *dir = g_dir_open(deps, 0, NULL);
     const char *name;
@@ -1469,41 +1469,41 @@ test_archive_install_flow(void)
 
     while ((name = g_dir_read_name(dir)) != NULL) {
         entries++;
-        assert(strcmp(name, "bin") == 0 || strcmp(name, "downloads") == 0);  /* nessuna cartella .staging/.old */
+        g_assert_true(strcmp(name, "bin") == 0 || strcmp(name, "downloads") == 0);  /* nessuna cartella .staging/.old */
     }
     g_dir_close(dir);
-    assert(entries >= 1);
+    g_assert_true(entries >= 1);
     char *zip_left = g_build_filename(deps, "downloads", "prova.bin", NULL);
 
-    assert(!g_file_test(zip_left, G_FILE_TEST_EXISTS));  /* l'archivio scaricato è stato tolto */
+    g_assert_false(g_file_test(zip_left, G_FILE_TEST_EXISTS));  /* l'archivio scaricato è stato tolto */
     g_free(zip_left);
 
     /* Archivio malevolo (zip-slip) con SHA-256 corretto: supera la verifica, ma l'estrazione lo rifiuta e la versione
      * precedente resta intatta, senza file fuori dalla cartella. */
     dep_plan_free(plan);
     plan = dep_plan_new_for_artifact(&evil, &error);
-    assert(!dep_installer_run(plan, &options, &error));
-    assert(error_is(error, DEP_INSTALLER_ERROR_EXTRACT));
+    g_assert_false(dep_installer_run(plan, &options, &error));
+    g_assert_true(error_is(error, DEP_INSTALLER_ERROR_EXTRACT));
     g_clear_error(&error);
-    assert(g_file_test(tool, G_FILE_TEST_IS_REGULAR));  /* installazione precedente intatta */
+    g_assert_true(g_file_test(tool, G_FILE_TEST_IS_REGULAR));  /* installazione precedente intatta */
     char *outside = g_build_filename(root, "evil.txt", NULL);
     char *outside2 = g_build_filename(deps, "evil.txt", NULL);
 
-    assert(!g_file_test(outside, G_FILE_TEST_EXISTS) && !g_file_test(outside2, G_FILE_TEST_EXISTS));
+    g_assert_true(!g_file_test(outside, G_FILE_TEST_EXISTS) && !g_file_test(outside2, G_FILE_TEST_EXISTS));
     dir = g_dir_open(deps, 0, NULL);
     while ((name = g_dir_read_name(dir)) != NULL) {
-        assert(strcmp(name, "bin") == 0 || strcmp(name, "downloads") == 0);  /* niente residui di staging */
+        g_assert_true(strcmp(name, "bin") == 0 || strcmp(name, "downloads") == 0);  /* niente residui di staging */
     }
     g_dir_close(dir);
 
     /* Nuova versione dello stesso archivio: sostituisce l'installazione in modo atomico, senza residui. */
     dep_plan_free(plan);
     plan = dep_plan_new_for_artifact(&good, &error);
-    assert(g_file_set_contents(notes, "vecchio", -1, NULL));
-    assert(dep_installer_run(plan, &options, &error));
+    g_assert_true(g_file_set_contents(notes, "vecchio", -1, NULL));
+    g_assert_true(dep_installer_run(plan, &options, &error));
     char *text = NULL;
 
-    assert(g_file_get_contents(notes, &text, NULL, NULL) && strcmp(text, "note della versione") == 0);
+    g_assert_true(g_file_get_contents(notes, &text, NULL, NULL) && strcmp(text, "note della versione") == 0);
     g_free(text);
 
     g_free(outside);
@@ -1522,7 +1522,7 @@ int
 main(void)
 {
     root = g_dir_make_tmp("syncview-installer-XXXXXX", NULL);
-    assert(root != NULL);
+    g_assert_nonnull(root);
     g_log_set_always_fatal(G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_ERROR);
 
     test_manifest();

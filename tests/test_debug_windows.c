@@ -9,7 +9,6 @@
 #include "ui/debug_modules_window.h"
 #include "ui/debug_windows.h"
 
-#include <assert.h>
 #include <glib.h>
 #include <gtk/gtk.h>
 #include <stdio.h>
@@ -107,7 +106,7 @@ open_debug(void)
     logger_init(NULL, TRUE, NULL);
     d.main_window = gtk_application_window_new(app);
     gtk_window_present(GTK_WINDOW(d.main_window));
-    assert(syncview_debug_windows_open(app, GTK_WINDOW(d.main_window), &d.log, &d.modules) == 2);
+    g_assert_cmpint(syncview_debug_windows_open(app, GTK_WINDOW(d.main_window), &d.log, &d.modules), ==, 2);
     return d;
 }
 
@@ -128,9 +127,9 @@ test_not_opened_without_debug(void)
     GtkWidget *main_window = gtk_application_window_new(app);
 
     logger_init(NULL, FALSE, NULL);
-    assert(syncview_debug_windows_open(app, GTK_WINDOW(main_window), &log, &modules) == 0);
-    assert(log == NULL && modules == NULL);
-    assert(logger_is_debug_mode() == FALSE);
+    g_assert_cmpint(syncview_debug_windows_open(app, GTK_WINDOW(main_window), &log, &modules), ==, 0);
+    g_assert_true(log == NULL && modules == NULL);
+    g_assert_true(logger_is_debug_mode() == FALSE);
     logger_shutdown();
     gtk_window_destroy(GTK_WINDOW(main_window));
 }
@@ -140,9 +139,9 @@ test_opens_two_windows_and_shows_lines(void)
 {
     Debug d = open_debug();
 
-    assert(d.log != NULL && d.modules != NULL);
-    assert(strcmp(gtk_window_get_title(GTK_WINDOW(d.log)), "Debug · Log in tempo reale") == 0);
-    assert(strcmp(gtk_window_get_title(GTK_WINDOW(d.modules)), "Debug · Moduli di log") == 0);
+    g_assert_true(d.log != NULL && d.modules != NULL);
+    g_assert_cmpstr(gtk_window_get_title(GTK_WINDOW(d.log)), ==, "Debug · Log in tempo reale");
+    g_assert_cmpstr(gtk_window_get_title(GTK_WINDOW(d.modules)), ==, "Debug · Moduli di log");
     settle(d.log);
 
     guint before = syncview_debug_log_window_get_line_count(d.log);
@@ -165,9 +164,9 @@ test_opens_two_windows_and_shows_lines(void)
             g_printerr("  [%u] livello=%d modulo=%d «%s»\n", i, lv, md, m);
         }
     }
-    assert(syncview_debug_log_window_get_line_count(d.log) == before + 4);
-    assert(count_lines_containing(d.log, "prova-azione") == 1);
-    assert(count_lines_containing(d.log, "prova-ui 42") == 1);
+    g_assert_true(syncview_debug_log_window_get_line_count(d.log) == before + 4);
+    g_assert_cmpint(count_lines_containing(d.log, "prova-azione"), ==, 1);
+    g_assert_cmpint(count_lines_containing(d.log, "prova-ui 42"), ==, 1);
 
     /* Livello e modulo di ogni riga sono quelli del logger. */
     guint n = syncview_debug_log_window_get_line_count(d.log);
@@ -175,15 +174,15 @@ test_opens_two_windows_and_shows_lines(void)
     LoggerModule module;
 
     for (guint i = before; i < n; i++) {
-        assert(syncview_debug_log_window_get_line(d.log, i, &level, &module, NULL));
+        g_assert_true(syncview_debug_log_window_get_line(d.log, i, &level, &module, NULL));
         if (line_contains(d.log, i, "prova-azione")) {
-            assert(level == LOGGER_LEVEL_INFO && module == LOGGER_MODULE_USER);
+            g_assert_true(level == LOGGER_LEVEL_INFO && module == LOGGER_MODULE_USER);
         } else if (line_contains(d.log, i, "prova-ui")) {
-            assert(level == LOGGER_LEVEL_DEBUG && module == LOGGER_MODULE_UI);
+            g_assert_true(level == LOGGER_LEVEL_DEBUG && module == LOGGER_MODULE_UI);
         } else if (line_contains(d.log, i, "prova-sync")) {
-            assert(level == LOGGER_LEVEL_DEBUG && module == LOGGER_MODULE_SYNC);
+            g_assert_true(level == LOGGER_LEVEL_DEBUG && module == LOGGER_MODULE_SYNC);
         } else if (line_contains(d.log, i, "prova-errore")) {
-            assert(level == LOGGER_LEVEL_ERROR && module == LOGGER_MODULE_APP);
+            g_assert_true(level == LOGGER_LEVEL_ERROR && module == LOGGER_MODULE_APP);
         }
     }
 
@@ -192,14 +191,14 @@ test_opens_two_windows_and_shows_lines(void)
         const char *message = NULL;
 
         syncview_debug_log_window_get_line(d.log, i, NULL, NULL, &message);
-        assert(!g_str_has_prefix(message, "[UI] ") && !g_str_has_prefix(message, "[SYNC] "));
+        g_assert_true(!g_str_has_prefix(message, "[UI] ") && !g_str_has_prefix(message, "[SYNC] "));
     }
 
     /* Riga di stato: righe e moduli attivi (tutti e 8). */
-    assert(wait_footer_contains(d.log, "righe", 5000));
-    assert(wait_footer_contains(d.log, "8 moduli attivi", 5000));
-    assert(strstr(gtk_label_get_text(GTK_LABEL(syncview_debug_log_window_get_widget(d.log, "live"))), "In diretta"));
-    assert(strstr(gtk_label_get_text(GTK_LABEL(syncview_debug_log_window_get_widget(d.log, "autoscroll"))), "ON"));
+    g_assert_true(wait_footer_contains(d.log, "righe", 5000));
+    g_assert_true(wait_footer_contains(d.log, "8 moduli attivi", 5000));
+    g_assert_true(strstr(gtk_label_get_text(GTK_LABEL(syncview_debug_log_window_get_widget(d.log, "live"))), "In diretta"));
+    g_assert_true(strstr(gtk_label_get_text(GTK_LABEL(syncview_debug_log_window_get_widget(d.log, "autoscroll"))), "ON"));
     close_debug(&d);
 }
 
@@ -210,39 +209,39 @@ test_module_switches_control_the_logger(void)
     GtkWidget *sync_switch = syncview_debug_modules_window_get_widget(d.modules, "switch-SYNC");
     GtkWidget *ui_switch = syncview_debug_modules_window_get_widget(d.modules, "switch-UI");
 
-    assert(sync_switch && ui_switch);
-    assert(gtk_switch_get_active(GTK_SWITCH(sync_switch)));  /* all'inizio tutti attivi, come il logger */
+    g_assert_true(sync_switch && ui_switch);
+    g_assert_true(gtk_switch_get_active(GTK_SWITCH(sync_switch)));  /* all'inizio tutti attivi, come il logger */
     settle(d.log);
 
     /* Spento il modulo SYNC: le sue righe non arrivano più alla finestra Log (e nemmeno a file/stderr: lo decide il logger). */
     gtk_switch_set_active(GTK_SWITCH(sync_switch), FALSE);
-    assert(!logger_is_module_enabled(LOGGER_MODULE_SYNC));
-    assert(logger_is_module_enabled(LOGGER_MODULE_UI));
+    g_assert_false(logger_is_module_enabled(LOGGER_MODULE_SYNC));
+    g_assert_true(logger_is_module_enabled(LOGGER_MODULE_UI));
     log_sync("sync-spento");
     log_ui("ui-acceso");
     settle(d.log);
-    assert(count_lines_containing(d.log, "sync-spento") == 0);
-    assert(count_lines_containing(d.log, "ui-acceso") == 1);
+    g_assert_cmpint(count_lines_containing(d.log, "sync-spento"), ==, 0);
+    g_assert_cmpint(count_lines_containing(d.log, "ui-acceso"), ==, 1);
 
     /* Gli errori non vengono mai filtrati, nemmeno con il modulo spento. */
     gtk_switch_set_active(GTK_SWITCH(ui_switch), FALSE);
     log_ui("ui-spento");
     log_error("errore-sempre", NULL);
     settle(d.log);
-    assert(count_lines_containing(d.log, "ui-spento") == 0);
-    assert(count_lines_containing(d.log, "errore-sempre") == 1);
-    assert(wait_footer_contains(d.log, "6 moduli attivi", 5000));
+    g_assert_cmpint(count_lines_containing(d.log, "ui-spento"), ==, 0);
+    g_assert_cmpint(count_lines_containing(d.log, "errore-sempre"), ==, 1);
+    g_assert_true(wait_footer_contains(d.log, "6 moduli attivi", 5000));
 
     /* Riacceso: le righe tornano. */
     gtk_switch_set_active(GTK_SWITCH(sync_switch), TRUE);
     log_sync("sync-riacceso");
     settle(d.log);
-    assert(count_lines_containing(d.log, "sync-riacceso") == 1);
+    g_assert_cmpint(count_lines_containing(d.log, "sync-riacceso"), ==, 1);
 
     /* «Tutti» riaccende ogni modulo. */
     g_signal_emit_by_name(syncview_debug_modules_window_get_widget(d.modules, "all"), "clicked");
-    assert(logger_is_module_enabled(LOGGER_MODULE_UI) && logger_is_module_enabled(LOGGER_MODULE_SYNC));
-    assert(gtk_switch_get_active(GTK_SWITCH(ui_switch)));
+    g_assert_true(logger_is_module_enabled(LOGGER_MODULE_UI) && logger_is_module_enabled(LOGGER_MODULE_SYNC));
+    g_assert_true(gtk_switch_get_active(GTK_SWITCH(ui_switch)));
 
     close_debug(&d);
 }
@@ -254,43 +253,43 @@ test_view_filters_by_level_and_module(void)
 
     settle(d.log);
     g_signal_emit_by_name(syncview_debug_log_window_get_widget(d.log, "clear"), "clicked");
-    assert(syncview_debug_log_window_get_line_count(d.log) == 0);
+    g_assert_cmpint(syncview_debug_log_window_get_line_count(d.log), ==, 0);
 
     log_sync("filtro-sync-debug");     /* DEBUG, SYNC */
     log_ui("filtro-ui-debug");         /* DEBUG, UI */
     log_user_action("filtro-info", NULL);  /* INFO, USER */
     log_error("filtro-errore", NULL);  /* ERROR, APP */
     settle(d.log);
-    assert(syncview_debug_log_window_get_line_count(d.log) >= 4);
+    g_assert_true(syncview_debug_log_window_get_line_count(d.log) >= 4);
     guint total = syncview_debug_log_window_get_line_count(d.log);
 
-    assert(syncview_debug_log_window_get_visible_count(d.log) == total);
+    g_assert_true(syncview_debug_log_window_get_visible_count(d.log) == total);
 
     /* Livello minimo «Info»: spariscono le righe DEBUG dalla vista, non dal modello. */
     gtk_drop_down_set_selected(GTK_DROP_DOWN(syncview_debug_log_window_get_widget(d.log, "level")), 1);
     guint info_visible = syncview_debug_log_window_get_visible_count(d.log);
 
-    assert(info_visible < total);
-    assert(syncview_debug_log_window_get_line_count(d.log) == total);
+    g_assert_true(info_visible < total);
+    g_assert_true(syncview_debug_log_window_get_line_count(d.log) == total);
 
     /* «Errore»: solo gli errori. */
     gtk_drop_down_set_selected(GTK_DROP_DOWN(syncview_debug_log_window_get_widget(d.log, "level")), 3);
     guint err_visible = syncview_debug_log_window_get_visible_count(d.log);
 
-    assert(err_visible >= 1 && err_visible < info_visible);
+    g_assert_true(err_visible >= 1 && err_visible < info_visible);
     gtk_drop_down_set_selected(GTK_DROP_DOWN(syncview_debug_log_window_get_widget(d.log, "level")), 0);
-    assert(syncview_debug_log_window_get_visible_count(d.log) == total);
+    g_assert_true(syncview_debug_log_window_get_visible_count(d.log) == total);
 
     /* Chip del modulo SYNC spento: le sue righe spariscono dalla vista; il segno di spunta lo mostra a parole. */
     GtkWidget *chip = syncview_debug_log_window_get_widget(d.log, "chip-SYNC");
 
-    assert(strcmp(gtk_button_get_label(GTK_BUTTON(chip)), "✓ SYNC") == 0);
+    g_assert_cmpstr(gtk_button_get_label(GTK_BUTTON(chip)), ==, "✓ SYNC");
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(chip), FALSE);
-    assert(strcmp(gtk_button_get_label(GTK_BUTTON(chip)), "SYNC") == 0);
-    assert(syncview_debug_log_window_get_visible_count(d.log) == total - 1);
-    assert(strstr(footer_text(d.log), "di") != NULL);  /* «N di M righe» */
+    g_assert_cmpstr(gtk_button_get_label(GTK_BUTTON(chip)), ==, "SYNC");
+    g_assert_true(syncview_debug_log_window_get_visible_count(d.log) == total - 1);
+    g_assert_nonnull(strstr(footer_text(d.log), "di"));  /* «N di M righe» */
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(chip), TRUE);
-    assert(syncview_debug_log_window_get_visible_count(d.log) == total);
+    g_assert_true(syncview_debug_log_window_get_visible_count(d.log) == total);
 
     close_debug(&d);
 }
@@ -305,37 +304,37 @@ test_pause_resume_and_clear(void)
     g_signal_emit_by_name(syncview_debug_log_window_get_widget(d.log, "clear"), "clicked");
     log_ui("prima-della-pausa");
     settle(d.log);
-    assert(syncview_debug_log_window_get_line_count(d.log) == 1);
+    g_assert_cmpint(syncview_debug_log_window_get_line_count(d.log), ==, 1);
 
     /* In pausa le righe nuove restano in coda. */
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(pause), TRUE);
-    assert(strstr(gtk_label_get_text(GTK_LABEL(syncview_debug_log_window_get_widget(d.log, "live"))), "In pausa"));
-    assert(strcmp(gtk_button_get_label(GTK_BUTTON(pause)), "Riprendi") == 0);
+    g_assert_true(strstr(gtk_label_get_text(GTK_LABEL(syncview_debug_log_window_get_widget(d.log, "live"))), "In pausa"));
+    g_assert_cmpstr(gtk_button_get_label(GTK_BUTTON(pause)), ==, "Riprendi");
     for (int i = 0; i < 5; i++) {
         log_ui("durante-la-pausa %d", i);
     }
     spin_for(150);
-    assert(syncview_debug_log_window_get_line_count(d.log) == 1);
-    assert(syncview_debug_log_window_get_pending_count(d.log) == 5);
-    assert(wait_footer_contains(d.log, "5 in attesa", 5000));
-    assert(strstr(gtk_label_get_text(GTK_LABEL(syncview_debug_log_window_get_widget(d.log, "autoscroll"))), "OFF"));
+    g_assert_cmpint(syncview_debug_log_window_get_line_count(d.log), ==, 1);
+    g_assert_cmpint(syncview_debug_log_window_get_pending_count(d.log), ==, 5);
+    g_assert_true(wait_footer_contains(d.log, "5 in attesa", 5000));
+    g_assert_true(strstr(gtk_label_get_text(GTK_LABEL(syncview_debug_log_window_get_widget(d.log, "autoscroll"))), "OFF"));
 
     /* Alla ripresa compaiono, nell'ordine di arrivo. */
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(pause), FALSE);
     settle(d.log);
-    assert(syncview_debug_log_window_get_line_count(d.log) == 6);
-    assert(line_contains(d.log, 1, "durante-la-pausa 0") && line_contains(d.log, 5, "durante-la-pausa 4"));
-    assert(strstr(gtk_label_get_text(GTK_LABEL(syncview_debug_log_window_get_widget(d.log, "live"))), "In diretta"));
+    g_assert_cmpint(syncview_debug_log_window_get_line_count(d.log), ==, 6);
+    g_assert_true(line_contains(d.log, 1, "durante-la-pausa 0") && line_contains(d.log, 5, "durante-la-pausa 4"));
+    g_assert_true(strstr(gtk_label_get_text(GTK_LABEL(syncview_debug_log_window_get_widget(d.log, "live"))), "In diretta"));
 
     /* Svuota: modello e coda a zero. */
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(pause), TRUE);
     log_ui("da-scartare");
     spin_for(100);
     g_signal_emit_by_name(syncview_debug_log_window_get_widget(d.log, "clear"), "clicked");
-    assert(syncview_debug_log_window_get_line_count(d.log) == 0 && syncview_debug_log_window_get_pending_count(d.log) == 0);
+    g_assert_true(syncview_debug_log_window_get_line_count(d.log) == 0 && syncview_debug_log_window_get_pending_count(d.log) == 0);
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(pause), FALSE);
     settle(d.log);
-    assert(syncview_debug_log_window_get_line_count(d.log) == 0);
+    g_assert_cmpint(syncview_debug_log_window_get_line_count(d.log), ==, 0);
 
     close_debug(&d);
 }
@@ -354,13 +353,13 @@ test_line_cap_keeps_the_newest(void)
         log_ui("riga-%d", i);
     }
     settle(d.log);
-    assert(syncview_debug_log_window_get_line_count(d.log) == SYNCVIEW_LOG_WINDOW_MAX_LINES);
+    g_assert_true(syncview_debug_log_window_get_line_count(d.log) == SYNCVIEW_LOG_WINDOW_MAX_LINES);
     char first[32], last[32];
 
     g_snprintf(first, sizeof first, "riga-%d", total - SYNCVIEW_LOG_WINDOW_MAX_LINES + 1);
     g_snprintf(last, sizeof last, "riga-%d", total);
-    assert(line_contains(d.log, 0, first));
-    assert(line_contains(d.log, SYNCVIEW_LOG_WINDOW_MAX_LINES - 1, last));
+    g_assert_true(line_contains(d.log, 0, first));
+    g_assert_true(line_contains(d.log, SYNCVIEW_LOG_WINDOW_MAX_LINES - 1, last));
     close_debug(&d);
 }
 
@@ -411,7 +410,7 @@ test_logging_from_other_threads(void)
     }
     settle(d.log);
 
-    assert(syncview_debug_log_window_get_dropped_count(d.log) == 0);
+    g_assert_cmpint(syncview_debug_log_window_get_dropped_count(d.log), ==, 0);
     for (int t = 0; t < 4; t++) {
         int next = 0;
         guint n = syncview_debug_log_window_get_line_count(d.log);
@@ -425,7 +424,7 @@ test_logging_from_other_threads(void)
             const char *at = strstr(message, prefix);
 
             if (at) {
-                assert(atoi(at + strlen(prefix)) == next);  /* ordine di emissione del thread rispettato */
+                g_assert_true(atoi(at + strlen(prefix)) == next);  /* ordine di emissione del thread rispettato */
                 next++;
             }
         }
@@ -434,7 +433,7 @@ test_logging_from_other_threads(void)
                        syncview_debug_log_window_get_line_count(d.log), syncview_debug_log_window_get_pending_count(d.log),
                        syncview_debug_log_window_get_dropped_count(d.log));
         }
-        assert(next == 800);
+        g_assert_cmpint(next, ==, 800);
     }
     close_debug(&d);
 }
@@ -451,13 +450,13 @@ test_closing_main_window_closes_debug_windows(void)
     /* Una chiusa prima, a mano: la chiusura della principale non deve toccare una finestra già sparita. */
     gtk_window_destroy(GTK_WINDOW(d.modules));
     spin_for(50);
-    assert(g_weak_ref_get(&modules_ref) == NULL);
+    g_assert_null(g_weak_ref_get(&modules_ref));
 
     gtk_window_destroy(GTK_WINDOW(d.main_window));
     spin_for(100);
     GtkWidget *alive = g_weak_ref_get(&log_ref);
 
-    assert(alive == NULL);
+    g_assert_null(alive);
     g_weak_ref_clear(&log_ref);
     g_weak_ref_clear(&modules_ref);
     logger_shutdown();
@@ -512,7 +511,7 @@ main(void)
     g_unsetenv("SYNCVIEW_DEBUG");
 
     app = gtk_application_new("com.syncview.SyncView.DebugTest", G_APPLICATION_NON_UNIQUE);
-    assert(g_application_register(G_APPLICATION(app), NULL, NULL));
+    g_assert_true(g_application_register(G_APPLICATION(app), NULL, NULL));
 
     RUN_TEST(test_not_opened_without_debug());
     RUN_TEST(test_opens_two_windows_and_shows_lines());

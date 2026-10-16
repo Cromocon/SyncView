@@ -8,7 +8,6 @@
 #include "video/video_player.h"
 #include "vfr_clip.h"
 
-#include <assert.h>
 #include <glib.h>
 #include <gtk/gtk.h>
 #include <gst/gst.h>
@@ -58,38 +57,38 @@ test_type_and_construction(void)
 {
     GError *error = NULL;
     SyncviewVideoPlayer *player = syncview_video_player_new(2, &error);
-    assert(player != NULL && error == NULL);
+    g_assert_true(player != NULL && error == NULL);
 
     /* Tipo GObject registrato e finale. */
     GType type = g_type_from_name("SyncviewVideoPlayer");
-    assert(type != 0 && type == SYNCVIEW_TYPE_VIDEO_PLAYER);
-    assert(SYNCVIEW_IS_VIDEO_PLAYER(player) && G_IS_OBJECT(player));
-    assert(G_TYPE_IS_FINAL(type));
-    assert(g_type_parent(type) == G_TYPE_OBJECT);
+    g_assert_true(type != 0 && type == SYNCVIEW_TYPE_VIDEO_PLAYER);
+    g_assert_true(SYNCVIEW_IS_VIDEO_PLAYER(player) && G_IS_OBJECT(player));
+    g_assert_true(G_TYPE_IS_FINAL(type));
+    g_assert_true(g_type_parent(type) == G_TYPE_OBJECT);
 
     /* Proprietà: video-index fisso alla creazione, paintable coerente con il getter. */
     int index = -1;
     GdkPaintable *paintable = NULL;
     g_object_get(player, "video-index", &index, "paintable", &paintable, NULL);
-    assert(index == 2 && syncview_video_player_get_video_index(player) == 2);
-    assert(paintable != NULL && paintable == syncview_video_player_get_paintable(player));
-    assert(GDK_IS_PAINTABLE(paintable));
+    g_assert_true(index == 2 && syncview_video_player_get_video_index(player) == 2);
+    g_assert_true(paintable != NULL && paintable == syncview_video_player_get_paintable(player));
+    g_assert_true(GDK_IS_PAINTABLE(paintable));
     g_object_unref(paintable);  /* g_object_get restituisce un riferimento */
 
     /* La pipeline è un playbin3 con gtk4paintablesink come video-sink, ferma in NULL (non avviata). */
     GstElement *pipeline = syncview_video_player_get_pipeline(player);
-    assert(pipeline != NULL && GST_IS_PIPELINE(pipeline));
+    g_assert_true(pipeline != NULL && GST_IS_PIPELINE(pipeline));
     GstElementFactory *factory = gst_element_get_factory(pipeline);
-    assert(strcmp(GST_OBJECT_NAME(factory), "playbin3") == 0);
-    assert(pipeline_state(pipeline) == GST_STATE_NULL);
+    g_assert_cmpstr(GST_OBJECT_NAME(factory), ==, "playbin3");
+    g_assert_true(pipeline_state(pipeline) == GST_STATE_NULL);
 
     GstElement *sink = NULL;
     g_object_get(pipeline, "video-sink", &sink, NULL);
-    assert(sink != NULL);
-    assert(strcmp(GST_OBJECT_NAME(gst_element_get_factory(sink)), "gtk4paintablesink") == 0);
+    g_assert_nonnull(sink);
+    g_assert_cmpstr(GST_OBJECT_NAME(gst_element_get_factory(sink)), ==, "gtk4paintablesink");
     GdkPaintable *sink_paintable = NULL;
     g_object_get(sink, "paintable", &sink_paintable, NULL);
-    assert(sink_paintable == paintable);  /* è proprio il paintable del sink collegato alla pipeline */
+    g_assert_true(sink_paintable == paintable);  /* è proprio il paintable del sink collegato alla pipeline */
     g_object_unref(sink_paintable);
     gst_object_unref(sink);
 
@@ -101,19 +100,19 @@ static void
 test_paintable_in_gtk_picture(void)
 {
     SyncviewVideoPlayer *player = syncview_video_player_new(0, NULL);
-    assert(player != NULL);
+    g_assert_nonnull(player);
 
     /* Il paintable si collega a un GtkPicture; senza video caricato è vuoto (nessuna dimensione intrinseca). */
     GtkWidget *picture = gtk_picture_new();
     gtk_picture_set_paintable(GTK_PICTURE(picture), syncview_video_player_get_paintable(player));
-    assert(gtk_picture_get_paintable(GTK_PICTURE(picture)) == syncview_video_player_get_paintable(player));
-    assert(gdk_paintable_get_intrinsic_width(syncview_video_player_get_paintable(player)) == 0);
-    assert(gdk_paintable_get_intrinsic_height(syncview_video_player_get_paintable(player)) == 0);
+    g_assert_true(gtk_picture_get_paintable(GTK_PICTURE(picture)) == syncview_video_player_get_paintable(player));
+    g_assert_cmpint(gdk_paintable_get_intrinsic_width(syncview_video_player_get_paintable(player)), ==, 0);
+    g_assert_cmpint(gdk_paintable_get_intrinsic_height(syncview_video_player_get_paintable(player)), ==, 0);
 
     /* Il widget può essere misurato e allocato (nessun crash nel rendering a vuoto) e la pipeline resta ferma. */
     int min, nat;
     gtk_widget_measure(picture, GTK_ORIENTATION_HORIZONTAL, -1, &min, &nat, NULL, NULL);
-    assert(pipeline_state(syncview_video_player_get_pipeline(player)) == GST_STATE_NULL);
+    g_assert_true(pipeline_state(syncview_video_player_get_pipeline(player)) == GST_STATE_NULL);
 
     /* Il GtkPicture tiene un proprio riferimento al paintable: distruggere il player prima non crasha. */
     g_object_ref_sink(picture);
@@ -129,16 +128,16 @@ test_invalid_index(void)
 
     for (size_t i = 0; i < G_N_ELEMENTS(bad); i++) {
         GError *error = NULL;
-        assert(syncview_video_player_new(bad[i], &error) == NULL);
-        assert(error != NULL && error->domain == SYNCVIEW_VIDEO_PLAYER_ERROR);
-        assert(error->code == SYNCVIEW_VIDEO_PLAYER_ERROR_INDEX);
+        g_assert_null(syncview_video_player_new(bad[i], &error));
+        g_assert_true(error != NULL && error->domain == SYNCVIEW_VIDEO_PLAYER_ERROR);
+        g_assert_true(error->code == SYNCVIEW_VIDEO_PLAYER_ERROR_INDEX);
         g_error_free(error);
     }
 
     /* Tutti gli indici validi funzionano; error NULL ammesso. */
     for (int i = 0; i < SYNCVIEW_MAX_VIDEOS; i++) {
         SyncviewVideoPlayer *p = syncview_video_player_new(i, NULL);
-        assert(p != NULL && syncview_video_player_get_video_index(p) == i);
+        g_assert_true(p != NULL && syncview_video_player_get_video_index(p) == i);
         g_object_unref(p);
     }
 }
@@ -150,15 +149,15 @@ test_independent_players(void)
 
     for (int i = 0; i < SYNCVIEW_MAX_VIDEOS; i++) {
         players[i] = syncview_video_player_new(i, NULL);
-        assert(players[i] != NULL);
+        g_assert_nonnull(players[i]);
     }
 
     /* Ogni player ha pipeline, sink e paintable propri, e nomi di elemento distinti. */
     for (int i = 0; i < SYNCVIEW_MAX_VIDEOS; i++) {
         for (int j = i + 1; j < SYNCVIEW_MAX_VIDEOS; j++) {
-            assert(syncview_video_player_get_pipeline(players[i]) != syncview_video_player_get_pipeline(players[j]));
-            assert(syncview_video_player_get_paintable(players[i]) != syncview_video_player_get_paintable(players[j]));
-            assert(strcmp(GST_OBJECT_NAME(syncview_video_player_get_pipeline(players[i])),
+            g_assert_true(syncview_video_player_get_pipeline(players[i]) != syncview_video_player_get_pipeline(players[j]));
+            g_assert_true(syncview_video_player_get_paintable(players[i]) != syncview_video_player_get_paintable(players[j]));
+            g_assert_true(strcmp(GST_OBJECT_NAME(syncview_video_player_get_pipeline(players[i])),
                           GST_OBJECT_NAME(syncview_video_player_get_pipeline(players[j]))) != 0);
         }
     }
@@ -184,19 +183,19 @@ test_lifecycle(void)
     /* Creazione/distruzione ripetuta: il player viene davvero finalizzato (e ASan non vede leak). */
     for (int i = 0; i < 25; i++) {
         SyncviewVideoPlayer *player = syncview_video_player_new(i % SYNCVIEW_MAX_VIDEOS, NULL);
-        assert(player != NULL);
+        g_assert_nonnull(player);
 
         finalized = FALSE;
         g_object_weak_ref(G_OBJECT(player), on_weak_notify, NULL);
         GstElement *pipeline = gst_object_ref(syncview_video_player_get_pipeline(player));
 
         g_object_unref(player);
-        assert(finalized);
+        g_assert_true(finalized);
 
         /* Lo smontaggio della pipeline è asincrono: a fine smontaggio resta l'ultimo riferimento (il nostro), in stato NULL. */
-        assert(drain_teardowns(10000));
-        assert(GST_OBJECT_REFCOUNT(pipeline) == 1);
-        assert(pipeline_state(pipeline) == GST_STATE_NULL);
+        g_assert_true(drain_teardowns(10000));
+        g_assert_cmpint(GST_OBJECT_REFCOUNT(pipeline), ==, 1);
+        g_assert_true(pipeline_state(pipeline) == GST_STATE_NULL);
         gst_object_unref(pipeline);
     }
 }
@@ -247,7 +246,7 @@ test_owned_objects_are_released(void)
 {
     for (int round = 0; round < 10; round++) {
         SyncviewVideoPlayer *player = syncview_video_player_new(round % SYNCVIEW_MAX_VIDEOS, NULL);
-        assert(player != NULL);
+        g_assert_nonnull(player);
 
         Finalized fin = { FALSE, FALSE, FALSE, FALSE };
         GstElement *pipeline = syncview_video_player_get_pipeline(player);
@@ -266,15 +265,15 @@ test_owned_objects_are_released(void)
         g_object_unref(player);
 
         /* Smontaggio asincrono: pipeline, sink, paintable e bus vengono rilasciati a fine smontaggio, sul thread principale. */
-        assert(drain_teardowns(10000));
+        g_assert_true(drain_teardowns(10000));
         for (int i = 0; i < 50 && !(fin.paintable_finalized && fin.sink_finalized && fin.bus_finalized); i++) {
             g_main_context_iteration(NULL, FALSE);
         }
 
-        assert(fin.pipeline_finalized);
-        assert(fin.sink_finalized);
-        assert(fin.paintable_finalized);
-        assert(fin.bus_finalized);
+        g_assert_true(fin.pipeline_finalized);
+        g_assert_true(fin.sink_finalized);
+        g_assert_true(fin.paintable_finalized);
+        g_assert_true(fin.bus_finalized);
     }
 }
 
@@ -295,7 +294,7 @@ make_video_fps(const char *dir, const char *name, int width, int height, int fra
         variable_rate ? "capssetter caps=\"video/x-vp8,framerate=0/1\" replace=false join=true !" : "");
     GError *error = NULL;
     GstElement *pipeline = gst_parse_launch(desc, &error);
-    assert(pipeline != NULL && error == NULL);
+    g_assert_true(pipeline != NULL && error == NULL);
 
     GstElement *out = gst_bin_get_by_name(GST_BIN(pipeline), "out");
     g_object_set(out, "location", path, NULL);
@@ -304,7 +303,7 @@ make_video_fps(const char *dir, const char *name, int width, int height, int fra
     gst_element_set_state(pipeline, GST_STATE_PLAYING);
     GstBus *bus = gst_element_get_bus(pipeline);
     GstMessage *msg = gst_bus_timed_pop_filtered(bus, 30 * GST_SECOND, GST_MESSAGE_EOS | GST_MESSAGE_ERROR);
-    assert(msg != NULL && GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS);
+    g_assert_true(msg != NULL && GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS);
     gst_message_unref(msg);
     gst_object_unref(bus);
     gst_element_set_state(pipeline, GST_STATE_NULL);
@@ -456,37 +455,37 @@ test_load_first_frame(const char *dir)
     GdkPaintable *paintable = syncview_video_player_get_paintable(player);
 
     /* Prima del load: nessun frame, nulla da disegnare, nessun decoder. */
-    assert(!syncview_video_player_is_loaded(player) && !syncview_video_player_is_loading(player));
-    assert(syncview_video_player_get_path(player) == NULL);
-    assert(syncview_video_player_get_decoder_description(player) == NULL);
+    g_assert_true(!syncview_video_player_is_loaded(player) && !syncview_video_player_is_loading(player));
+    g_assert_null(syncview_video_player_get_path(player));
+    g_assert_null(syncview_video_player_get_decoder_description(player));
     GskRenderNode *empty = snapshot_paintable(paintable, 320, 240);
-    assert(!node_contains_texture(empty));  /* al più un riempimento nero, nessuna texture */
+    g_assert_false(node_contains_texture(empty));  /* al più un riempimento nero, nessuna texture */
     if (empty) {
         gsk_render_node_unref(empty);
     }
 
     /* load() è asincrono: ritorna subito, in stato "loading", senza segnali. */
     GError *error = NULL;
-    assert(syncview_video_player_load(player, path, &error) && error == NULL);
-    assert(syncview_video_player_is_loading(player) && !syncview_video_player_is_loaded(player));
-    assert(strcmp(syncview_video_player_get_path(player), path) == 0);
-    assert(ev.loaded_true == 0 && ev.errors == 0);
+    g_assert_true(syncview_video_player_load(player, path, &error) && error == NULL);
+    g_assert_true(syncview_video_player_is_loading(player) && !syncview_video_player_is_loaded(player));
+    g_assert_cmpstr(syncview_video_player_get_path(player), ==, path);
+    g_assert_true(ev.loaded_true == 0 && ev.errors == 0);
 
     /* ASYNC_DONE dal bus -> load-state-changed(TRUE), una sola volta. */
-    assert(spin_until(&ev.got_loaded, 10000));
-    assert(ev.loaded_true == 1 && ev.loaded_false == 0 && ev.errors == 0);
-    assert(syncview_video_player_is_loaded(player) && !syncview_video_player_is_loading(player));
+    g_assert_true(spin_until(&ev.got_loaded, 10000));
+    g_assert_true(ev.loaded_true == 1 && ev.loaded_false == 0 && ev.errors == 0);
+    g_assert_true(syncview_video_player_is_loaded(player) && !syncview_video_player_is_loading(player));
 
     /* Pipeline in PAUSED (non in play): il primo frame è mostrato, il video non avanza. */
-    assert(pipeline_state(syncview_video_player_get_pipeline(player)) == GST_STATE_PAUSED);
+    g_assert_true(pipeline_state(syncview_video_player_get_pipeline(player)) == GST_STATE_PAUSED);
 
     /* Il primo frame è nel paintable: dimensioni intrinseche del video e qualcosa da disegnare. */
-    assert(wait_for_frame(player, 320, 240));
+    g_assert_true(wait_for_frame(player, 320, 240));
     GskRenderNode *node = snapshot_paintable(paintable, 320, 240);
-    assert(node != NULL && node_contains_texture(node));  /* ora c'è la texture del frame */
+    g_assert_true(node != NULL && node_contains_texture(node));  /* ora c'è la texture del frame */
     graphene_rect_t bounds;
     gsk_render_node_get_bounds(node, &bounds);
-    assert(bounds.size.width > 0 && bounds.size.height > 0);
+    g_assert_true(bounds.size.width > 0 && bounds.size.height > 0);
     gsk_render_node_unref(node);
 
     /* Un GtkPicture collegato riceve le dimensioni del video. */
@@ -494,26 +493,26 @@ test_load_first_frame(const char *dir)
     gtk_picture_set_paintable(GTK_PICTURE(picture), paintable);
     int min_w, nat_w;
     gtk_widget_measure(picture, GTK_ORIENTATION_HORIZONTAL, -1, &min_w, &nat_w, NULL, NULL);
-    assert(nat_w == 320);
+    g_assert_cmpint(nat_w, ==, 320);
     g_object_unref(picture);
 
     /* Decoder in uso (O6): VP8, software o hardware. */
     char *decoder = syncview_video_player_get_decoder_description(player);
-    assert(decoder != NULL && strstr(decoder, "vp8") != NULL);
-    assert(strstr(decoder, "(software)") != NULL || strstr(decoder, "(hardware)") != NULL);
+    g_assert_true(decoder != NULL && strstr(decoder, "vp8") != NULL);
+    g_assert_true(strstr(decoder, "(software)") != NULL || strstr(decoder, "(hardware)") != NULL);
     g_free(decoder);
 
     /* Nessun evento spurio nel frattempo. */
     spin_for(200);
-    assert(ev.loaded_true == 1 && ev.errors == 0);
+    g_assert_true(ev.loaded_true == 1 && ev.errors == 0);
 
     /* Un seek con flush produce un nuovo ASYNC_DONE: non è un nuovo caricamento, nessun segnale. */
-    assert(gst_element_seek_simple(syncview_video_player_get_pipeline(player), GST_FORMAT_TIME,
+    g_assert_true(gst_element_seek_simple(syncview_video_player_get_pipeline(player), GST_FORMAT_TIME,
                                    GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT, 0));
     GstState st;
     gst_element_get_state(syncview_video_player_get_pipeline(player), &st, NULL, 5 * GST_SECOND);
     spin_for(300);
-    assert(ev.loaded_true == 1 && ev.errors == 0 && syncview_video_player_is_loaded(player));
+    g_assert_true(ev.loaded_true == 1 && ev.errors == 0 && syncview_video_player_is_loaded(player));
 
     g_free(ev.last_error);
     g_object_unref(player);
@@ -530,17 +529,17 @@ test_load_errors(const char *dir)
 
     /* File assente / NULL / directory: errore immediato, nessun segnale, stato invariato. */
     char *missing = g_build_filename(dir, "manca.webm", NULL);
-    assert(!syncview_video_player_load(player, missing, &error));
-    assert(error->domain == SYNCVIEW_VIDEO_PLAYER_ERROR && error->code == SYNCVIEW_VIDEO_PLAYER_ERROR_FILE_NOT_FOUND);
-    assert(strcmp(error->message, "File non trovato") == 0);
+    g_assert_false(syncview_video_player_load(player, missing, &error));
+    g_assert_true(error->domain == SYNCVIEW_VIDEO_PLAYER_ERROR && error->code == SYNCVIEW_VIDEO_PLAYER_ERROR_FILE_NOT_FOUND);
+    g_assert_cmpstr(error->message, ==, "File non trovato");
     g_clear_error(&error);
-    assert(!syncview_video_player_load(player, NULL, &error) && error->code == SYNCVIEW_VIDEO_PLAYER_ERROR_FILE_NOT_FOUND);
+    g_assert_true(!syncview_video_player_load(player, NULL, &error) && error->code == SYNCVIEW_VIDEO_PLAYER_ERROR_FILE_NOT_FOUND);
     g_clear_error(&error);
-    assert(!syncview_video_player_load(player, dir, NULL));
-    assert(!syncview_video_player_is_loading(player) && !syncview_video_player_is_loaded(player));
-    assert(pipeline_state(syncview_video_player_get_pipeline(player)) == GST_STATE_NULL);
+    g_assert_false(syncview_video_player_load(player, dir, NULL));
+    g_assert_true(!syncview_video_player_is_loading(player) && !syncview_video_player_is_loaded(player));
+    g_assert_true(pipeline_state(syncview_video_player_get_pipeline(player)) == GST_STATE_NULL);
     spin_for(100);
-    assert(ev.errors == 0 && ev.loaded_true == 0);
+    g_assert_true(ev.errors == 0 && ev.loaded_true == 0);
 
     /* File che GStreamer non sa leggere: il bus segnala un ERROR -> segnale "error", pipeline a NULL. */
     char *garbage = g_build_filename(dir, "garbage.mp4", NULL);
@@ -548,20 +547,20 @@ test_load_errors(const char *dir)
     for (size_t i = 0; i < sizeof(data); i++) {
         data[i] = (char)((i * 131 + 17) % 251);
     }
-    assert(g_file_set_contents(garbage, data, sizeof(data), NULL));
-    assert(syncview_video_player_load(player, garbage, NULL));  /* l'errore arriva dal bus, non subito */
-    assert(spin_until(&ev.got_error, 10000));
-    assert(ev.errors == 1 && ev.loaded_true == 0 && ev.last_error != NULL && *ev.last_error != '\0');
-    assert(!syncview_video_player_is_loaded(player) && !syncview_video_player_is_loading(player));
-    assert(wait_until_null(player));  /* smontaggio asincrono */
-    assert(syncview_video_player_get_decoder_description(player) == NULL);
+    g_assert_true(g_file_set_contents(garbage, data, sizeof(data), NULL));
+    g_assert_true(syncview_video_player_load(player, garbage, NULL));  /* l'errore arriva dal bus, non subito */
+    g_assert_true(spin_until(&ev.got_error, 10000));
+    g_assert_true(ev.errors == 1 && ev.loaded_true == 0 && ev.last_error != NULL && *ev.last_error != '\0');
+    g_assert_true(!syncview_video_player_is_loaded(player) && !syncview_video_player_is_loading(player));
+    g_assert_true(wait_until_null(player));  /* smontaggio asincrono */
+    g_assert_null(syncview_video_player_get_decoder_description(player));
 
     /* Dopo un errore il player si riprende con un file valido. */
     char *good = make_video(dir, "dopo_errore.webm", 320, 240, 25);
     ev.got_loaded = FALSE;
-    assert(syncview_video_player_load(player, good, NULL));
-    assert(spin_until(&ev.got_loaded, 10000));
-    assert(ev.loaded_true == 1 && ev.errors == 1 && syncview_video_player_is_loaded(player));
+    g_assert_true(syncview_video_player_load(player, good, NULL));
+    g_assert_true(spin_until(&ev.got_loaded, 10000));
+    g_assert_true(ev.loaded_true == 1 && ev.errors == 1 && syncview_video_player_is_loaded(player));
 
     g_free(ev.last_error);
     g_object_unref(player);
@@ -579,9 +578,9 @@ test_error_after_loaded(const char *dir)
     Events ev;
     events_connect(player, &ev);
 
-    assert(syncview_video_player_load(player, path, NULL));
-    assert(spin_until(&ev.got_loaded, 10000));
-    assert(syncview_video_player_is_loaded(player));
+    g_assert_true(syncview_video_player_load(player, path, NULL));
+    g_assert_true(spin_until(&ev.got_loaded, 10000));
+    g_assert_true(syncview_video_player_is_loaded(player));
 
     /* Errore iniettato sul bus come se arrivasse da un elemento della pipeline. */
     GstElement *pipeline = syncview_video_player_get_pipeline(player);
@@ -589,18 +588,18 @@ test_error_after_loaded(const char *dir)
     gst_element_post_message(pipeline, gst_message_new_error(GST_OBJECT(pipeline), injected, "debug di prova"));
     g_error_free(injected);
 
-    assert(spin_until(&ev.got_error, 10000));
-    assert(ev.errors == 1 && strcmp(ev.last_error, "errore iniettato dal test") == 0);
-    assert(ev.loaded_true == 1 && ev.loaded_false == 1);          /* "load-state-changed(FALSE)" emesso una volta */
-    assert(!syncview_video_player_is_loaded(player) && !syncview_video_player_is_loading(player));
-    assert(wait_until_null(player));  /* smontaggio asincrono */
-    assert(syncview_video_player_get_decoder_description(player) == NULL);
+    g_assert_true(spin_until(&ev.got_error, 10000));
+    g_assert_true(ev.errors == 1 && strcmp(ev.last_error, "errore iniettato dal test") == 0);
+    g_assert_true(ev.loaded_true == 1 && ev.loaded_false == 1);          /* "load-state-changed(FALSE)" emesso una volta */
+    g_assert_true(!syncview_video_player_is_loaded(player) && !syncview_video_player_is_loading(player));
+    g_assert_true(wait_until_null(player));  /* smontaggio asincrono */
+    g_assert_null(syncview_video_player_get_decoder_description(player));
 
     /* Il player si riprende con un nuovo load. */
     ev.got_loaded = FALSE;
-    assert(syncview_video_player_load(player, path, NULL));
-    assert(spin_until(&ev.got_loaded, 10000) && syncview_video_player_is_loaded(player));
-    assert(ev.loaded_true == 2 && ev.errors == 1);
+    g_assert_true(syncview_video_player_load(player, path, NULL));
+    g_assert_true(spin_until(&ev.got_loaded, 10000) && syncview_video_player_is_loaded(player));
+    g_assert_true(ev.loaded_true == 2 && ev.errors == 1);
 
     g_free(ev.last_error);
     g_object_unref(player);
@@ -616,16 +615,16 @@ test_reload_replaces_video(const char *dir)
     Events ev;
     events_connect(player, &ev);
 
-    assert(syncview_video_player_load(player, small, NULL));
-    assert(spin_until(&ev.got_loaded, 10000) && wait_for_frame(player, 320, 240));
+    g_assert_true(syncview_video_player_load(player, small, NULL));
+    g_assert_true(spin_until(&ev.got_loaded, 10000) && wait_for_frame(player, 320, 240));
 
     /* Secondo load nello stesso player: sostituisce il primo, nuovo ASYNC_DONE, nuove dimensioni. */
     ev.got_loaded = FALSE;
-    assert(syncview_video_player_load(player, big, NULL));
-    assert(syncview_video_player_is_loading(player) && !syncview_video_player_is_loaded(player));
-    assert(strcmp(syncview_video_player_get_path(player), big) == 0);
-    assert(spin_until(&ev.got_loaded, 10000) && wait_for_frame(player, 640, 360));
-    assert(ev.loaded_true == 2 && ev.errors == 0);
+    g_assert_true(syncview_video_player_load(player, big, NULL));
+    g_assert_true(syncview_video_player_is_loading(player) && !syncview_video_player_is_loaded(player));
+    g_assert_cmpstr(syncview_video_player_get_path(player), ==, big);
+    g_assert_true(spin_until(&ev.got_loaded, 10000) && wait_for_frame(player, 640, 360));
+    g_assert_true(ev.loaded_true == 2 && ev.errors == 0);
 
     /*
      * ASYNC_DONE del caricamento precedente già pubblicato sul bus ma non ancora consegnato (il main
@@ -633,27 +632,27 @@ test_reload_replaces_video(const char *dir)
      */
     ev.got_loaded = FALSE;
     ev.loaded_true = 0;
-    assert(syncview_video_player_load(player, small, NULL));
+    g_assert_true(syncview_video_player_load(player, small, NULL));
     GstState state_now;
-    assert(gst_element_get_state(syncview_video_player_get_pipeline(player), &state_now, NULL, 10 * GST_SECOND)
+    g_assert_true(gst_element_get_state(syncview_video_player_get_pipeline(player), &state_now, NULL, 10 * GST_SECOND)
            == GST_STATE_CHANGE_SUCCESS);  /* preroll finito: ASYNC_DONE è sul bus, non ancora dispatchato */
-    assert(ev.loaded_true == 0);
-    assert(syncview_video_player_load(player, big, NULL));
-    assert(spin_until(&ev.got_loaded, 10000));
+    g_assert_cmpint(ev.loaded_true, ==, 0);
+    g_assert_true(syncview_video_player_load(player, big, NULL));
+    g_assert_true(spin_until(&ev.got_loaded, 10000));
     spin_for(300);
-    assert(ev.loaded_true == 1);                      /* un solo esito, non due */
-    assert(wait_for_frame(player, 640, 360));         /* ed è quello del file nuovo */
+    g_assert_cmpint(ev.loaded_true, ==, 1);                      /* un solo esito, non due */
+    g_assert_true(wait_for_frame(player, 640, 360));         /* ed è quello del file nuovo */
 
     /* Load ravvicinati: il primo viene scartato, arriva UN SOLO esito (per l'ultimo file). */
     ev.got_loaded = FALSE;
     ev.loaded_true = 0;
-    assert(syncview_video_player_load(player, small, NULL));
-    assert(syncview_video_player_load(player, big, NULL));
-    assert(spin_until(&ev.got_loaded, 10000));
+    g_assert_true(syncview_video_player_load(player, small, NULL));
+    g_assert_true(syncview_video_player_load(player, big, NULL));
+    g_assert_true(spin_until(&ev.got_loaded, 10000));
     spin_for(500);  /* un ASYNC_DONE del caricamento scartato arriverebbe qui */
-    assert(ev.loaded_true == 1 && ev.errors == 0);
-    assert(strcmp(syncview_video_player_get_path(player), big) == 0);
-    assert(wait_for_frame(player, 640, 360));
+    g_assert_true(ev.loaded_true == 1 && ev.errors == 0);
+    g_assert_cmpstr(syncview_video_player_get_path(player), ==, big);
+    g_assert_true(wait_for_frame(player, 640, 360));
 
     g_free(ev.last_error);
     g_object_unref(player);
@@ -672,11 +671,11 @@ test_players_load_independently(const char *dir)
     events_connect(a, &ea);
     events_connect(b, &eb);
 
-    assert(syncview_video_player_load(a, p1, NULL));
-    assert(syncview_video_player_load(b, p2, NULL));
-    assert(spin_until(&ea.got_loaded, 10000) && spin_until(&eb.got_loaded, 10000));
-    assert(wait_for_frame(a, 320, 240) && wait_for_frame(b, 640, 360));
-    assert(ea.loaded_true == 1 && eb.loaded_true == 1 && ea.errors == 0 && eb.errors == 0);
+    g_assert_true(syncview_video_player_load(a, p1, NULL));
+    g_assert_true(syncview_video_player_load(b, p2, NULL));
+    g_assert_true(spin_until(&ea.got_loaded, 10000) && spin_until(&eb.got_loaded, 10000));
+    g_assert_true(wait_for_frame(a, 320, 240) && wait_for_frame(b, 640, 360));
+    g_assert_true(ea.loaded_true == 1 && eb.loaded_true == 1 && ea.errors == 0 && eb.errors == 0);
 
     g_object_unref(a);
     g_object_unref(b);
@@ -699,7 +698,7 @@ test_dispose_while_loading(const char *dir)
         SyncviewVideoPlayer *player = syncview_video_player_new(i % SYNCVIEW_MAX_VIDEOS, NULL);
         Events ev;
         events_connect(player, &ev);
-        assert(syncview_video_player_load(player, path, NULL));
+        g_assert_true(syncview_video_player_load(player, path, NULL));
         if (i % 2) {
             spin_for(20);  /* a volte a caricamento già avviato */
         }
@@ -709,8 +708,8 @@ test_dispose_while_loading(const char *dir)
 
     /* Nessuna pipeline deve restare bloccata in READY -> PAUSED: è lo stallo di gtk4paintablesink (sink portato a READY
      * dal thread principale in start_pending_load). Senza quella correzione 4-5 caricamenti su 10 restavano bloccati. */
-    assert(drain_teardowns(15000));
-    assert(syncview_video_player_abandoned_teardowns() == abandoned_before);
+    g_assert_true(drain_teardowns(15000));
+    g_assert_true(syncview_video_player_abandoned_teardowns() == abandoned_before);
 
     g_free(path);
 }
@@ -741,29 +740,29 @@ test_abandoned_teardown_builds_new_pipeline(const char *dir)
     GstElement *old_pipeline = syncview_video_player_get_pipeline(player);
     guint abandoned_before = syncview_video_player_abandoned_teardowns();
 
-    assert(syncview_video_player_load(player, small, NULL));      /* ancora in PAUSED asincrono */
+    g_assert_true(syncview_video_player_load(player, small, NULL));      /* ancora in PAUSED asincrono */
     syncview_video_player_test_force_abandon(TRUE);
-    assert(syncview_video_player_load(player, big, NULL));         /* smontaggio rimandato */
+    g_assert_true(syncview_video_player_load(player, big, NULL));         /* smontaggio rimandato */
     syncview_video_player_test_force_abandon(FALSE);
-    assert(syncview_video_player_pending_teardowns() == 1);
+    g_assert_cmpint(syncview_video_player_pending_teardowns(), ==, 1);
 
-    assert(spin_until(&ev.got_loaded, 15000));
+    g_assert_true(spin_until(&ev.got_loaded, 15000));
     spin_for(300);
-    assert(syncview_video_player_abandoned_teardowns() == abandoned_before + 1);
-    assert(syncview_video_player_get_pipeline(player) != old_pipeline);
-    assert(notified == 1);
-    assert(ev.loaded_true == 1 && ev.errors == 0);
-    assert(syncview_video_player_is_loaded(player));
-    assert(wait_for_frame(player, 640, 360));
+    g_assert_true(syncview_video_player_abandoned_teardowns() == abandoned_before + 1);
+    g_assert_true(syncview_video_player_get_pipeline(player) != old_pipeline);
+    g_assert_cmpint(notified, ==, 1);
+    g_assert_true(ev.loaded_true == 1 && ev.errors == 0);
+    g_assert_true(syncview_video_player_is_loaded(player));
+    g_assert_true(wait_for_frame(player, 640, 360));
 
     /* Il player è di nuovo normale: un load() successivo non aspetta nulla e funziona. */
     ev.got_loaded = FALSE;
-    assert(syncview_video_player_load(player, small, NULL));
-    assert(spin_until(&ev.got_loaded, 10000) && wait_for_frame(player, 320, 240));
-    assert(syncview_video_player_pending_teardowns() == 0);
+    g_assert_true(syncview_video_player_load(player, small, NULL));
+    g_assert_true(spin_until(&ev.got_loaded, 10000) && wait_for_frame(player, 320, 240));
+    g_assert_cmpint(syncview_video_player_pending_teardowns(), ==, 0);
 
     g_object_unref(player);
-    assert(drain_teardowns(15000));
+    g_assert_true(drain_teardowns(15000));
     syncview_video_player_test_release_abandoned();
     g_free(small);
     g_free(big);
@@ -855,7 +854,7 @@ position_ms(SyncviewVideoPlayer *player)
 {
     gint64 pos = -1;
 
-    assert(gst_element_query_position(syncview_video_player_get_pipeline(player), GST_FORMAT_TIME, &pos));
+    g_assert_true(gst_element_query_position(syncview_video_player_get_pipeline(player), GST_FORMAT_TIME, &pos));
     return pos / GST_MSECOND;
 }
 
@@ -885,56 +884,56 @@ test_play_pause_basics(const char *dir)
     PlayEvents ev;
     SyncviewVideoPlayer *player = player_with_events(0, &ev);
 
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
-    assert(syncview_video_player_load(player, path, NULL));
-    assert(spin_until(&ev.got_loaded, 10000));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
+    g_assert_true(syncview_video_player_load(player, path, NULL));
+    g_assert_true(spin_until(&ev.got_loaded, 10000));
 
     /* Dopo il load: in pausa sul primo frame, come l'originale. Un solo segnale (PAUSED). */
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
-    assert(ev.states->len == 1 && state_at(&ev, 0) == SYNCVIEW_PLAYBACK_PAUSED);
-    assert(wait_for_frame(player, 320, 240));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
+    g_assert_true(ev.states->len == 1 && state_at(&ev, 0) == SYNCVIEW_PLAYBACK_PAUSED);
+    g_assert_true(wait_for_frame(player, 320, 240));
     spin_for(200);
     gint64 still = position_ms(player);
     spin_for(300);
-    assert(position_ms(player) == still);  /* in pausa il video non avanza */
+    g_assert_true(position_ms(player) == still);  /* in pausa il video non avanza */
 
     /* play(): PLAYING, il video avanza in tempo reale e il paintable riceve frame. */
     GError *error = NULL;
     int frames_before = ev.frames;
-    assert(syncview_video_player_play(player, &error) && error == NULL);
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
-    assert(pipeline_state(syncview_video_player_get_pipeline(player)) == GST_STATE_PLAYING);
+    g_assert_true(syncview_video_player_play(player, &error) && error == NULL);
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
+    g_assert_true(pipeline_state(syncview_video_player_get_pipeline(player)) == GST_STATE_PLAYING);
     spin_for(600);
     gint64 after_play = position_ms(player);
-    assert(after_play >= still + 300 && after_play <= still + 1500);  /* ~600 ms di riproduzione */
-    assert(ev.frames - frames_before >= 5);                              /* frame disegnati (25 fps) */
+    g_assert_true(after_play >= still + 300 && after_play <= still + 1500);  /* ~600 ms di riproduzione */
+    g_assert_true(ev.frames - frames_before >= 5);                              /* frame disegnati (25 fps) */
 
     /* pause(): si ferma, la posizione non cambia più e nessun nuovo frame. */
-    assert(syncview_video_player_pause(player, NULL));
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
+    g_assert_true(syncview_video_player_pause(player, NULL));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
     settle(player);
     gint64 paused_at = position_ms(player);
     int frames_paused = ev.frames;
     spin_for(400);
-    assert(position_ms(player) == paused_at);
-    assert(ev.frames - frames_paused <= 1);
+    g_assert_true(position_ms(player) == paused_at);
+    g_assert_true(ev.frames - frames_paused <= 1);
 
     /* play() riprende da dove si era fermato, non da capo. */
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_play(player, NULL));
     spin_for(400);
     gint64 resumed = position_ms(player);
-    assert(resumed > paused_at + 150 && resumed >= after_play);
+    g_assert_true(resumed > paused_at + 150 && resumed >= after_play);
 
     /* Sequenza dei segnali: PAUSED (load), PLAYING, PAUSED, PLAYING; chiamate ripetute non ne emettono. */
-    assert(syncview_video_player_play(player, NULL));  /* già in play */
-    assert(ev.states->len == 4);
-    assert(state_at(&ev, 1) == SYNCVIEW_PLAYBACK_PLAYING && state_at(&ev, 2) == SYNCVIEW_PLAYBACK_PAUSED
+    g_assert_true(syncview_video_player_play(player, NULL));  /* già in play */
+    g_assert_cmpint(ev.states->len, ==, 4);
+    g_assert_true(state_at(&ev, 1) == SYNCVIEW_PLAYBACK_PLAYING && state_at(&ev, 2) == SYNCVIEW_PLAYBACK_PAUSED
            && state_at(&ev, 3) == SYNCVIEW_PLAYBACK_PLAYING);
-    assert(syncview_video_player_pause(player, NULL) && syncview_video_player_pause(player, NULL));
-    assert(ev.states->len == 5);  /* un solo PAUSED in più */
+    g_assert_true(syncview_video_player_pause(player, NULL) && syncview_video_player_pause(player, NULL));
+    g_assert_cmpint(ev.states->len, ==, 5);  /* un solo PAUSED in più */
 
     /* Il video è rimasto caricato per tutto il tempo; nessun errore. */
-    assert(syncview_video_player_is_loaded(player) && ev.errors == 0);
+    g_assert_true(syncview_video_player_is_loaded(player) && ev.errors == 0);
 
     events_free(&ev);
     g_object_unref(player);
@@ -948,20 +947,20 @@ test_toggle(const char *dir)
     PlayEvents ev;
     SyncviewVideoPlayer *player = player_with_events(1, &ev);
 
-    assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
+    g_assert_true(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
 
-    assert(syncview_video_player_toggle_play_pause(player, NULL));
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
-    assert(syncview_video_player_toggle_play_pause(player, NULL));
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
-    assert(syncview_video_player_toggle_play_pause(player, NULL));
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
+    g_assert_true(syncview_video_player_toggle_play_pause(player, NULL));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
+    g_assert_true(syncview_video_player_toggle_play_pause(player, NULL));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
+    g_assert_true(syncview_video_player_toggle_play_pause(player, NULL));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
 
     /* Da STOPPED il toggle avvia la riproduzione. */
-    assert(syncview_video_player_stop(player, NULL));
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
-    assert(syncview_video_player_toggle_play_pause(player, NULL));
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
+    g_assert_true(syncview_video_player_stop(player, NULL));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
+    g_assert_true(syncview_video_player_toggle_play_pause(player, NULL));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
 
     events_free(&ev);
     g_object_unref(player);
@@ -975,44 +974,44 @@ test_stop_rewinds_and_keeps_video(const char *dir)
     PlayEvents ev;
     SyncviewVideoPlayer *player = player_with_events(2, &ev);
 
-    assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
-    assert(wait_for_frame(player, 320, 240));
+    g_assert_true(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
+    g_assert_true(wait_for_frame(player, 320, 240));
 
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_play(player, NULL));
     spin_for(700);
-    assert(position_ms(player) >= 400);
+    g_assert_true(position_ms(player) >= 400);
 
     /* stop(): STOPPED, posizione a 0, video ANCORA CARICATO e primo frame visibile (la pipeline non scende a NULL). */
-    assert(syncview_video_player_stop(player, NULL));
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
+    g_assert_true(syncview_video_player_stop(player, NULL));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
     settle(player);
-    assert(position_ms(player) < 80);
-    assert(syncview_video_player_is_loaded(player) && !syncview_video_player_is_loading(player));
-    assert(pipeline_state(syncview_video_player_get_pipeline(player)) == GST_STATE_PAUSED);
-    assert(syncview_video_player_get_path(player) != NULL);
+    g_assert_true(position_ms(player) < 80);
+    g_assert_true(syncview_video_player_is_loaded(player) && !syncview_video_player_is_loading(player));
+    g_assert_true(pipeline_state(syncview_video_player_get_pipeline(player)) == GST_STATE_PAUSED);
+    g_assert_nonnull(syncview_video_player_get_path(player));
     char *decoder = syncview_video_player_get_decoder_description(player);
-    assert(decoder != NULL);  /* la pipeline è ancora montata */
+    g_assert_nonnull(decoder);  /* la pipeline è ancora montata */
     g_free(decoder);
     GskRenderNode *node = snapshot_paintable(syncview_video_player_get_paintable(player), 320, 240);
-    assert(node_contains_texture(node));  /* il primo frame è visibile */
+    g_assert_true(node_contains_texture(node));  /* il primo frame è visibile */
     gsk_render_node_unref(node);
-    assert(paintable_has_size(syncview_video_player_get_paintable(player), 320, 240));
+    g_assert_true(paintable_has_size(syncview_video_player_get_paintable(player), 320, 240));
 
     /* Fermo: non avanza. */
     gint64 at_stop = position_ms(player);
     spin_for(300);
-    assert(position_ms(player) == at_stop);
+    g_assert_true(position_ms(player) == at_stop);
 
     /* play() dopo stop() riparte da 0 e avanza. */
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_play(player, NULL));
     spin_for(500);
-    assert(position_ms(player) >= 250 && position_ms(player) <= 1500);
+    g_assert_true(position_ms(player) >= 250 && position_ms(player) <= 1500);
 
     /* stop() due volte di seguito non crea segnali doppi. */
-    assert(syncview_video_player_stop(player, NULL));
+    g_assert_true(syncview_video_player_stop(player, NULL));
     guint n = ev.states->len;
-    assert(syncview_video_player_stop(player, NULL));
-    assert(ev.states->len == n);
+    g_assert_true(syncview_video_player_stop(player, NULL));
+    g_assert_true(ev.states->len == n);
 
     events_free(&ev);
     g_object_unref(player);
@@ -1026,8 +1025,8 @@ test_end_of_video(const char *dir)
     PlayEvents ev;
     SyncviewVideoPlayer *player = player_with_events(0, &ev);
 
-    assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
+    g_assert_true(syncview_video_player_play(player, NULL));
 
     /* Arrivato in fondo: passa da solo a STOPPED, un solo segnale, il video resta caricato. */
     gint64 deadline = g_get_monotonic_time() + 10 * G_USEC_PER_SEC;
@@ -1036,31 +1035,31 @@ test_end_of_video(const char *dir)
         g_main_context_iteration(NULL, FALSE);
         g_usleep(1000);
     }
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
-    assert(ev.states->len == 3);  /* PAUSED (load), PLAYING, STOPPED */
-    assert(state_at(&ev, 2) == SYNCVIEW_PLAYBACK_STOPPED);
-    assert(syncview_video_player_is_loaded(player) && ev.errors == 0);
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
+    g_assert_cmpint(ev.states->len, ==, 3);  /* PAUSED (load), PLAYING, STOPPED */
+    g_assert_true(state_at(&ev, 2) == SYNCVIEW_PLAYBACK_STOPPED);
+    g_assert_true(syncview_video_player_is_loaded(player) && ev.errors == 0);
     settle(player);
     gint64 end_pos = position_ms(player);
-    assert(end_pos >= 800);  /* fermo in fondo */
+    g_assert_true(end_pos >= 800);  /* fermo in fondo */
     spin_for(300);
-    assert(position_ms(player) == end_pos);
+    g_assert_true(position_ms(player) == end_pos);
 
     /* All'EOS la pipeline viene messa in PAUSED (non resta in PLAYING con l'orologio che corre). */
-    assert(pipeline_state(syncview_video_player_get_pipeline(player)) == GST_STATE_PAUSED);
+    g_assert_true(pipeline_state(syncview_video_player_get_pipeline(player)) == GST_STATE_PAUSED);
 
     /* pause() a fine video: nessun cambio di stato né segnali (resta STOPPED, non diventa "in pausa a metà"). */
-    assert(syncview_video_player_pause(player, NULL));
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
-    assert(ev.states->len == 3);
-    assert(position_ms(player) == end_pos);
+    g_assert_true(syncview_video_player_pause(player, NULL));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
+    g_assert_cmpint(ev.states->len, ==, 3);
+    g_assert_true(position_ms(player) == end_pos);
 
     /* play() a fine video: riparte dall'inizio. */
-    assert(syncview_video_player_play(player, NULL));
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
+    g_assert_true(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
     spin_for(300);
-    assert(position_ms(player) < 700);  /* ripartito da 0, non dalla fine */
-    assert(ev.states->len == 4);
+    g_assert_true(position_ms(player) < 700);  /* ripartito da 0, non dalla fine */
+    g_assert_cmpint(ev.states->len, ==, 4);
 
     /* E arriva di nuovo in fondo. */
     deadline = g_get_monotonic_time() + 10 * G_USEC_PER_SEC;
@@ -1069,12 +1068,12 @@ test_end_of_video(const char *dir)
         g_main_context_iteration(NULL, FALSE);
         g_usleep(1000);
     }
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED && ev.states->len == 5);
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED && ev.states->len == 5);
 
     /* stop() a fine video: torna a 0 senza altri segnali (era già STOPPED). */
-    assert(syncview_video_player_stop(player, NULL));
+    g_assert_true(syncview_video_player_stop(player, NULL));
     settle(player);
-    assert(position_ms(player) < 80 && ev.states->len == 5);
+    g_assert_true(position_ms(player) < 80 && ev.states->len == 5);
 
     events_free(&ev);
     g_object_unref(player);
@@ -1089,7 +1088,7 @@ test_not_loaded_is_noop(const char *dir)
     for (size_t i = 0; i < sizeof(data); i++) {
         data[i] = (char)((i * 131 + 17) % 251);
     }
-    assert(g_file_set_contents(garbage, data, sizeof(data), NULL));
+    g_assert_true(g_file_set_contents(garbage, data, sizeof(data), NULL));
     char *good = make_video(dir, "good2.webm", 320, 240, 25);
 
     PlayEvents ev;
@@ -1102,29 +1101,29 @@ test_not_loaded_is_noop(const char *dir)
     /* Mai caricato: nessuna azione ha effetto, errore NOT_LOADED, nessun segnale, stato STOPPED. */
     for (size_t i = 0; i < G_N_ELEMENTS(actions); i++) {
         GError *error = NULL;
-        assert(!actions[i](player, &error));
-        assert(error != NULL && error->domain == SYNCVIEW_VIDEO_PLAYER_ERROR && error->code == SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED);
+        g_assert_true(!actions[i](player, &error));
+        g_assert_true(error != NULL && error->domain == SYNCVIEW_VIDEO_PLAYER_ERROR && error->code == SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED);
         g_error_free(error);
-        assert(!actions[i](player, NULL));  /* error NULL ammesso */
+        g_assert_true(!actions[i](player, NULL));  /* error NULL ammesso */
     }
-    assert(ev.states->len == 0 && syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
-    assert(pipeline_state(syncview_video_player_get_pipeline(player)) == GST_STATE_NULL);
+    g_assert_true(ev.states->len == 0 && syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
+    g_assert_true(pipeline_state(syncview_video_player_get_pipeline(player)) == GST_STATE_NULL);
 
     /* Durante il caricamento (load accettato, ASYNC_DONE non ancora consegnato): stesso comportamento. */
-    assert(syncview_video_player_load(player, good, NULL));
+    g_assert_true(syncview_video_player_load(player, good, NULL));
     GError *error = NULL;
-    assert(!syncview_video_player_play(player, &error) && error->code == SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED);
-    assert(strstr(error->message, "caricamento") != NULL);
+    g_assert_true(!syncview_video_player_play(player, &error) && error->code == SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED);
+    g_assert_nonnull(strstr(error->message, "caricamento"));
     g_error_free(error);
-    assert(spin_until(&ev.got_loaded, 10000));
-    assert(syncview_video_player_play(player, NULL));  /* ora sì */
+    g_assert_true(spin_until(&ev.got_loaded, 10000));
+    g_assert_true(syncview_video_player_play(player, NULL));  /* ora sì */
 
     /* Dopo un errore di caricamento: di nuovo nessun effetto. */
     ev.got_error = FALSE;
-    assert(syncview_video_player_load(player, garbage, NULL));
-    assert(spin_until(&ev.got_error, 10000));
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
-    assert(!syncview_video_player_play(player, NULL) && !syncview_video_player_pause(player, NULL));
+    g_assert_true(syncview_video_player_load(player, garbage, NULL));
+    g_assert_true(spin_until(&ev.got_error, 10000));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
+    g_assert_true(!syncview_video_player_play(player, NULL) && !syncview_video_player_pause(player, NULL));
 
     events_free(&ev);
     g_object_unref(player);
@@ -1140,26 +1139,26 @@ test_reload_while_playing(const char *dir)
     PlayEvents ev;
     SyncviewVideoPlayer *player = player_with_events(0, &ev);
 
-    assert(syncview_video_player_load(player, a, NULL) && spin_until(&ev.got_loaded, 10000));
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_load(player, a, NULL) && spin_until(&ev.got_loaded, 10000));
+    g_assert_true(syncview_video_player_play(player, NULL));
     spin_for(300);
 
     /* Nuovo load in play: il vecchio video è scartato (STOPPED), il nuovo arriva in PAUSED e NON parte da solo. */
     guint n = ev.states->len;
     ev.got_loaded = FALSE;
-    assert(syncview_video_player_load(player, b, NULL));
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
-    assert(ev.states->len == n + 1 && state_at(&ev, n) == SYNCVIEW_PLAYBACK_STOPPED);
-    assert(spin_until(&ev.got_loaded, 10000) && wait_for_frame(player, 640, 360));
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
-    assert(ev.states->len == n + 2);
+    g_assert_true(syncview_video_player_load(player, b, NULL));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
+    g_assert_true(ev.states->len == n + 1 && state_at(&ev, n) == SYNCVIEW_PLAYBACK_STOPPED);
+    g_assert_true(spin_until(&ev.got_loaded, 10000) && wait_for_frame(player, 640, 360));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
+    g_assert_true(ev.states->len == n + 2);
     gint64 pos = position_ms(player);
     spin_for(300);
-    assert(position_ms(player) == pos);  /* fermo finché non si chiama play() */
+    g_assert_true(position_ms(player) == pos);  /* fermo finché non si chiama play() */
 
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_play(player, NULL));
     spin_for(400);
-    assert(position_ms(player) > pos + 150);
+    g_assert_true(position_ms(player) > pos + 150);
 
     events_free(&ev);
     g_object_unref(player);
@@ -1174,8 +1173,8 @@ test_error_while_playing(const char *dir)
     PlayEvents ev;
     SyncviewVideoPlayer *player = player_with_events(1, &ev);
 
-    assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
+    g_assert_true(syncview_video_player_play(player, NULL));
     spin_for(200);
 
     GstElement *pipeline = syncview_video_player_get_pipeline(player);
@@ -1183,13 +1182,13 @@ test_error_while_playing(const char *dir)
     gst_element_post_message(pipeline, gst_message_new_error(GST_OBJECT(pipeline), injected, NULL));
     g_error_free(injected);
 
-    assert(spin_until(&ev.got_error, 10000));
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
-    assert(!syncview_video_player_is_loaded(player));
-    assert(wait_until_null(player));  /* smontaggio asincrono */
+    g_assert_true(spin_until(&ev.got_error, 10000));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
+    g_assert_false(syncview_video_player_is_loaded(player));
+    g_assert_true(wait_until_null(player));  /* smontaggio asincrono */
     /* STOPPED emesso PRIMA dell'errore. */
-    assert(state_at(&ev, ev.states->len - 1) == SYNCVIEW_PLAYBACK_STOPPED);
-    assert(!syncview_video_player_play(player, NULL));
+    g_assert_true(state_at(&ev, ev.states->len - 1) == SYNCVIEW_PLAYBACK_STOPPED);
+    g_assert_false(syncview_video_player_play(player, NULL));
 
     events_free(&ev);
     g_object_unref(player);
@@ -1204,21 +1203,21 @@ test_players_play_independently(const char *dir)
     SyncviewVideoPlayer *a = player_with_events(0, &ea);
     SyncviewVideoPlayer *b = player_with_events(1, &eb);
 
-    assert(syncview_video_player_load(a, p, NULL) && syncview_video_player_load(b, p, NULL));
-    assert(spin_until(&ea.got_loaded, 10000) && spin_until(&eb.got_loaded, 10000));
-    assert(syncview_video_player_play(a, NULL) && syncview_video_player_play(b, NULL));
+    g_assert_true(syncview_video_player_load(a, p, NULL) && syncview_video_player_load(b, p, NULL));
+    g_assert_true(spin_until(&ea.got_loaded, 10000) && spin_until(&eb.got_loaded, 10000));
+    g_assert_true(syncview_video_player_play(a, NULL) && syncview_video_player_play(b, NULL));
     spin_for(400);
-    assert(position_ms(a) >= 200 && position_ms(b) >= 200);
+    g_assert_true(position_ms(a) >= 200 && position_ms(b) >= 200);
 
     /* Mettere in pausa uno non tocca l'altro. */
-    assert(syncview_video_player_pause(a, NULL));
+    g_assert_true(syncview_video_player_pause(a, NULL));
     settle(a);
     gint64 pa = position_ms(a);
     gint64 pb = position_ms(b);
     spin_for(400);
-    assert(position_ms(a) == pa);
-    assert(position_ms(b) >= pb + 200);
-    assert(syncview_video_player_get_playback_state(a) == SYNCVIEW_PLAYBACK_PAUSED
+    g_assert_true(position_ms(a) == pa);
+    g_assert_true(position_ms(b) >= pb + 200);
+    g_assert_true(syncview_video_player_get_playback_state(a) == SYNCVIEW_PLAYBACK_PAUSED
            && syncview_video_player_get_playback_state(b) == SYNCVIEW_PLAYBACK_PLAYING);
 
     events_free(&ea);
@@ -1236,8 +1235,8 @@ test_dispose_while_playing(const char *dir)
     for (int i = 0; i < 8; i++) {
         PlayEvents ev;
         SyncviewVideoPlayer *player = player_with_events(i % SYNCVIEW_MAX_VIDEOS, &ev);
-        assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
-        assert(syncview_video_player_play(player, NULL));
+        g_assert_true(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
+        g_assert_true(syncview_video_player_play(player, NULL));
         spin_for(i * 30);
         events_free(&ev);
         g_object_unref(player);  /* distrutto in PLAYING */
@@ -1253,30 +1252,30 @@ test_playback_log(const char *dir)
     char *path = make_video(dir, "log.webm", 320, 240, 100);
     char *log_path = g_build_filename(dir, "player.log", NULL);
     g_unsetenv("SYNCVIEW_DEBUG");
-    assert(logger_init(log_path, FALSE, NULL));
+    g_assert_true(logger_init(log_path, FALSE, NULL));
 
     PlayEvents ev;
     SyncviewVideoPlayer *player = player_with_events(2, &ev);  /* slot 3 */
-    assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
-    assert(syncview_video_player_play(player, NULL));
-    assert(syncview_video_player_pause(player, NULL));
-    assert(syncview_video_player_stop(player, NULL));
-    assert(syncview_video_player_play(player, NULL));
-    assert(syncview_video_player_play(player, NULL));  /* ogni chiamata registra, come l'originale */
+    g_assert_true(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
+    g_assert_true(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_pause(player, NULL));
+    g_assert_true(syncview_video_player_stop(player, NULL));
+    g_assert_true(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_play(player, NULL));  /* ogni chiamata registra, come l'originale */
 
     events_free(&ev);
     g_object_unref(player);
     logger_shutdown();
 
     char *log = NULL;
-    assert(g_file_get_contents(log_path, &log, NULL, NULL));
+    g_assert_true(g_file_get_contents(log_path, &log, NULL, NULL));
     int plays = 0;
     for (const char *p = log; (p = strstr(p, "INFO - [VIDEO 3] Stato riproduzione: PLAY")); p++) {
         plays++;
     }
-    assert(plays == 3);
-    assert(strstr(log, "INFO - [VIDEO 3] Stato riproduzione: PAUSA") != NULL);
-    assert(strstr(log, "INFO - [VIDEO 3] Stato riproduzione: STOP") != NULL);
+    g_assert_cmpint(plays, ==, 3);
+    g_assert_nonnull(strstr(log, "INFO - [VIDEO 3] Stato riproduzione: PAUSA"));
+    g_assert_nonnull(strstr(log, "INFO - [VIDEO 3] Stato riproduzione: STOP"));
     g_free(log);
     g_free(log_path);
     g_free(path);
@@ -1374,7 +1373,7 @@ pos_at(PosEvents *ev, guint i)
 static gint64
 last_pos(PosEvents *ev)
 {
-    assert(ev->positions->len > 0);
+    g_assert_true(ev->positions->len > 0);
     return pos_at(ev, ev->positions->len - 1);
 }
 
@@ -1454,7 +1453,7 @@ show_window_for(SyncviewVideoPlayer *player)
         g_main_context_iteration(NULL, FALSE);
         g_usleep(1000);
     }
-    assert(gtk_widget_get_mapped(shown.picture));
+    g_assert_true(gtk_widget_get_mapped(shown.picture));
     return shown;
 }
 
@@ -1465,29 +1464,29 @@ test_load_reports_duration(const char *dir)
     PosEvents ev;
     SyncviewVideoPlayer *player = pos_player(0, &ev);
 
-    assert(syncview_video_player_get_duration(player) == 0 && syncview_video_player_get_position(player) == 0);
-    assert(!syncview_video_player_is_ticking(player));
+    g_assert_true(syncview_video_player_get_duration(player) == 0 && syncview_video_player_get_position(player) == 0);
+    g_assert_false(syncview_video_player_is_ticking(player));
 
-    assert(syncview_video_player_load(player, path, NULL));
-    assert(syncview_video_player_get_duration(player) == 0);  /* ancora in caricamento: non nota */
-    assert(spin_until(&ev.got_loaded, 10000));
+    g_assert_true(syncview_video_player_load(player, path, NULL));
+    g_assert_cmpint(syncview_video_player_get_duration(player), ==, 0);  /* ancora in caricamento: non nota */
+    g_assert_true(spin_until(&ev.got_loaded, 10000));
 
     /* Durata nota PRIMA di "caricato" (come QMediaPlayer); la posizione resta 0 e non genera segnali. */
-    assert(strcmp(ev.order->str, "DL") == 0);
-    assert(ev.durations->len == 1);
+    g_assert_cmpstr(ev.order->str, ==, "DL");
+    g_assert_cmpint(ev.durations->len, ==, 1);
     gint64 duration = syncview_video_player_get_duration(player);
-    assert(duration == g_array_index(ev.durations, gint64, 0));
-    assert(syncview_video_player_get_position(player) == 0 && ev.positions->len == 0);
+    g_assert_true(duration == g_array_index(ev.durations, gint64, 0));
+    g_assert_true(syncview_video_player_get_position(player) == 0 && ev.positions->len == 0);
 
     /* Coerente con la durata reale del file, misurata indipendentemente da core/discoverer. */
     VideoInfo *info = discoverer_probe_file(path, 0, NULL);
-    assert(info != NULL && info->duration_ms > 3500 && info->duration_ms < 4500);
-    assert(llabs(duration - info->duration_ms) <= 60);
+    g_assert_true(info != NULL && info->duration_ms > 3500 && info->duration_ms < 4500);
+    g_assert_true(llabs(duration - info->duration_ms) <= 60);
     video_info_free(info);
 
     /* In pausa dopo il caricamento: nessun aggiornamento periodico. */
     spin_for(400);
-    assert(ev.positions->len == 0 && ev.durations->len == 1 && !syncview_video_player_is_ticking(player));
+    g_assert_true(ev.positions->len == 0 && ev.durations->len == 1 && !syncview_video_player_is_ticking(player));
 
     pos_events_free(&ev);
     g_object_unref(player);
@@ -1509,12 +1508,12 @@ check_position_while_playing(const char *dir, gboolean with_window)
     if (with_window) {
         shown = show_window_for(player);
     }
-    assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
+    g_assert_true(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
     gint64 duration = syncview_video_player_get_duration(player);
 
-    assert(!syncview_video_player_is_ticking(player));  /* in pausa: nessun polling */
-    assert(syncview_video_player_play(player, NULL));
-    assert(syncview_video_player_is_ticking(player));  /* in PLAYING: attivo */
+    g_assert_false(syncview_video_player_is_ticking(player));  /* in pausa: nessun polling */
+    g_assert_true(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_is_ticking(player));  /* in PLAYING: attivo */
     /* Quanti tick del frame clock arrivano davvero durante la riproduzione (su certi runner il main loop resta fermo a lungo). */
     guint clock_ticks = 0;
     guint clock_tick_id = with_window ? gtk_widget_add_tick_callback(shown.picture, tick_counter, &clock_ticks, NULL) : 0;
@@ -1524,7 +1523,7 @@ check_position_while_playing(const char *dir, gboolean with_window)
         g_main_context_iteration(NULL, FALSE);
         g_usleep(1000);
     }
-    assert(ev.positions->len > 0);
+    g_assert_true(ev.positions->len > 0);
     spin_for(800);
 
     if (clock_tick_id) {
@@ -1536,7 +1535,7 @@ check_position_while_playing(const char *dir, gboolean with_window)
     if (!clock_regular) {
         /* Il main loop è rimasto fermo a lungo: anche posizioni e tempi che seguono non sono più verificabili. */
         g_printerr("frame clock irregolare in riproduzione (%u tick): verifiche sugli aggiornamenti saltate\n", clock_ticks);
-        assert(syncview_video_player_pause(player, NULL));
+        g_assert_true(syncview_video_player_pause(player, NULL));
         gtk_window_destroy(GTK_WINDOW(shown.window));
         pos_events_free(&ev);
         g_object_unref(player);
@@ -1550,48 +1549,48 @@ check_position_while_playing(const char *dir, gboolean with_window)
         }
         g_printerr("\n");
     }
-    assert(n >= 8);  /* ~30-50 aggiornamenti al secondo, non uno ogni tanto */
-    assert(n <= 60);  /* ma limitati (<=~50 Hz): non uno per ogni tick dello schermo */
+    g_assert_true(n >= 8);  /* ~30-50 aggiornamenti al secondo, non uno ogni tanto */
+    g_assert_true(n <= 60);  /* ma limitati (<=~50 Hz): non uno per ogni tick dello schermo */
     for (guint i = 0; i < n; i++) {
-        assert(pos_at(&ev, i) >= 0 && pos_at(&ev, i) <= duration);
+        g_assert_true(pos_at(&ev, i) >= 0 && pos_at(&ev, i) <= duration);
         if (i > 0) {
-            assert(pos_at(&ev, i) > pos_at(&ev, i - 1));  /* strettamente crescente (e mai duplicata) */
+            g_assert_true(pos_at(&ev, i) > pos_at(&ev, i - 1));  /* strettamente crescente (e mai duplicata) */
             gint64 gap_us = g_array_index(ev.pos_times, gint64, i) - g_array_index(ev.pos_times, gint64, i - 1);
-            assert(gap_us >= 15000);  /* throttle ~20 ms */
+            g_assert_true(gap_us >= 15000);  /* throttle ~20 ms */
         }
     }
     /* Unità: ms, coerenti con la posizione reale della pipeline (~800 ms di riproduzione). */
     gint64 now_pos = syncview_video_player_get_position(player);
-    assert(now_pos >= 500 && now_pos <= 2000);
-    assert(llabs(now_pos - last_pos(&ev)) <= 120);
+    g_assert_true(now_pos >= 500 && now_pos <= 2000);
+    g_assert_true(llabs(now_pos - last_pos(&ev)) <= 120);
 
     /* pause(): un ultimo aggiornamento con la posizione finale, poi silenzio e polling spento. */
     guint before_pause = ev.positions->len;
-    assert(syncview_video_player_pause(player, NULL));
-    assert(!syncview_video_player_is_ticking(player));
+    g_assert_true(syncview_video_player_pause(player, NULL));
+    g_assert_false(syncview_video_player_is_ticking(player));
     settle(player);
     /*
      * Assestamento: alla fine del cambio di stato (ASYNC_DONE) la posizione definitiva viene pubblicata di nuovo
      * e può differire di qualche ms da quella letta subito dopo pause(): al massimo pochi aggiornamenti singoli.
      */
     spin_for(250);
-    assert(ev.positions->len - before_pause <= 3);
+    g_assert_true(ev.positions->len - before_pause <= 3);
     gint64 paused_at = syncview_video_player_get_position(player);
     /*
      * La posizione finale è pubblicata a pause(): coincide con quella reale (±5 ms). Con la sola cadenza del ticker
      * l'ultimo valore sarebbe fino a ~33 ms indietro.
      */
-    assert(llabs(last_pos(&ev) - paused_at) <= 5);
+    g_assert_true(llabs(last_pos(&ev) - paused_at) <= 5);
     guint after_pause = ev.positions->len;
     spin_for(500);
-    assert(ev.positions->len == after_pause);  /* poi silenzio assoluto: nessun wakeup periodico da fermo */
+    g_assert_true(ev.positions->len == after_pause);  /* poi silenzio assoluto: nessun wakeup periodico da fermo */
 
     /* Un secondo pause() non ripete lo stesso valore. */
-    assert(syncview_video_player_pause(player, NULL));
-    assert(ev.positions->len == after_pause);
+    g_assert_true(syncview_video_player_pause(player, NULL));
+    g_assert_true(ev.positions->len == after_pause);
 
     /* Nessun segnale di durata durante la riproduzione (la durata non cambia). */
-    assert(ev.durations->len == 1);
+    g_assert_cmpint(ev.durations->len, ==, 1);
 
     if (with_window) {
         gtk_window_destroy(GTK_WINDOW(shown.window));
@@ -1620,38 +1619,38 @@ test_position_on_stop_and_end(const char *dir)
     PosEvents ev;
     SyncviewVideoPlayer *player = pos_player(2, &ev);
 
-    assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
+    g_assert_true(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
     gint64 duration = syncview_video_player_get_duration(player);
 
     /* Fine del video: posizione finale ~ durata, poi nessun altro aggiornamento e polling spento. */
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_play(player, NULL));
     gint64 deadline = g_get_monotonic_time() + 10 * G_USEC_PER_SEC;
     while (syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING
            && g_get_monotonic_time() < deadline) {
         g_main_context_iteration(NULL, FALSE);
         g_usleep(1000);
     }
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
-    assert(!syncview_video_player_is_ticking(player));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
+    g_assert_false(syncview_video_player_is_ticking(player));
     settle(player);
     /* Posizione finale pubblicata all'EOS: coincide con la durata (±10 ms), non solo "vicino" all'ultimo tick del polling. */
-    assert(llabs(last_pos(&ev) - duration) <= 45);  /* fine video: entro un frame (40 ms a 25 fps) */
+    g_assert_true(llabs(last_pos(&ev) - duration) <= 45);  /* fine video: entro un frame (40 ms a 25 fps) */
     guint at_end = ev.positions->len;
     spin_for(400);
-    assert(ev.positions->len == at_end);
+    g_assert_true(ev.positions->len == at_end);
 
     /* play() a fine video: riparte da 0 (un aggiornamento con ~0) e poi avanza. */
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_play(player, NULL));
     spin_for(300);
     gboolean saw_restart = FALSE;
     for (guint i = at_end; i < ev.positions->len; i++) {
         saw_restart |= pos_at(&ev, i) < 150;
     }
-    assert(saw_restart);
+    g_assert_true(saw_restart);
 
     /* stop(): posizione a 0 pubblicata a seek concluso, una sola volta, poi silenzio. */
-    assert(syncview_video_player_stop(player, NULL));
-    assert(!syncview_video_player_is_ticking(player));
+    g_assert_true(syncview_video_player_stop(player, NULL));
+    g_assert_false(syncview_video_player_is_ticking(player));
     settle(player);
     /* La posizione 0 viene pubblicata a seek concluso (ASYNC_DONE): si attende con un timeout, non un tempo fisso. */
     {
@@ -1661,12 +1660,12 @@ test_position_on_stop_and_end(const char *dir)
             g_usleep(1000);
         }
     }
-    assert(last_pos(&ev) < 80);
+    g_assert_true(last_pos(&ev) < 80);
     spin_for(200);  /* eventuali aggiornamenti di assestamento */
     guint after_stop = ev.positions->len;
     spin_for(400);
-    assert(ev.positions->len == after_stop);
-    assert(ev.durations->len == 1);  /* la durata non è mai cambiata */
+    g_assert_true(ev.positions->len == after_stop);
+    g_assert_cmpint(ev.durations->len, ==, 1);  /* la durata non è mai cambiata */
 
     pos_events_free(&ev);
     g_object_unref(player);
@@ -1681,41 +1680,41 @@ test_position_reset_on_reload_and_error(const char *dir)
     PosEvents ev;
     SyncviewVideoPlayer *player = pos_player(3, &ev);
 
-    assert(syncview_video_player_load(player, a, NULL) && spin_until(&ev.got_loaded, 10000));
+    g_assert_true(syncview_video_player_load(player, a, NULL) && spin_until(&ev.got_loaded, 10000));
     gint64 dur_a = syncview_video_player_get_duration(player);
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_play(player, NULL));
     spin_for(400);
-    assert(syncview_video_player_pause(player, NULL));
+    g_assert_true(syncview_video_player_pause(player, NULL));
     settle(player);
-    assert(last_pos(&ev) > 200);
+    g_assert_true(last_pos(&ev) > 200);
 
     /* Nuovo load: il video vecchio è scartato -> posizione e durata tornano a 0 (subito), poi durata nuova e "caricato". */
     g_string_truncate(ev.order, 0);
     guint n_dur = ev.durations->len;
     ev.got_loaded = FALSE;
-    assert(syncview_video_player_load(player, b, NULL));
-    assert(strcmp(ev.order->str, "PD") == 0);                   /* 0 ms e durata 0, sincroni col load() */
-    assert(last_pos(&ev) == 0 && g_array_index(ev.durations, gint64, n_dur) == 0);
-    assert(syncview_video_player_get_duration(player) == 0 && syncview_video_player_get_position(player) == 0);
-    assert(spin_until(&ev.got_loaded, 10000));
-    assert(strcmp(ev.order->str, "PDDL") == 0);                 /* poi durata del nuovo video e caricato */
+    g_assert_true(syncview_video_player_load(player, b, NULL));
+    g_assert_cmpstr(ev.order->str, ==, "PD");                   /* 0 ms e durata 0, sincroni col load() */
+    g_assert_true(last_pos(&ev) == 0 && g_array_index(ev.durations, gint64, n_dur) == 0);
+    g_assert_true(syncview_video_player_get_duration(player) == 0 && syncview_video_player_get_position(player) == 0);
+    g_assert_true(spin_until(&ev.got_loaded, 10000));
+    g_assert_cmpstr(ev.order->str, ==, "PDDL");                 /* poi durata del nuovo video e caricato */
     gint64 dur_b = syncview_video_player_get_duration(player);
-    assert(dur_b > 1500 && dur_b < 2500 && dur_b < dur_a - 1000);
+    g_assert_true(dur_b > 1500 && dur_b < 2500 && dur_b < dur_a - 1000);
 
     /* Errore con un video caricato e in posizione > 0: anche qui tutto a 0, prima del segnale di errore. */
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_play(player, NULL));
     spin_for(300);
-    assert(syncview_video_player_pause(player, NULL));
-    assert(last_pos(&ev) > 100);
+    g_assert_true(syncview_video_player_pause(player, NULL));
+    g_assert_true(last_pos(&ev) > 100);
     g_string_truncate(ev.order, 0);
     GstElement *pipeline = syncview_video_player_get_pipeline(player);
     GError *injected = g_error_new_literal(GST_STREAM_ERROR, GST_STREAM_ERROR_FAILED, "errore");
     gst_element_post_message(pipeline, gst_message_new_error(GST_OBJECT(pipeline), injected, NULL));
     g_error_free(injected);
-    assert(spin_until(&ev.got_error, 10000));
-    assert(last_pos(&ev) == 0 && g_array_index(ev.durations, gint64, ev.durations->len - 1) == 0);
-    assert(syncview_video_player_get_duration(player) == 0 && syncview_video_player_get_position(player) == 0);
-    assert(!syncview_video_player_is_ticking(player));
+    g_assert_true(spin_until(&ev.got_error, 10000));
+    g_assert_true(last_pos(&ev) == 0 && g_array_index(ev.durations, gint64, ev.durations->len - 1) == 0);
+    g_assert_true(syncview_video_player_get_duration(player) == 0 && syncview_video_player_get_position(player) == 0);
+    g_assert_false(syncview_video_player_is_ticking(player));
 
     pos_events_free(&ev);
     g_object_unref(player);
@@ -1733,26 +1732,26 @@ test_ticker_only_while_playing(const char *dir)
     PosEvents ev;
     SyncviewVideoPlayer *player = pos_player(0, &ev);
 
-    assert(!syncview_video_player_is_ticking(player));
-    assert(syncview_video_player_load(player, path, NULL));
-    assert(!syncview_video_player_is_ticking(player));
-    assert(spin_until(&ev.got_loaded, 10000));
-    assert(!syncview_video_player_is_ticking(player));               /* caricato, in pausa */
-    assert(syncview_video_player_play(player, NULL) && syncview_video_player_is_ticking(player));
-    assert(syncview_video_player_pause(player, NULL) && !syncview_video_player_is_ticking(player));
-    assert(syncview_video_player_play(player, NULL) && syncview_video_player_is_ticking(player));
-    assert(syncview_video_player_stop(player, NULL) && !syncview_video_player_is_ticking(player));
-    assert(syncview_video_player_play(player, NULL));
-    assert(syncview_video_player_load(player, path, NULL));          /* nuovo load in riproduzione */
-    assert(!syncview_video_player_is_ticking(player));
-    assert(spin_until(&ev.got_loaded, 10000) || TRUE);
+    g_assert_false(syncview_video_player_is_ticking(player));
+    g_assert_true(syncview_video_player_load(player, path, NULL));
+    g_assert_false(syncview_video_player_is_ticking(player));
+    g_assert_true(spin_until(&ev.got_loaded, 10000));
+    g_assert_false(syncview_video_player_is_ticking(player));               /* caricato, in pausa */
+    g_assert_true(syncview_video_player_play(player, NULL) && syncview_video_player_is_ticking(player));
+    g_assert_true(syncview_video_player_pause(player, NULL) && !syncview_video_player_is_ticking(player));
+    g_assert_true(syncview_video_player_play(player, NULL) && syncview_video_player_is_ticking(player));
+    g_assert_true(syncview_video_player_stop(player, NULL) && !syncview_video_player_is_ticking(player));
+    g_assert_true(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_load(player, path, NULL));          /* nuovo load in riproduzione */
+    g_assert_false(syncview_video_player_is_ticking(player));
+    g_assert_true(spin_until(&ev.got_loaded, 10000) || TRUE);
 
     /* Cambiare il widget del tick durante la riproduzione non interrompe né duplica il polling. */
     ev.got_loaded = FALSE;
     spin_until(&ev.got_loaded, 10000);
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_play(player, NULL));
     Shown shown = show_window_for(player);          /* imposta il widget mentre è in PLAYING */
-    assert(syncview_video_player_is_ticking(player));
+    g_assert_true(syncview_video_player_is_ticking(player));
     guint n = ev.positions->len;
     /* Il primo aggiornamento può tardare (avvio del decoder hardware su Windows): si attende, con un limite. */
     for (gint64 deadline = g_get_monotonic_time() + 5 * G_USEC_PER_SEC;
@@ -1760,12 +1759,12 @@ test_ticker_only_while_playing(const char *dir)
         g_main_context_iteration(NULL, FALSE);
         g_usleep(1000);
     }
-    assert(ev.positions->len > n);
+    g_assert_true(ev.positions->len > n);
     syncview_video_player_set_tick_widget(player, NULL);  /* torna al timer di ripiego */
-    assert(syncview_video_player_is_ticking(player));
+    g_assert_true(syncview_video_player_is_ticking(player));
     n = ev.positions->len;
     spin_for(300);
-    assert(ev.positions->len > n || syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
+    g_assert_true(ev.positions->len > n || syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
 
     gtk_window_destroy(GTK_WINDOW(shown.window));
     pos_events_free(&ev);
@@ -1783,21 +1782,21 @@ test_tick_widget_destroyed_while_playing(const char *dir)
     PosEvents ev;
     SyncviewVideoPlayer *player = pos_player(1, &ev);
 
-    assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
+    g_assert_true(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
     Shown shown = show_window_for(player);
-    assert(syncview_video_player_play(player, NULL) && syncview_video_player_is_ticking(player));
+    g_assert_true(syncview_video_player_play(player, NULL) && syncview_video_player_is_ticking(player));
     spin_for(300);
 
     /* Il widget sparisce mentre si riproduce: il polling prosegue col timer di ripiego, senza crash né CRITICAL. */
     gtk_window_destroy(GTK_WINDOW(shown.window));
     spin_for(100);
-    assert(syncview_video_player_is_ticking(player));
+    g_assert_true(syncview_video_player_is_ticking(player));
     guint n = ev.positions->len;
     spin_for(400);
-    assert(ev.positions->len >= n + 5);
+    g_assert_true(ev.positions->len >= n + 5);
 
     /* E si ferma normalmente. */
-    assert(syncview_video_player_pause(player, NULL) && !syncview_video_player_is_ticking(player));
+    g_assert_true(syncview_video_player_pause(player, NULL) && !syncview_video_player_is_ticking(player));
 
     pos_events_free(&ev);
     g_object_unref(player);
@@ -1814,9 +1813,9 @@ test_frame_clock_drives_the_ticks(const char *dir)
     PosEvents ev;
     SyncviewVideoPlayer *player = pos_player(0, &ev);
 
-    assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
+    g_assert_true(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
     Shown shown = show_window_for(player);
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_play(player, NULL));
     /* Si misura dal primo aggiornamento: l'avvio del decoder (hardware su Windows) può superare i 300 ms. */
     for (gint64 deadline = g_get_monotonic_time() + 10 * G_USEC_PER_SEC;
          ev.positions->len == 0 && g_get_monotonic_time() < deadline;) {
@@ -1824,7 +1823,7 @@ test_frame_clock_drives_the_ticks(const char *dir)
         g_usleep(1000);
     }
     spin_for(300);
-    assert(ev.positions->len >= 4);
+    g_assert_true(ev.positions->len >= 4);
 
     /*
      * Senza frame clock niente tick: staccando il widget dalla finestra (non ha più una root né un frame clock)
@@ -1836,9 +1835,9 @@ test_frame_clock_drives_the_ticks(const char *dir)
     spin_for(200);
     guint detached_from = ev.positions->len;
     spin_for(500);
-    assert(ev.positions->len - detached_from <= 2);
-    assert(syncview_video_player_is_ticking(player));
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
+    g_assert_true(ev.positions->len - detached_from <= 2);
+    g_assert_true(syncview_video_player_is_ticking(player));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
 
     /* Riagganciato alla finestra: il frame clock torna e gli aggiornamenti riprendono. */
     gtk_window_set_child(GTK_WINDOW(shown.window), shown.picture);
@@ -1850,7 +1849,7 @@ test_frame_clock_drives_the_ticks(const char *dir)
     }
     guint reattached_from = ev.positions->len;
     spin_for(500);
-    assert(ev.positions->len - reattached_from >= 5);
+    g_assert_true(ev.positions->len - reattached_from >= 5);
 
     gtk_window_destroy(GTK_WINDOW(shown.window));
     pos_events_free(&ev);
@@ -1868,11 +1867,11 @@ test_dispose_while_ticking(const char *dir)
         SyncviewVideoPlayer *player = pos_player(i % SYNCVIEW_MAX_VIDEOS, &ev);
         Shown shown = { NULL, NULL };
 
-        assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
+        g_assert_true(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
         if (i % 2 && frame_clock_usable()) {
             shown = show_window_for(player);
         }
-        assert(syncview_video_player_play(player, NULL));
+        g_assert_true(syncview_video_player_play(player, NULL));
         spin_for(100 + i * 20);
 
         pos_events_free(&ev);  /* gli handler puntano a ev: il player va distrutto con i segnali ancora collegati... */
@@ -1897,24 +1896,24 @@ test_missing_element_error(void)
     /* Simula l'assenza del plugin rimuovendo la factory dal registry (poi la si ripristina). */
     GstRegistry *registry = gst_registry_get();
     GstPluginFeature *feature = gst_registry_lookup_feature(registry, "gtk4paintablesink");
-    assert(feature != NULL);
+    g_assert_nonnull(feature);
     gst_object_ref(feature);
     gst_registry_remove_feature(registry, feature);
 
     GError *error = NULL;
     SyncviewVideoPlayer *player = syncview_video_player_new(0, &error);
-    assert(player == NULL);
-    assert(error != NULL && error->domain == SYNCVIEW_VIDEO_PLAYER_ERROR);
-    assert(error->code == SYNCVIEW_VIDEO_PLAYER_ERROR_MISSING_ELEMENT);
-    assert(strstr(error->message, "gtk4paintablesink") != NULL);  /* nomina l'elemento mancante */
+    g_assert_null(player);
+    g_assert_true(error != NULL && error->domain == SYNCVIEW_VIDEO_PLAYER_ERROR);
+    g_assert_true(error->code == SYNCVIEW_VIDEO_PLAYER_ERROR_MISSING_ELEMENT);
+    g_assert_nonnull(strstr(error->message, "gtk4paintablesink"));  /* nomina l'elemento mancante */
     g_error_free(error);
 
-    assert(gst_registry_add_feature(registry, feature));
+    g_assert_true(gst_registry_add_feature(registry, feature));
     gst_object_unref(feature);
 
     /* Ripristinato: di nuovo creabile. */
     player = syncview_video_player_new(0, NULL);
-    assert(player != NULL);
+    g_assert_nonnull(player);
     g_object_unref(player);
 }
 
@@ -2000,8 +1999,8 @@ loaded_player(PosEvents *ev, const char *path)
 {
     SyncviewVideoPlayer *player = pos_player(0, ev);
 
-    assert(syncview_video_player_load(player, path, NULL));
-    assert(spin_until(&ev->got_loaded, 10000));
+    g_assert_true(syncview_video_player_load(player, path, NULL));
+    g_assert_true(spin_until(&ev->got_loaded, 10000));
     return player;
 }
 
@@ -2027,20 +2026,20 @@ test_seek_and_step_need_a_video(void)
     SyncviewVideoPlayer *player = pos_player(0, &ev);
     GError *error = NULL;
 
-    assert(!syncview_video_player_seek(player, 1000, &error));
-    assert(g_error_matches(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED));
+    g_assert_false(syncview_video_player_seek(player, 1000, &error));
+    g_assert_true(g_error_matches(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED));
     g_clear_error(&error);
-    assert(!syncview_video_player_step_ms(player, 40, &error));
-    assert(g_error_matches(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED));
+    g_assert_false(syncview_video_player_step_ms(player, 40, &error));
+    g_assert_true(g_error_matches(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED));
     g_clear_error(&error);
-    assert(!syncview_video_player_step_frames(player, 1, &error));
-    assert(g_error_matches(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED));
+    g_assert_false(syncview_video_player_step_frames(player, 1, &error));
+    g_assert_true(g_error_matches(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED));
     g_clear_error(&error);
-    assert(!syncview_video_player_set_playback_rate(player, 2.0, &error));
-    assert(g_error_matches(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED));
+    g_assert_false(syncview_video_player_set_playback_rate(player, 2.0, &error));
+    g_assert_true(g_error_matches(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_NOT_LOADED));
     g_clear_error(&error);
-    assert(ev.positions->len == 0);
-    assert(syncview_video_player_get_frame_rate(player) == 0.0 && syncview_video_player_get_frame_end_ns(player) == -1);
+    g_assert_cmpint(ev.positions->len, ==, 0);
+    g_assert_true(syncview_video_player_get_frame_rate(player) == 0.0 && syncview_video_player_get_frame_end_ns(player) == -1);
 
     pos_events_free(&ev);
     g_object_unref(player);
@@ -2053,48 +2052,48 @@ test_seek(const char *dir)
     PosEvents ev;
     SyncviewVideoPlayer *player = loaded_player(&ev, path);
 
-    assert(llabs(syncview_video_player_get_frame_end_ns(player) - 40 * NS_PER_MS) <= 1000);  /* primo frame: 0-40 ms */
-    assert(syncview_video_player_get_frame_rate(player) == 25.0);
+    g_assert_true(llabs(syncview_video_player_get_frame_end_ns(player) - 40 * NS_PER_MS) <= 1000);  /* primo frame: 0-40 ms */
+    g_assert_true(syncview_video_player_get_frame_rate(player) == 25.0);
 
     /* Seek accurato: il frame mostrato è quello richiesto, la posizione è riportata a seek concluso. */
-    assert(syncview_video_player_seek(player, 2000, NULL));
-    assert(wait_frame_end(player, 2040 * NS_PER_MS, 5000));  /* frame 2000-2040 */
-    assert(wait_last_position_between(&ev, 1990, 2010, 2000));
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);  /* lo stato non cambia */
-    assert(!syncview_video_player_is_ticking(player));
+    g_assert_true(syncview_video_player_seek(player, 2000, NULL));
+    g_assert_true(wait_frame_end(player, 2040 * NS_PER_MS, 5000));  /* frame 2000-2040 */
+    g_assert_true(wait_last_position_between(&ev, 1990, 2010, 2000));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);  /* lo stato non cambia */
+    g_assert_false(syncview_video_player_is_ticking(player));
 
     /* Un punto in mezzo a un frame mostra il frame che lo contiene. */
-    assert(syncview_video_player_seek(player, 1290, NULL));
-    assert(wait_frame_end(player, 1320 * NS_PER_MS, 5000));  /* frame 1280-1320 */
+    g_assert_true(syncview_video_player_seek(player, 1290, NULL));
+    g_assert_true(wait_frame_end(player, 1320 * NS_PER_MS, 5000));  /* frame 1280-1320 */
 
     /* Fuori intervallo: limitato a 0..durata. */
-    assert(syncview_video_player_seek(player, -500, NULL));
-    assert(wait_frame_end(player, 40 * NS_PER_MS, 5000));
-    assert(wait_last_position_between(&ev, 0, 10, 2000));
+    g_assert_true(syncview_video_player_seek(player, -500, NULL));
+    g_assert_true(wait_frame_end(player, 40 * NS_PER_MS, 5000));
+    g_assert_true(wait_last_position_between(&ev, 0, 10, 2000));
     gint64 duration = syncview_video_player_get_duration(player);
-    assert(syncview_video_player_seek(player, duration + 100000, NULL));
-    assert(wait_last_position_between(&ev, duration - 80, duration, 5000));
+    g_assert_true(syncview_video_player_seek(player, duration + 100000, NULL));
+    g_assert_true(wait_last_position_between(&ev, duration - 80, duration, 5000));
     /* (a un seek esattamente alla durata non arriva alcun frame, solo EOS: si verifica la sola posizione) */
 
     /* Un nuovo load() azzera subito frame e framerate del video scartato. */
-    assert(syncview_video_player_get_frame_end_ns(player) > 0 && syncview_video_player_get_frame_rate(player) == 25.0);
+    g_assert_true(syncview_video_player_get_frame_end_ns(player) > 0 && syncview_video_player_get_frame_rate(player) == 25.0);
     ev.got_loaded = FALSE;
-    assert(syncview_video_player_load(player, path, NULL));
-    assert(syncview_video_player_get_frame_end_ns(player) == -1 && syncview_video_player_get_frame_rate(player) == 0.0);
-    assert(spin_until(&ev.got_loaded, 10000));
-    assert(syncview_video_player_get_frame_rate(player) == 25.0);
+    g_assert_true(syncview_video_player_load(player, path, NULL));
+    g_assert_true(syncview_video_player_get_frame_end_ns(player) == -1 && syncview_video_player_get_frame_rate(player) == 0.0);
+    g_assert_true(spin_until(&ev.got_loaded, 10000));
+    g_assert_true(syncview_video_player_get_frame_rate(player) == 25.0);
 
     /* Durante la riproduzione: continua a girare dal nuovo punto. */
-    assert(syncview_video_player_seek(player, 0, NULL));
-    assert(wait_frame_end(player, 40 * NS_PER_MS, 5000));
-    assert(syncview_video_player_play(player, NULL));
-    assert(syncview_video_player_seek(player, 2000, NULL));
+    g_assert_true(syncview_video_player_seek(player, 0, NULL));
+    g_assert_true(wait_frame_end(player, 40 * NS_PER_MS, 5000));
+    g_assert_true(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_seek(player, 2000, NULL));
     spin_for(500);
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
-    assert(syncview_video_player_is_ticking(player));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
+    g_assert_true(syncview_video_player_is_ticking(player));
     gint64 pos = syncview_video_player_get_position(player);
-    assert(pos >= 2000 && pos <= 3000);
-    assert(syncview_video_player_pause(player, NULL));
+    g_assert_true(pos >= 2000 && pos <= 3000);
+    g_assert_true(syncview_video_player_pause(player, NULL));
 
     pos_events_free(&ev);
     g_object_unref(player);
@@ -2108,22 +2107,22 @@ test_seek_after_end_of_video(const char *dir)
     PosEvents ev;
     SyncviewVideoPlayer *player = loaded_player(&ev, path);
 
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_play(player, NULL));
     gint64 deadline = g_get_monotonic_time() + 10 * G_USEC_PER_SEC;
     while (syncview_video_player_get_playback_state(player) != SYNCVIEW_PLAYBACK_STOPPED &&
            g_get_monotonic_time() < deadline) {
         g_main_context_iteration(NULL, FALSE);
         g_usleep(1000);
     }
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_STOPPED);
 
     /* Dopo la fine ci si sposta a metà: play() riprende da lì, non dall'inizio. */
-    assert(syncview_video_player_seek(player, 400, NULL));
-    assert(wait_frame_end(player, 440 * NS_PER_MS, 5000));
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_seek(player, 400, NULL));
+    g_assert_true(wait_frame_end(player, 440 * NS_PER_MS, 5000));
+    g_assert_true(syncview_video_player_play(player, NULL));
     spin_for(100);
     gint64 pos = syncview_video_player_get_position(player);
-    assert(pos >= 400);
+    g_assert_true(pos >= 400);
 
     pos_events_free(&ev);
     g_object_unref(player);
@@ -2137,41 +2136,41 @@ test_step_ms(const char *dir)
     PosEvents ev;
     SyncviewVideoPlayer *player = loaded_player(&ev, path);
 
-    assert(syncview_video_player_step_ms(player, 200, NULL));
-    assert(wait_last_position_between(&ev, 195, 205, 5000));
-    assert(wait_frame_end(player, 240 * NS_PER_MS, 5000));
-    assert(syncview_video_player_step_ms(player, 1000, NULL));
-    assert(wait_last_position_between(&ev, 1195, 1205, 5000));
-    assert(syncview_video_player_step_ms(player, -200, NULL));
-    assert(wait_last_position_between(&ev, 995, 1005, 5000));
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
+    g_assert_true(syncview_video_player_step_ms(player, 200, NULL));
+    g_assert_true(wait_last_position_between(&ev, 195, 205, 5000));
+    g_assert_true(wait_frame_end(player, 240 * NS_PER_MS, 5000));
+    g_assert_true(syncview_video_player_step_ms(player, 1000, NULL));
+    g_assert_true(wait_last_position_between(&ev, 1195, 1205, 5000));
+    g_assert_true(syncview_video_player_step_ms(player, -200, NULL));
+    g_assert_true(wait_last_position_between(&ev, 995, 1005, 5000));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
 
     /* Limiti 0..durata. */
-    assert(syncview_video_player_step_ms(player, -100000, NULL));
-    assert(wait_last_position_between(&ev, 0, 10, 5000));
+    g_assert_true(syncview_video_player_step_ms(player, -100000, NULL));
+    g_assert_true(wait_last_position_between(&ev, 0, 10, 5000));
     gint64 duration = syncview_video_player_get_duration(player);
-    assert(syncview_video_player_step_ms(player, 100000, NULL));
-    assert(wait_last_position_between(&ev, duration - 80, duration, 5000));
+    g_assert_true(syncview_video_player_step_ms(player, 100000, NULL));
+    g_assert_true(wait_last_position_between(&ev, duration - 80, duration, 5000));
 
     /* Subito dopo un seek (ancora in corso) e ravvicinati: partono dalla destinazione, non dalla posizione vecchia. */
-    assert(syncview_video_player_seek(player, 400, NULL));
-    assert(syncview_video_player_step_ms(player, 40, NULL));
-    assert(wait_last_position_between(&ev, 435, 445, 5000));
+    g_assert_true(syncview_video_player_seek(player, 400, NULL));
+    g_assert_true(syncview_video_player_step_ms(player, 40, NULL));
+    g_assert_true(wait_last_position_between(&ev, 435, 445, 5000));
     for (int i = 0; i < 5; i++) {
-        assert(syncview_video_player_step_ms(player, 40, NULL));
+        g_assert_true(syncview_video_player_step_ms(player, 40, NULL));
     }
-    assert(wait_last_position_between(&ev, 635, 645, 5000));
+    g_assert_true(wait_last_position_between(&ev, 635, 645, 5000));
     spin_for(300);
-    assert(last_pos(&ev) >= 635 && last_pos(&ev) <= 645);
+    g_assert_true(last_pos(&ev) >= 635 && last_pos(&ev) <= 645);
 
     /* In riproduzione lo step mette in pausa, come nell'originale. */
-    assert(syncview_video_player_seek(player, 520, NULL));
-    assert(wait_frame_end(player, 560 * NS_PER_MS, 5000));
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_seek(player, 520, NULL));
+    g_assert_true(wait_frame_end(player, 560 * NS_PER_MS, 5000));
+    g_assert_true(syncview_video_player_play(player, NULL));
     spin_for(200);
-    assert(syncview_video_player_step_ms(player, 100, NULL));
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
-    assert(!syncview_video_player_is_ticking(player));
+    g_assert_true(syncview_video_player_step_ms(player, 100, NULL));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
+    g_assert_false(syncview_video_player_is_ticking(player));
 
     pos_events_free(&ev);
     g_object_unref(player);
@@ -2191,7 +2190,7 @@ step_and_settle(SyncviewVideoPlayer *player, int count, gint64 *pts_out)
 {
     gint64 before = syncview_video_player_get_frame_end_ns(player);
 
-    assert(syncview_video_player_step_frames(player, count, NULL));
+    g_assert_true(syncview_video_player_step_frames(player, count, NULL));
     *pts_out = settled_after(player, before, 3000);  /* ai bordi (primo/ultimo frame) il frame non cambia */
 }
 
@@ -2204,56 +2203,56 @@ check_exact_frame_step(const char *dir, int fps)
     SyncviewVideoPlayer *player = loaded_player(&ev, path);
     gint64 truth[STEP_FRAMES + 1];
 
-    assert(syncview_video_player_get_frame_rate(player) == (double)fps);
+    g_assert_true(syncview_video_player_get_frame_rate(player) == (double)fps);
     gint64 frame_ns = GST_SECOND / fps;
     truth[0] = settled_frame_end(player);
-    assert(llabs(truth[0] - frame_ns) <= 2 * NS_PER_MS);  /* primo frame: finisce dopo ~1/fps */
+    g_assert_true(llabs(truth[0] - frame_ns) <= 2 * NS_PER_MS);  /* primo frame: finisce dopo ~1/fps */
 
     /* Riferimento: un frame avanti alla volta; ogni passo cambia frame e ne avanza uno solo (~1/fps). */
     for (int i = 1; i <= STEP_FRAMES; i++) {
         step_and_settle(player, 1, &truth[i]);
-        assert(truth[i] > truth[i - 1]);
-        assert(llabs((truth[i] - truth[i - 1]) - frame_ns) <= 1500 * 1000);  /* ms di arrotondamento del container */
+        g_assert_true(truth[i] > truth[i - 1]);
+        g_assert_true(llabs((truth[i] - truth[i - 1]) - frame_ns) <= 1500 * 1000);  /* ms di arrotondamento del container */
     }
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
     /* La posizione segue il frame: da dove inizia a dove finisce. */
-    assert(wait_last_position_between(&ev, (truth[STEP_FRAMES] - frame_ns) / NS_PER_MS - 2, truth[STEP_FRAMES] / NS_PER_MS, 2000));
+    g_assert_true(wait_last_position_between(&ev, (truth[STEP_FRAMES] - frame_ns) / NS_PER_MS - 2, truth[STEP_FRAMES] / NS_PER_MS, 2000));
 
     /* Indietro un frame alla volta: esattamente gli stessi frame, in ordine inverso. */
     for (int i = STEP_FRAMES - 1; i >= 0; i--) {
         gint64 pts;
         step_and_settle(player, -1, &pts);
-        assert(pts == truth[i]);
+        g_assert_true(pts == truth[i]);
     }
 
     /* Dal primo frame non si va oltre. */
     gint64 pts;
     step_and_settle(player, -1, &pts);
-    assert(pts == truth[0]);
+    g_assert_true(pts == truth[0]);
 
     /* Salti di N frame in una volta. */
     step_and_settle(player, 5, &pts);
-    assert(pts == truth[5]);
+    g_assert_true(pts == truth[5]);
     step_and_settle(player, -3, &pts);
-    assert(pts == truth[2]);
+    g_assert_true(pts == truth[2]);
     step_and_settle(player, STEP_FRAMES - 2, &pts);
-    assert(pts == truth[STEP_FRAMES]);
+    g_assert_true(pts == truth[STEP_FRAMES]);
     step_and_settle(player, -STEP_FRAMES, &pts);
-    assert(pts == truth[0]);
+    g_assert_true(pts == truth[0]);
 
     /* Passi ravvicinati, senza attendere la fine del seek precedente: nessun frame perso. */
     step_and_settle(player, STEP_FRAMES, &pts);
-    assert(pts == truth[STEP_FRAMES]);
+    g_assert_true(pts == truth[STEP_FRAMES]);
     gint64 before_rapid = syncview_video_player_get_frame_end_ns(player);
     for (int i = 0; i < 6; i++) {
-        assert(syncview_video_player_step_frames(player, -1, NULL));
+        g_assert_true(syncview_video_player_step_frames(player, -1, NULL));
     }
-    assert(settled_after(player, before_rapid, 5000) == truth[STEP_FRAMES - 6]);
+    g_assert_true(settled_after(player, before_rapid, 5000) == truth[STEP_FRAMES - 6]);
     before_rapid = syncview_video_player_get_frame_end_ns(player);
     for (int i = 0; i < 4; i++) {
-        assert(syncview_video_player_step_frames(player, 1, NULL));
+        g_assert_true(syncview_video_player_step_frames(player, 1, NULL));
     }
-    assert(settled_after(player, before_rapid, 5000) == truth[STEP_FRAMES - 2]);
+    g_assert_true(settled_after(player, before_rapid, 5000) == truth[STEP_FRAMES - 2]);
 
     /*
      * Seek esattamente sull'inizio di un frame e step indietro SUBITO (seek ancora in corso): a 30 fps i pts in ms
@@ -2262,47 +2261,47 @@ check_exact_frame_step(const char *dir, int fps)
     for (int j = 1; j <= STEP_FRAMES; j++) {
         gint64 start_ms = (truth[j] - frame_ns + NS_PER_MS / 2) / NS_PER_MS;  /* pts del frame j, intero in ms */
         gint64 before_j = syncview_video_player_get_frame_end_ns(player);
-        assert(syncview_video_player_seek(player, start_ms, NULL));
-        assert(syncview_video_player_step_frames(player, -1, NULL));
-        assert(settled_after(player, before_j, 5000) == truth[j - 1]);
+        g_assert_true(syncview_video_player_seek(player, start_ms, NULL));
+        g_assert_true(syncview_video_player_step_frames(player, -1, NULL));
+        g_assert_true(settled_after(player, before_j, 5000) == truth[j - 1]);
     }
 
     /* Oltre l'ultimo frame non si va: molti passi avanti ravvicinati si fermano sull'ultimo, e si torna indietro di uno. */
     gint64 duration_ns = syncview_video_player_get_duration(player) * NS_PER_MS;
     gint64 before_last = syncview_video_player_get_frame_end_ns(player);
     for (int i = 0; i < 100; i++) {
-        assert(syncview_video_player_step_frames(player, 1, NULL));
+        g_assert_true(syncview_video_player_step_frames(player, 1, NULL));
     }
     gint64 last_end = settled_after(player, before_last, 5000);
-    assert(last_end >= duration_ns - 2 * NS_PER_MS && last_end <= duration_ns + 2 * NS_PER_MS);
+    g_assert_true(last_end >= duration_ns - 2 * NS_PER_MS && last_end <= duration_ns + 2 * NS_PER_MS);
     step_and_settle(player, -1, &pts);
-    assert(llabs((last_end - pts) - frame_ns) <= 2 * NS_PER_MS);
+    g_assert_true(llabs((last_end - pts) - frame_ns) <= 2 * NS_PER_MS);
 
     /* Dopo un seek arbitrario l'ancora si ricalcola dal frame mostrato. */
     gint64 before_seek = syncview_video_player_get_frame_end_ns(player);
-    assert(syncview_video_player_seek(player, 1000, NULL));
+    g_assert_true(syncview_video_player_seek(player, 1000, NULL));
     gint64 shown = settled_after(player, before_seek, 5000);
-    assert(shown > 1000 * NS_PER_MS && shown <= 1000 * NS_PER_MS + frame_ns + 2 * NS_PER_MS);
+    g_assert_true(shown > 1000 * NS_PER_MS && shown <= 1000 * NS_PER_MS + frame_ns + 2 * NS_PER_MS);
     step_and_settle(player, -1, &pts);
     if (!(pts < shown && shown - pts <= frame_ns + 1500 * 1000)) {
         g_printerr("step indietro dopo seek: prima=%lld dopo=%lld frame=%lld (ns)\n", (long long)shown, (long long)pts, (long long)frame_ns);
     }
-    assert(pts < shown && shown - pts <= frame_ns + 1500 * 1000);
+    g_assert_true(pts < shown && shown - pts <= frame_ns + 1500 * 1000);
     gint64 back = pts;
     step_and_settle(player, 1, &pts);
-    assert(pts == shown);
+    g_assert_true(pts == shown);
     (void)back;
 
     /* In riproduzione lo step mette in pausa e avanza di un frame rispetto al frame mostrato. */
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_play(player, NULL));
     spin_for(300);
     gint64 before_play_step = syncview_video_player_get_frame_end_ns(player);
-    assert(syncview_video_player_step_frames(player, 1, NULL));
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
-    assert(!syncview_video_player_is_ticking(player));
+    g_assert_true(syncview_video_player_step_frames(player, 1, NULL));
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
+    g_assert_false(syncview_video_player_is_ticking(player));
     gint64 after_play = settled_after(player, before_play_step, 5000);
     step_and_settle(player, 1, &pts);
-    assert(pts > after_play && pts - after_play <= frame_ns + 1500 * 1000);
+    g_assert_true(pts > after_play && pts - after_play <= frame_ns + 1500 * 1000);
 
     pos_events_free(&ev);
     g_object_unref(player);
@@ -2330,11 +2329,11 @@ test_frame_step_unknown_frame_rate(const char *dir)
     SyncviewVideoPlayer *player = loaded_player(&ev, path);
 
     /* Framerate variabile/sconosciuto: ricade sullo step in ms dell'originale (40 ms per frame). */
-    assert(syncview_video_player_get_frame_rate(player) == 0.0);
-    assert(syncview_video_player_step_frames(player, 5, NULL));
-    assert(wait_last_position_between(&ev, 195, 205, 5000));
-    assert(syncview_video_player_step_frames(player, -2, NULL));
-    assert(wait_last_position_between(&ev, 115, 125, 5000));
+    g_assert_true(syncview_video_player_get_frame_rate(player) == 0.0);
+    g_assert_true(syncview_video_player_step_frames(player, 5, NULL));
+    g_assert_true(wait_last_position_between(&ev, 195, 205, 5000));
+    g_assert_true(syncview_video_player_step_frames(player, -2, NULL));
+    g_assert_true(wait_last_position_between(&ev, 115, 125, 5000));
 
     pos_events_free(&ev);
     g_object_unref(player);
@@ -2354,55 +2353,55 @@ test_frame_step_variable_rate(const char *dir)
     SyncviewVideoPlayer *player = loaded_player(&ev, path);
 
     /* Il container non dichiara un framerate; l'indice arriva da un thread di lavoro dopo il caricamento. */
-    assert(syncview_video_player_get_frame_rate(player) == 0.0);
+    g_assert_true(syncview_video_player_get_frame_rate(player) == 0.0);
     for (int i = 0; i < 3000 && syncview_video_player_frame_index_pending(player); i++) {
         spin_for(10);
     }
     guint n = 0;
     const gint64 *idx = syncview_video_player_get_frame_index(player, &n);
-    assert(idx != NULL && n == (guint)frames);
+    g_assert_true(idx != NULL && n == (guint)frames);
     for (guint i = 0; i < n; i++) {
-        assert(llabs(idx[i] - vfr_frame_start_ns(i)) <= NS_PER_MS);
+        g_assert_true(llabs(idx[i] - vfr_frame_start_ns(i)) <= NS_PER_MS);
     }
 
     /* Fine del frame k = inizio del k+1. */
     gint64 prev = settled_frame_end(player);
-    assert(llabs(prev - idx[1]) <= NS_PER_MS);
+    g_assert_true(llabs(prev - idx[1]) <= NS_PER_MS);
     for (int k = 1; k <= 8; k++) {
-        assert(syncview_video_player_step_frames(player, 1, NULL));
+        g_assert_true(syncview_video_player_step_frames(player, 1, NULL));
         prev = settled_after(player, prev, 5000);
-        assert(llabs(prev - idx[k + 1]) <= NS_PER_MS);
+        g_assert_true(llabs(prev - idx[k + 1]) <= NS_PER_MS);
     }
     for (int k = 7; k >= 0; k--) {
-        assert(syncview_video_player_step_frames(player, -1, NULL));
+        g_assert_true(syncview_video_player_step_frames(player, -1, NULL));
         prev = settled_after(player, prev, 5000);
-        assert(llabs(prev - idx[k + 1]) <= NS_PER_MS);
+        g_assert_true(llabs(prev - idx[k + 1]) <= NS_PER_MS);
     }
 
     /* Dieci frame in una volta, in entrambe le direzioni. */
-    assert(syncview_video_player_step_frames(player, 10, NULL));
+    g_assert_true(syncview_video_player_step_frames(player, 10, NULL));
     prev = settled_after(player, prev, 5000);
-    assert(llabs(prev - idx[11]) <= NS_PER_MS);
-    assert(syncview_video_player_step_frames(player, -10, NULL));
+    g_assert_true(llabs(prev - idx[11]) <= NS_PER_MS);
+    g_assert_true(syncview_video_player_step_frames(player, -10, NULL));
     prev = settled_after(player, prev, 5000);
-    assert(llabs(prev - idx[1]) <= NS_PER_MS);
+    g_assert_true(llabs(prev - idx[1]) <= NS_PER_MS);
 
     /* Dopo un seek in mezzo: il frame che contiene il punto, poi un passo indietro. */
     gint64 target_ms = idx[60] / NS_PER_MS + 3;
-    assert(syncview_video_player_seek(player, target_ms, NULL));
+    g_assert_true(syncview_video_player_seek(player, target_ms, NULL));
     prev = settled_after(player, prev, 5000);
-    assert(llabs(prev - idx[61]) <= NS_PER_MS);
-    assert(syncview_video_player_step_frames(player, -1, NULL));
+    g_assert_true(llabs(prev - idx[61]) <= NS_PER_MS);
+    g_assert_true(syncview_video_player_step_frames(player, -1, NULL));
     prev = settled_after(player, prev, 5000);
-    assert(llabs(prev - idx[60]) <= NS_PER_MS);
+    g_assert_true(llabs(prev - idx[60]) <= NS_PER_MS);
 
     /* Oltre i limiti si ferma sul primo e sull'ultimo frame. */
-    assert(syncview_video_player_step_frames(player, -500, NULL));
+    g_assert_true(syncview_video_player_step_frames(player, -500, NULL));
     prev = settled_after(player, prev, 5000);
-    assert(llabs(prev - idx[1]) <= NS_PER_MS);
-    assert(syncview_video_player_step_frames(player, 500, NULL));
+    g_assert_true(llabs(prev - idx[1]) <= NS_PER_MS);
+    g_assert_true(syncview_video_player_step_frames(player, 500, NULL));
     prev = settled_after(player, prev, 5000);
-    assert(prev >= idx[n - 1]);
+    g_assert_true(prev >= idx[n - 1]);
 
     pos_events_free(&ev);
     g_object_unref(player);
@@ -2430,31 +2429,31 @@ test_playback_rate(const char *dir)
     SyncviewVideoPlayer *player = loaded_player(&ev, path);
     GError *error = NULL;
 
-    assert(syncview_video_player_get_playback_rate(player) == 1.0);
+    g_assert_true(syncview_video_player_get_playback_rate(player) == 1.0);
 
     /* Argomenti non validi: nessun cambiamento. */
     double bad[] = { 0.0, -1.0, NAN, INFINITY };
     for (guint i = 0; i < G_N_ELEMENTS(bad); i++) {
-        assert(!syncview_video_player_set_playback_rate(player, bad[i], &error));
-        assert(g_error_matches(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_INVALID_ARGUMENT));
+        g_assert_false(syncview_video_player_set_playback_rate(player, bad[i], &error));
+        g_assert_true(g_error_matches(error, SYNCVIEW_VIDEO_PLAYER_ERROR, SYNCVIEW_VIDEO_PLAYER_ERROR_INVALID_ARGUMENT));
         g_clear_error(&error);
     }
-    assert(syncview_video_player_get_playback_rate(player) == 1.0);
+    g_assert_true(syncview_video_player_get_playback_rate(player) == 1.0);
 
     /* Da fermo: la velocità si imposta e vale al play(), senza spostare il frame mostrato. */
-    assert(syncview_video_player_set_playback_rate(player, 2.0, NULL));
-    assert(syncview_video_player_get_playback_rate(player) == 2.0);
-    assert(llabs(settled_frame_end(player) - 40 * NS_PER_MS) <= 1000);
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_set_playback_rate(player, 2.0, NULL));
+    g_assert_true(syncview_video_player_get_playback_rate(player) == 2.0);
+    g_assert_true(llabs(settled_frame_end(player) - 40 * NS_PER_MS) <= 1000);
+    g_assert_true(syncview_video_player_play(player, NULL));
     spin_for(300);
     double speed = measured_speed(player, 800);
-    assert(speed > 1.5 && speed < 2.6);
+    g_assert_true(speed > 1.5 && speed < 2.6);
 
     /* In riproduzione cambia senza interrompere né spostare il video. */
     gint64 before = syncview_video_player_get_position(player);
     gint64 t0 = g_get_monotonic_time();
 
-    assert(syncview_video_player_set_playback_rate(player, 0.5, NULL));
+    g_assert_true(syncview_video_player_set_playback_rate(player, 0.5, NULL));
     gint64 after = syncview_video_player_get_position(player);
     gint64 elapsed_ms = (g_get_monotonic_time() - t0) / 1000;
 
@@ -2466,39 +2465,39 @@ test_playback_rate(const char *dir)
         g_printerr("playback_rate: salto di posizione al cambio di velocità: prima=%" G_GINT64_FORMAT " ms dopo=%" G_GINT64_FORMAT
                    " ms (delta %" G_GINT64_FORMAT " ms) in %" G_GINT64_FORMAT " ms reali\n",
                    before, after, after - before, elapsed_ms);
-    assert(after >= before - 100 && after - before <= elapsed_ms * 2 + 300);
+    g_assert_true(after >= before - 100 && after - before <= elapsed_ms * 2 + 300);
     spin_for(300);
     speed = measured_speed(player, 1000);
-    assert(speed > 0.3 && speed < 0.75);
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
+    g_assert_true(speed > 0.3 && speed < 0.75);
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
 
-    assert(syncview_video_player_set_playback_rate(player, 1.0, NULL));
+    g_assert_true(syncview_video_player_set_playback_rate(player, 1.0, NULL));
     spin_for(300);
     speed = measured_speed(player, 800);
-    assert(speed > 0.75 && speed < 1.3);
+    g_assert_true(speed > 0.75 && speed < 1.3);
 
     /* Un seek e uno stop non la riportano a 1.0x. */
-    assert(syncview_video_player_set_playback_rate(player, 2.0, NULL));
-    assert(syncview_video_player_seek(player, 1000, NULL));
+    g_assert_true(syncview_video_player_set_playback_rate(player, 2.0, NULL));
+    g_assert_true(syncview_video_player_seek(player, 1000, NULL));
     spin_for(300);
     speed = measured_speed(player, 800);
-    assert(speed > 1.5 && speed < 2.6);
-    assert(syncview_video_player_stop(player, NULL));
-    assert(syncview_video_player_get_playback_rate(player) == 2.0);
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(speed > 1.5 && speed < 2.6);
+    g_assert_true(syncview_video_player_stop(player, NULL));
+    g_assert_true(syncview_video_player_get_playback_rate(player) == 2.0);
+    g_assert_true(syncview_video_player_play(player, NULL));
     spin_for(300);
     speed = measured_speed(player, 800);
-    assert(speed > 1.5 && speed < 2.6);
-    assert(syncview_video_player_pause(player, NULL));
+    g_assert_true(speed > 1.5 && speed < 2.6);
+    g_assert_true(syncview_video_player_pause(player, NULL));
 
     /* Un nuovo load() riparte a 1.0x. */
     ev.got_loaded = FALSE;
-    assert(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
-    assert(syncview_video_player_get_playback_rate(player) == 1.0);
-    assert(syncview_video_player_play(player, NULL));
+    g_assert_true(syncview_video_player_load(player, path, NULL) && spin_until(&ev.got_loaded, 10000));
+    g_assert_true(syncview_video_player_get_playback_rate(player) == 1.0);
+    g_assert_true(syncview_video_player_play(player, NULL));
     spin_for(300);
     speed = measured_speed(player, 800);
-    assert(speed > 0.75 && speed < 1.3);
+    g_assert_true(speed > 0.75 && speed < 1.3);
 
     pos_events_free(&ev);
     g_object_unref(player);
@@ -2514,31 +2513,31 @@ test_seek_step_log(const char *dir)
     PosEvents ev;
 
     g_unsetenv("SYNCVIEW_DEBUG");
-    assert(logger_init(log_path, FALSE, NULL));
+    g_assert_true(logger_init(log_path, FALSE, NULL));
     SyncviewVideoPlayer *player = loaded_player(&ev, path);
-    assert(syncview_video_player_seek(player, 400, NULL));
-    assert(syncview_video_player_step_ms(player, 40, NULL));
-    assert(syncview_video_player_step_frames(player, 1, NULL));
-    assert(syncview_video_player_set_playback_rate(player, 1.5, NULL));
+    g_assert_true(syncview_video_player_seek(player, 400, NULL));
+    g_assert_true(syncview_video_player_step_ms(player, 40, NULL));
+    g_assert_true(syncview_video_player_step_frames(player, 1, NULL));
+    g_assert_true(syncview_video_player_set_playback_rate(player, 1.5, NULL));
     spin_for(300);
     gint64 duration = syncview_video_player_get_duration(player);
-    assert(duration >= 1900 && duration <= 2100);
-    assert(syncview_video_player_seek(player, 10000, NULL));  /* oltre la fine: si registra la destinazione effettiva */
+    g_assert_true(duration >= 1900 && duration <= 2100);
+    g_assert_true(syncview_video_player_seek(player, 10000, NULL));  /* oltre la fine: si registra la destinazione effettiva */
     spin_for(300);
     pos_events_free(&ev);
     g_object_unref(player);
     logger_shutdown();
 
     char *log = NULL;
-    assert(g_file_get_contents(log_path, &log, NULL, NULL));
-    assert(strstr(log, "[VIDEO 1] Timeline seek: 00:00 (400ms)") != NULL);
+    g_assert_true(g_file_get_contents(log_path, &log, NULL, NULL));
+    g_assert_nonnull(strstr(log, "[VIDEO 1] Timeline seek: 00:00 (400ms)"));
     char *clamped = g_strdup_printf("[VIDEO 1] Timeline seek: 00:0%d (%lldms)", (int)(duration / 1000), (long long)duration);
-    assert(strstr(log, clamped) != NULL);
+    g_assert_nonnull(strstr(log, clamped));
     g_free(clamped);
-    assert(strstr(log, "10000ms") == NULL);
-    assert(strstr(log, "[VIDEO 1] Step (ms)") != NULL);
-    assert(strstr(log, "[VIDEO 1] Step Frame") != NULL);
-    assert(strstr(log, "[VIDEO 1] Velocità") != NULL && strstr(log, "1.50x") != NULL);
+    g_assert_null(strstr(log, "10000ms"));
+    g_assert_nonnull(strstr(log, "[VIDEO 1] Step (ms)"));
+    g_assert_nonnull(strstr(log, "[VIDEO 1] Step Frame"));
+    g_assert_true(strstr(log, "[VIDEO 1] Velocità") != NULL && strstr(log, "1.50x") != NULL);
     g_free(log);
     g_free(log_path);
     g_free(path);
@@ -2605,7 +2604,7 @@ main(void)
 
     if (have_test_encoder) {
         char *dir = g_dir_make_tmp("syncview-player-XXXXXX", NULL);
-        assert(dir != NULL);
+        g_assert_nonnull(dir);
 
         RUN_TEST(test_load_first_frame(dir));
         RUN_TEST(test_load_errors(dir));
@@ -2648,7 +2647,7 @@ main(void)
         RUN_TEST(test_seek_step_log(dir));
 
         /* Nessuno smontaggio di pipeline deve restare appeso (un blocco interno a GStreamer lo farebbe fallire qui). */
-        assert(drain_teardowns(15000));
+        g_assert_true(drain_teardowns(15000));
 
         char *cmd = g_strdup_printf("rm -rf '%s'", dir);
 #ifdef _WIN32
@@ -2657,13 +2656,13 @@ main(void)
             fprintf(stderr, "avviso: cartella temporanea non cancellata del tutto: %s\n", dir);
         }
 #else
-        assert(system(cmd) == 0);
+        g_assert_cmpint(system(cmd), ==, 0);
 #endif
         g_free(cmd);
         g_free(dir);
     }
 
     test_missing_element_error();
-    assert(drain_teardowns(15000));
+    g_assert_true(drain_teardowns(15000));
     return 0;
 }

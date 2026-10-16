@@ -1,6 +1,5 @@
 #include "core/marker_db.h"
 
-#include <assert.h>
 #include <glib.h>
 #include <glib/gstdio.h>
 #include <sqlite3.h>
@@ -15,8 +14,8 @@ query_scalar(const char *path, const char *sql)
     sqlite3_stmt *stmt = NULL;
     char *result = NULL;
 
-    assert(sqlite3_open(path, &conn) == SQLITE_OK);
-    assert(sqlite3_prepare_v2(conn, sql, -1, &stmt, NULL) == SQLITE_OK);
+    g_assert_true(sqlite3_open(path, &conn) == SQLITE_OK);
+    g_assert_true(sqlite3_prepare_v2(conn, sql, -1, &stmt, NULL) == SQLITE_OK);
     if (sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_text(stmt, 0)) {
         result = g_strdup((const char *)sqlite3_column_text(stmt, 0));
     }
@@ -29,8 +28,8 @@ static void
 exec_direct(const char *path, const char *sql)
 {
     sqlite3 *conn = NULL;
-    assert(sqlite3_open(path, &conn) == SQLITE_OK);
-    assert(sqlite3_exec(conn, sql, NULL, NULL, NULL) == SQLITE_OK);
+    g_assert_true(sqlite3_open(path, &conn) == SQLITE_OK);
+    g_assert_true(sqlite3_exec(conn, sql, NULL, NULL, NULL) == SQLITE_OK);
     sqlite3_close(conn);
 }
 
@@ -43,8 +42,8 @@ table_columns(const char *path, const char *table)
     GString *out = g_string_new(NULL);
     char *sql = g_strdup_printf("PRAGMA table_info(%s)", table);
 
-    assert(sqlite3_open(path, &conn) == SQLITE_OK);
-    assert(sqlite3_prepare_v2(conn, sql, -1, &stmt, NULL) == SQLITE_OK);
+    g_assert_true(sqlite3_open(path, &conn) == SQLITE_OK);
+    g_assert_true(sqlite3_prepare_v2(conn, sql, -1, &stmt, NULL) == SQLITE_OK);
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         const unsigned char *dflt = sqlite3_column_text(stmt, 4);
         g_string_append_printf(out, "%s%s:%s:%d:%s:%d", out->len ? "," : "",
@@ -66,23 +65,23 @@ test_creates_schema(const char *dir)
     GError *error = NULL;
 
     MarkerDb *db = marker_db_open(path, &error);
-    assert(db != NULL && error == NULL);
-    assert(strcmp(marker_db_get_path(db), path) == 0);
-    assert(g_file_test(path, G_FILE_TEST_IS_REGULAR));
+    g_assert_true(db != NULL && error == NULL);
+    g_assert_cmpstr(marker_db_get_path(db), ==, path);
+    g_assert_true(g_file_test(path, G_FILE_TEST_IS_REGULAR));
 
     /* Tabelle: esattamente metadata e markers. */
     char *tables = query_scalar(path,
         "SELECT group_concat(name) FROM (SELECT name FROM sqlite_master "
         "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name)");
-    assert(tables && strcmp(tables, "markers,metadata") == 0);
+    g_assert_true(tables && strcmp(tables, "markers,metadata") == 0);
     g_free(tables);
 
     char *cols = table_columns(path, "metadata");
-    assert(strcmp(cols, "key:TEXT:0::1,value:TEXT:1::0") == 0);
+    g_assert_cmpstr(cols, ==, "key:TEXT:0::1,value:TEXT:1::0");
     g_free(cols);
 
     cols = table_columns(path, "markers");
-    assert(strcmp(cols,
+    g_assert_true(strcmp(cols,
         "id:TEXT:0::1,timestamp:INTEGER:1::0,color:TEXT:1::0,description:TEXT:0:'':0,"
         "category:TEXT:0:'default':0,video_index:INTEGER:0::0,created_at:TEXT:1::0,"
         "updated_at:TEXT:1::0,is_deleted:INTEGER:0:0:0") == 0);
@@ -92,22 +91,22 @@ test_creates_schema(const char *dir)
     char *indexes = query_scalar(path,
         "SELECT group_concat(name || ':' || tbl_name) FROM (SELECT name, tbl_name FROM sqlite_master "
         "WHERE type='index' AND name NOT LIKE 'sqlite_%' ORDER BY name)");
-    assert(indexes && strcmp(indexes,
+    g_assert_true(indexes && strcmp(indexes,
         "idx_category:markers,idx_deleted:markers,idx_timestamp:markers,idx_video_index:markers") == 0);
     g_free(indexes);
 
     /* Vincolo UNIQUE(timestamp, video_index, created_at) presente come autoindex. */
     char *unique = query_scalar(path,
         "SELECT count(*) FROM pragma_index_list('markers') WHERE origin='u'");
-    assert(unique && strcmp(unique, "1") == 0);
+    g_assert_true(unique && strcmp(unique, "1") == 0);
     g_free(unique);
 
     /* Metadata iniziali. */
     char *version = query_scalar(path, "SELECT value FROM metadata WHERE key='db_version'");
-    assert(version && strcmp(version, "1") == 0);
+    g_assert_true(version && strcmp(version, "1") == 0);
     g_free(version);
     char *created = query_scalar(path, "SELECT value FROM metadata WHERE key='created_at'");
-    assert(created && strlen(created) >= 11 && created[10] == 'T');
+    g_assert_true(created && strlen(created) >= 11 && created[10] == 'T');
     g_free(created);
 
     marker_db_free(db);
@@ -120,7 +119,7 @@ test_reopen_is_idempotent(const char *dir)
     char *path = g_build_filename(dir, "reopen.db", NULL);
 
     MarkerDb *db = marker_db_open(path, NULL);
-    assert(db != NULL);
+    g_assert_nonnull(db);
     marker_db_free(db);
 
     char *created_before = query_scalar(path, "SELECT value FROM metadata WHERE key='created_at'");
@@ -129,15 +128,15 @@ test_reopen_is_idempotent(const char *dir)
 
     /* Riapertura: nessun reset di schema, dati e created_at invariati. */
     db = marker_db_open(path, NULL);
-    assert(db != NULL);
+    g_assert_nonnull(db);
     marker_db_free(db);
 
     char *count = query_scalar(path, "SELECT count(*) FROM markers");
-    assert(strcmp(count, "1") == 0);
+    g_assert_cmpstr(count, ==, "1");
     char *created_after = query_scalar(path, "SELECT value FROM metadata WHERE key='created_at'");
-    assert(strcmp(created_before, created_after) == 0);
+    g_assert_cmpstr(created_before, ==, created_after);
     char *meta_rows = query_scalar(path, "SELECT count(*) FROM metadata");
-    assert(strcmp(meta_rows, "2") == 0);
+    g_assert_cmpstr(meta_rows, ==, "2");
 
     g_free(created_before);
     g_free(created_after);
@@ -156,11 +155,11 @@ test_migrates_older_version(const char *dir)
     exec_direct(path, "UPDATE metadata SET value='0' WHERE key='db_version'");
 
     db = marker_db_open(path, NULL);
-    assert(db != NULL);
+    g_assert_nonnull(db);
     marker_db_free(db);
 
     char *version = query_scalar(path, "SELECT value FROM metadata WHERE key='db_version'");
-    assert(strcmp(version, "1") == 0);
+    g_assert_cmpstr(version, ==, "1");
 
     g_free(version);
     g_free(path);
@@ -171,12 +170,12 @@ test_open_failure(const char *dir)
 {
     /* Il "file" è in realtà una directory: SQLite non può aprirlo come database. */
     char *path = g_build_filename(dir, "isdir.db", NULL);
-    assert(g_mkdir(path, 0755) == 0);
+    g_assert_cmpint(g_mkdir(path, 0755), ==, 0);
 
     GError *error = NULL;
     MarkerDb *db = marker_db_open(path, &error);
-    assert(db == NULL);
-    assert(error != NULL && error->domain == MARKER_DB_ERROR);
+    g_assert_null(db);
+    g_assert_true(error != NULL && error->domain == MARKER_DB_ERROR);
 
     g_error_free(error);
     g_free(path);
@@ -185,13 +184,13 @@ test_open_failure(const char *dir)
 static void
 assert_markers_equal(const Marker *a, const Marker *b)
 {
-    assert(strcmp(a->id, b->id) == 0);
-    assert(a->timestamp_ms == b->timestamp_ms);
-    assert(strcmp(a->color, b->color) == 0);
-    assert(strcmp(a->description, b->description) == 0);
-    assert(strcmp(a->category, b->category) == 0);
-    assert(a->video_index == b->video_index);
-    assert(strcmp(a->created_at, b->created_at) == 0);
+    g_assert_cmpstr(a->id, ==, b->id);
+    g_assert_true(a->timestamp_ms == b->timestamp_ms);
+    g_assert_cmpstr(a->color, ==, b->color);
+    g_assert_cmpstr(a->description, ==, b->description);
+    g_assert_cmpstr(a->category, ==, b->category);
+    g_assert_true(a->video_index == b->video_index);
+    g_assert_cmpstr(a->created_at, ==, b->created_at);
 }
 
 static void
@@ -199,14 +198,14 @@ test_save_load_roundtrip(const char *dir)
 {
     char *path = g_build_filename(dir, "roundtrip.db", NULL);
     MarkerDb *db = marker_db_open(path, NULL);
-    assert(db != NULL);
+    g_assert_nonnull(db);
 
     /* Store vuoto: save ok, load ritorna store vuoto. */
     MarkerStore *empty = marker_store_new();
-    assert(marker_db_save_batch(db, empty, NULL));
+    g_assert_true(marker_db_save_batch(db, empty, NULL));
     marker_store_free(empty);
     MarkerStore *loaded = marker_db_load_all(db, FALSE, NULL);
-    assert(loaded != NULL && marker_store_count(loaded) == 0);
+    g_assert_true(loaded != NULL && marker_store_count(loaded) == 0);
     marker_store_free(loaded);
 
     /* 50 marker: timestamp sparsi (con duplicati), video_index misti, stringhe non banali. */
@@ -219,25 +218,25 @@ test_save_load_roundtrip(const char *dir)
         g_free(desc);
     }
 
-    assert(marker_db_save_batch(db, store, NULL));
+    g_assert_true(marker_db_save_batch(db, store, NULL));
 
     /* video_index globale salvato come NULL. */
     char *nulls = query_scalar(path, "SELECT count(*) FROM markers WHERE video_index IS NULL");
-    assert(strcmp(nulls, "10") == 0);
+    g_assert_cmpstr(nulls, ==, "10");
     g_free(nulls);
 
     loaded = marker_db_load_all(db, FALSE, NULL);
-    assert(loaded != NULL);
-    assert(marker_store_count(loaded) == marker_store_count(store));
+    g_assert_nonnull(loaded);
+    g_assert_true(marker_store_count(loaded) == marker_store_count(store));
 
     /* Ordinati per timestamp; confronto per id (l'ordine a pari timestamp non è garantito). */
     for (size_t i = 0; i < marker_store_count(loaded); i++) {
         const Marker *l = marker_store_get(loaded, i);
         if (i > 0) {
-            assert(marker_store_get(loaded, i - 1)->timestamp_ms <= l->timestamp_ms);
+            g_assert_true(marker_store_get(loaded, i - 1)->timestamp_ms <= l->timestamp_ms);
         }
         const Marker *orig = marker_store_find_by_id(store, l->id);
-        assert(orig != NULL);
+        g_assert_nonnull(orig);
         assert_markers_equal(orig, l);
     }
     marker_store_free(loaded);
@@ -250,25 +249,25 @@ test_save_load_roundtrip(const char *dir)
                                   | MARKER_FIELD_TIMESTAMP | MARKER_FIELD_VIDEO_INDEX,
                         .color = "#e74c3c", .description = "modificato", .timestamp_ms = 99999,
                         .video_index = 3 };
-    assert(marker_store_update(store, first_id, &up) != NULL);
-    assert(marker_db_save_batch(db, store, NULL));
+    g_assert_nonnull(marker_store_update(store, first_id, &up));
+    g_assert_true(marker_db_save_batch(db, store, NULL));
 
     char *count = query_scalar(path, "SELECT count(*) FROM markers");
-    assert(strcmp(count, "50") == 0);
+    g_assert_cmpstr(count, ==, "50");
     g_free(count);
 
     loaded = marker_db_load_all(db, FALSE, NULL);
     const Marker *l = marker_store_find_by_id(loaded, first_id);
-    assert(l != NULL);
-    assert(l->timestamp_ms == 99999 && l->video_index == 3);
-    assert(strcmp(l->color, "#e74c3c") == 0 && strcmp(l->description, "modificato") == 0);
-    assert(strcmp(l->created_at, first_created) == 0);  /* created_at non viene riscritto */
+    g_assert_nonnull(l);
+    g_assert_true(l->timestamp_ms == 99999 && l->video_index == 3);
+    g_assert_true(strcmp(l->color, "#e74c3c") == 0 && strcmp(l->description, "modificato") == 0);
+    g_assert_cmpstr(l->created_at, ==, first_created);  /* created_at non viene riscritto */
     marker_store_free(loaded);
 
     /* updated_at valorizzato ISO8601 su tutte le righe. */
     char *bad_updated = query_scalar(path,
         "SELECT count(*) FROM markers WHERE substr(updated_at, 11, 1) != 'T'");
-    assert(strcmp(bad_updated, "0") == 0);
+    g_assert_cmpstr(bad_updated, ==, "0");
     g_free(bad_updated);
 
     g_free(first_id);
@@ -289,7 +288,7 @@ test_load_excludes_deleted(const char *dir)
     const Marker *gone = marker_store_add(store, 2000, "#000000", NULL, NULL, 0);
     char *keep_id = g_strdup(keep->id);
     char *gone_id = g_strdup(gone->id);
-    assert(marker_db_save_batch(db, store, NULL));
+    g_assert_true(marker_db_save_batch(db, store, NULL));
     marker_store_free(store);
 
     char *sql = g_strdup_printf("UPDATE markers SET is_deleted = 1 WHERE id = '%s'", gone_id);
@@ -297,13 +296,13 @@ test_load_excludes_deleted(const char *dir)
     g_free(sql);
 
     MarkerStore *loaded = marker_db_load_all(db, FALSE, NULL);
-    assert(marker_store_count(loaded) == 1);
-    assert(marker_store_find_by_id(loaded, keep_id) != NULL);
-    assert(marker_store_find_by_id(loaded, gone_id) == NULL);
+    g_assert_cmpint(marker_store_count(loaded), ==, 1);
+    g_assert_nonnull(marker_store_find_by_id(loaded, keep_id));
+    g_assert_null(marker_store_find_by_id(loaded, gone_id));
     marker_store_free(loaded);
 
     loaded = marker_db_load_all(db, TRUE, NULL);
-    assert(marker_store_count(loaded) == 2);
+    g_assert_cmpint(marker_store_count(loaded), ==, 2);
     marker_store_free(loaded);
 
     g_free(keep_id);
@@ -332,12 +331,12 @@ test_save_batch_rolls_back_on_error(const char *dir)
     marker_store_add_marker(store, b);
 
     GError *error = NULL;
-    assert(!marker_db_save_batch(db, store, &error));
-    assert(error != NULL && error->domain == MARKER_DB_ERROR && error->code == MARKER_DB_ERROR_SQL);
+    g_assert_false(marker_db_save_batch(db, store, &error));
+    g_assert_true(error != NULL && error->domain == MARKER_DB_ERROR && error->code == MARKER_DB_ERROR_SQL);
     g_error_free(error);
 
     char *count = query_scalar(path, "SELECT count(*) FROM markers");
-    assert(strcmp(count, "0") == 0);  /* anche il marker valido (ts=100) è stato annullato */
+    g_assert_cmpstr(count, ==, "0");  /* anche il marker valido (ts=100) è stato annullato */
     g_free(count);
 
     marker_store_free(store);
@@ -356,50 +355,50 @@ test_soft_delete(const char *dir)
     for (int i = 0; i < 3; i++) {
         ids[i] = g_strdup(marker_store_add(store, 1000 * (i + 1), "#000000", "d", NULL, i)->id);
     }
-    assert(marker_db_save_batch(db, store, NULL));
+    g_assert_true(marker_db_save_batch(db, store, NULL));
     marker_store_free(store);
 
     char *sql = g_strdup_printf("SELECT updated_at FROM markers WHERE id = '%s'", ids[1]);
     char *updated_before = query_scalar(path, sql);
     g_free(sql);
 
-    assert(marker_db_delete(db, ids[1], NULL));
+    g_assert_true(marker_db_delete(db, ids[1], NULL));
 
     /* Riga ancora presente con is_deleted=1 e dati intatti (soft, non hard delete). */
     sql = g_strdup_printf("SELECT is_deleted || '|' || timestamp || '|' || description FROM markers "
                           "WHERE id = '%s'", ids[1]);
     char *row = query_scalar(path, sql);
     g_free(sql);
-    assert(row && strcmp(row, "1|2000|d") == 0);
+    g_assert_true(row && strcmp(row, "1|2000|d") == 0);
     g_free(row);
 
     /* updated_at aggiornato, ISO8601. */
     sql = g_strdup_printf("SELECT updated_at FROM markers WHERE id = '%s'", ids[1]);
     char *updated_after = query_scalar(path, sql);
     g_free(sql);
-    assert(strcmp(updated_before, updated_after) != 0 && updated_after[10] == 'T');
+    g_assert_true(strcmp(updated_before, updated_after) != 0 && updated_after[10] == 'T');
     g_free(updated_before);
     g_free(updated_after);
 
     /* Gli altri marker non sono toccati. */
     char *others = query_scalar(path, "SELECT count(*) FROM markers WHERE is_deleted = 0");
-    assert(strcmp(others, "2") == 0);
+    g_assert_cmpstr(others, ==, "2");
     g_free(others);
 
     /* Assente da load_all, presente con include_deleted. */
     MarkerStore *loaded = marker_db_load_all(db, FALSE, NULL);
-    assert(marker_store_count(loaded) == 2);
-    assert(marker_store_find_by_id(loaded, ids[1]) == NULL);
+    g_assert_cmpint(marker_store_count(loaded), ==, 2);
+    g_assert_null(marker_store_find_by_id(loaded, ids[1]));
     marker_store_free(loaded);
     loaded = marker_db_load_all(db, TRUE, NULL);
-    assert(marker_store_count(loaded) == 3);
+    g_assert_cmpint(marker_store_count(loaded), ==, 3);
     marker_store_free(loaded);
 
     /* Idempotente; id inesistente non è un errore e non modifica nulla. */
-    assert(marker_db_delete(db, ids[1], NULL));
-    assert(marker_db_delete(db, "inesistente", NULL));
+    g_assert_true(marker_db_delete(db, ids[1], NULL));
+    g_assert_true(marker_db_delete(db, "inesistente", NULL));
     char *deleted = query_scalar(path, "SELECT count(*) FROM markers WHERE is_deleted = 1");
-    assert(strcmp(deleted, "1") == 0);
+    g_assert_cmpstr(deleted, ==, "1");
     g_free(deleted);
 
     for (int i = 0; i < 3; i++) {
@@ -414,14 +413,14 @@ test_soft_delete(const char *dir)
 static void
 write_file(const char *path, const char *content)
 {
-    assert(g_file_set_contents(path, content, -1, NULL));
+    g_assert_true(g_file_set_contents(path, content, -1, NULL));
 }
 
 static char *
 read_file(const char *path)
 {
     char *content = NULL;
-    assert(g_file_get_contents(path, &content, NULL, NULL));
+    g_assert_true(g_file_get_contents(path, &content, NULL, NULL));
     return content;
 }
 
@@ -451,51 +450,51 @@ test_migrate_json(const char *dir)
     MarkerDb *db = marker_db_open(dbpath, NULL);
     int migrated = -1;
     GError *error = NULL;
-    assert(marker_db_migrate_from_json(db, json, &migrated, &error));
-    assert(error == NULL && migrated == 4);
+    g_assert_true(marker_db_migrate_from_json(db, json, &migrated, &error));
+    g_assert_true(error == NULL && migrated == 4);
 
     /* JSON rinominato in .json.backup, contenuto identico all'originale. */
-    assert(!g_file_test(json, G_FILE_TEST_EXISTS));
-    assert(g_file_test(backup, G_FILE_TEST_IS_REGULAR));
+    g_assert_false(g_file_test(json, G_FILE_TEST_EXISTS));
+    g_assert_true(g_file_test(backup, G_FILE_TEST_IS_REGULAR));
     char *backup_content = read_file(backup);
-    assert(strcmp(backup_content, LEGACY_JSON) == 0);
+    g_assert_cmpstr(backup_content, ==, LEGACY_JSON);
     g_free(backup_content);
 
     /* Contenuto migrato, ordinato per timestamp. */
     MarkerStore *store = marker_db_load_all(db, FALSE, NULL);
-    assert(marker_store_count(store) == 4);
-    assert(marker_store_get(store, 0)->timestamp_ms == 1000);
-    assert(marker_store_get(store, 1)->timestamp_ms == 2000);
-    assert(marker_store_get(store, 2)->timestamp_ms == 3000);
-    assert(marker_store_get(store, 3)->timestamp_ms == 5000);
+    g_assert_cmpint(marker_store_count(store), ==, 4);
+    g_assert_cmpint(marker_store_get(store, 0)->timestamp_ms, ==, 1000);
+    g_assert_cmpint(marker_store_get(store, 1)->timestamp_ms, ==, 2000);
+    g_assert_cmpint(marker_store_get(store, 2)->timestamp_ms, ==, 3000);
+    g_assert_cmpint(marker_store_get(store, 3)->timestamp_ms, ==, 5000);
 
     const Marker *m = marker_store_find_by_id(store, "marker_5000_1.5");  /* id preservato */
-    assert(m != NULL);
-    assert(m->timestamp_ms == 5000 && m->video_index == 2);
-    assert(strcmp(m->color, "#e74c3c") == 0 && strcmp(m->category, "event") == 0);
-    assert(strcmp(m->description, "gol \xc3\xa8 fatto") == 0);
-    assert(strcmp(m->created_at, "2024-01-01T10:00:01.000001") == 0);
+    g_assert_nonnull(m);
+    g_assert_true(m->timestamp_ms == 5000 && m->video_index == 2);
+    g_assert_true(strcmp(m->color, "#e74c3c") == 0 && strcmp(m->category, "event") == 0);
+    g_assert_cmpstr(m->description, ==, "gol \xc3\xa8 fatto");
+    g_assert_cmpstr(m->created_at, ==, "2024-01-01T10:00:01.000001");
 
     m = marker_store_find_by_id(store, "marker_1000_2.5");
-    assert(m != NULL && m->video_index == SYNCVIEW_MARKER_VIDEO_INDEX_ALL);
+    g_assert_true(m != NULL && m->video_index == SYNCVIEW_MARKER_VIDEO_INDEX_ALL);
 
     /* Campi mancanti: default e id/created_at generati. */
     m = marker_store_get(store, 2);
-    assert(strcmp(m->color, "#2ecc71") == 0 && strcmp(m->description, "") == 0);
-    assert(strcmp(m->category, "default") == 0 && m->video_index == SYNCVIEW_MARKER_VIDEO_INDEX_ALL);
-    assert(strncmp(m->id, "marker_3000_", strlen("marker_3000_")) == 0);
-    assert(m->created_at[4] == '-' && m->created_at[10] == 'T');
+    g_assert_true(strcmp(m->color, "#2ecc71") == 0 && strcmp(m->description, "") == 0);
+    g_assert_true(strcmp(m->category, "default") == 0 && m->video_index == SYNCVIEW_MARKER_VIDEO_INDEX_ALL);
+    g_assert_cmpint(strncmp(m->id, "marker_3000_", strlen("marker_3000_")), ==, 0);
+    g_assert_true(m->created_at[4] == '-' && m->created_at[10] == 'T');
 
     /* Timestamp float (2000.0) accettato, id null generato, video_index 0. */
     m = marker_store_get(store, 1);
-    assert(strncmp(m->id, "marker_2000_", strlen("marker_2000_")) == 0 && m->video_index == 0);
+    g_assert_true(strncmp(m->id, "marker_2000_", strlen("marker_2000_")) == 0 && m->video_index == 0);
     marker_store_free(store);
 
     /* Un secondo backup sostituisce il precedente. */
     write_file(json, "{\"markers\": [{\"timestamp\": 7, \"color\": \"#fff\"}]}");
-    assert(marker_db_migrate_from_json(db, json, &migrated, NULL) && migrated == 1);
+    g_assert_true(marker_db_migrate_from_json(db, json, &migrated, NULL) && migrated == 1);
     backup_content = read_file(backup);
-    assert(strstr(backup_content, "\"timestamp\": 7") != NULL);
+    g_assert_nonnull(strstr(backup_content, "\"timestamp\": 7"));
     g_free(backup_content);
 
     marker_db_free(db);
@@ -514,16 +513,16 @@ test_migrate_json_no_op_cases(const char *dir)
     int migrated = -1;
 
     /* File assente: successo, nulla da fare. */
-    assert(marker_db_migrate_from_json(db, json, &migrated, NULL) && migrated == 0);
+    g_assert_true(marker_db_migrate_from_json(db, json, &migrated, NULL) && migrated == 0);
 
     /* Lista vuota (o chiave 'markers' assente): nessun salvataggio e nessun backup. */
     write_file(json, "{\"version\": \"3.0\", \"markers\": []}");
     migrated = -1;
-    assert(marker_db_migrate_from_json(db, json, &migrated, NULL) && migrated == 0);
-    assert(g_file_test(json, G_FILE_TEST_EXISTS) && !g_file_test(backup, G_FILE_TEST_EXISTS));
+    g_assert_true(marker_db_migrate_from_json(db, json, &migrated, NULL) && migrated == 0);
+    g_assert_true(g_file_test(json, G_FILE_TEST_EXISTS) && !g_file_test(backup, G_FILE_TEST_EXISTS));
     write_file(json, "{}");
-    assert(marker_db_migrate_from_json(db, json, &migrated, NULL) && migrated == 0);
-    assert(g_file_test(json, G_FILE_TEST_EXISTS) && !g_file_test(backup, G_FILE_TEST_EXISTS));
+    g_assert_true(marker_db_migrate_from_json(db, json, &migrated, NULL) && migrated == 0);
+    g_assert_true(g_file_test(json, G_FILE_TEST_EXISTS) && !g_file_test(backup, G_FILE_TEST_EXISTS));
 
     marker_db_free(db);
     g_free(dbpath);
@@ -556,18 +555,18 @@ test_migrate_json_errors(const char *dir)
         write_file(json, bad_inputs[i]);
         GError *error = NULL;
         int migrated = -1;
-        assert(!marker_db_migrate_from_json(db, json, &migrated, &error));
-        assert(error != NULL && error->domain == MARKER_DB_ERROR && error->code == MARKER_DB_ERROR_JSON);
-        assert(migrated == 0);
+        g_assert_false(marker_db_migrate_from_json(db, json, &migrated, &error));
+        g_assert_true(error != NULL && error->domain == MARKER_DB_ERROR && error->code == MARKER_DB_ERROR_JSON);
+        g_assert_cmpint(migrated, ==, 0);
         g_error_free(error);
 
         /* JSON intatto, nessun backup, nulla salvato nel DB. */
         char *content = read_file(json);
-        assert(strcmp(content, bad_inputs[i]) == 0);
+        g_assert_cmpstr(content, ==, bad_inputs[i]);
         g_free(content);
-        assert(!g_file_test(backup, G_FILE_TEST_EXISTS));
+        g_assert_false(g_file_test(backup, G_FILE_TEST_EXISTS));
         char *count = query_scalar(dbpath, "SELECT count(*) FROM markers");
-        assert(strcmp(count, "0") == 0);
+        g_assert_cmpstr(count, ==, "0");
         g_free(count);
     }
 
@@ -588,20 +587,20 @@ test_open_migrating(const char *dir)
     /* DB nuovo + JSON presente: migrazione automatica. */
     GError *migration_error = NULL;
     MarkerDb *db = marker_db_open_migrating(dbpath, json, &migration_error, NULL);
-    assert(db != NULL && migration_error == NULL);
-    assert(!g_file_test(json, G_FILE_TEST_EXISTS) && g_file_test(backup, G_FILE_TEST_EXISTS));
+    g_assert_true(db != NULL && migration_error == NULL);
+    g_assert_true(!g_file_test(json, G_FILE_TEST_EXISTS) && g_file_test(backup, G_FILE_TEST_EXISTS));
     MarkerStore *store = marker_db_load_all(db, FALSE, NULL);
-    assert(marker_store_count(store) == 1);
+    g_assert_cmpint(marker_store_count(store), ==, 1);
     marker_store_free(store);
     marker_db_free(db);
 
     /* DB già esistente: un nuovo JSON NON viene migrato. */
     write_file(json, "{\"markers\": [{\"timestamp\": 20, \"color\": \"#fff\"}]}");
     db = marker_db_open_migrating(dbpath, json, NULL, NULL);
-    assert(db != NULL);
-    assert(g_file_test(json, G_FILE_TEST_EXISTS));
+    g_assert_nonnull(db);
+    g_assert_true(g_file_test(json, G_FILE_TEST_EXISTS));
     store = marker_db_load_all(db, FALSE, NULL);
-    assert(marker_store_count(store) == 1);
+    g_assert_cmpint(marker_store_count(store), ==, 1);
     marker_store_free(store);
     marker_db_free(db);
 
@@ -610,16 +609,16 @@ test_open_migrating(const char *dir)
     char *json2 = g_build_filename(dir, "om2.json", NULL);
     write_file(json2, "garbage");
     db = marker_db_open_migrating(dbpath2, json2, &migration_error, NULL);
-    assert(db != NULL && migration_error != NULL);
-    assert(migration_error->code == MARKER_DB_ERROR_JSON);
+    g_assert_true(db != NULL && migration_error != NULL);
+    g_assert_true(migration_error->code == MARKER_DB_ERROR_JSON);
     g_error_free(migration_error);
-    assert(g_file_test(json2, G_FILE_TEST_EXISTS));
+    g_assert_true(g_file_test(json2, G_FILE_TEST_EXISTS));
     marker_db_free(db);
 
     /* legacy_json_path NULL: nessun tentativo. */
     char *dbpath3 = g_build_filename(dir, "om3.markers.db", NULL);
     db = marker_db_open_migrating(dbpath3, NULL, NULL, NULL);
-    assert(db != NULL);
+    g_assert_nonnull(db);
     marker_db_free(db);
 
     g_free(dbpath);
@@ -640,11 +639,11 @@ test_null_db_version(const char *dir)
                       "INSERT INTO metadata (key, value) VALUES ('db_version', NULL);");
 
     MarkerDb *db = marker_db_open(path, NULL);
-    assert(db != NULL);
+    g_assert_nonnull(db);
     marker_db_free(db);
 
     char *version = query_scalar(path, "SELECT value FROM metadata WHERE key='db_version'");
-    assert(version != NULL && strcmp(version, "1") == 0);
+    g_assert_true(version != NULL && strcmp(version, "1") == 0);
 
     g_free(version);
     g_free(path);
@@ -659,16 +658,16 @@ test_resave_restores_deleted(const char *dir)
 
     MarkerStore *store = marker_store_new();
     char *id = g_strdup(marker_store_add(store, 1000, "#000000", "d", NULL, 0)->id);
-    assert(marker_db_save_batch(db, store, NULL));
-    assert(marker_db_delete(db, id, NULL));
+    g_assert_true(marker_db_save_batch(db, store, NULL));
+    g_assert_true(marker_db_delete(db, id, NULL));
 
     MarkerStore *loaded = marker_db_load_all(db, FALSE, NULL);
-    assert(marker_store_count(loaded) == 0);
+    g_assert_cmpint(marker_store_count(loaded), ==, 0);
     marker_store_free(loaded);
 
-    assert(marker_db_save_batch(db, store, NULL));
+    g_assert_true(marker_db_save_batch(db, store, NULL));
     loaded = marker_db_load_all(db, FALSE, NULL);
-    assert(marker_store_count(loaded) == 1 && marker_store_find_by_id(loaded, id) != NULL);
+    g_assert_true(marker_store_count(loaded) == 1 && marker_store_find_by_id(loaded, id) != NULL);
     marker_store_free(loaded);
 
     marker_store_free(store);
@@ -696,9 +695,9 @@ test_migrate_json_out_of_range_timestamp(const char *dir)
         int migrated = -1;
 
         write_file(json, bad[i]);
-        assert(!marker_db_migrate_from_json(db, json, &migrated, &error));
-        assert(error != NULL && error->code == MARKER_DB_ERROR_JSON);
-        assert(g_file_test(json, G_FILE_TEST_EXISTS));
+        g_assert_false(marker_db_migrate_from_json(db, json, &migrated, &error));
+        g_assert_true(error != NULL && error->code == MARKER_DB_ERROR_JSON);
+        g_assert_true(g_file_test(json, G_FILE_TEST_EXISTS));
         g_error_free(error);
     }
 
@@ -724,15 +723,15 @@ test_migrate_json_duplicates(const char *dir)
     MarkerDb *db = marker_db_open(dbpath, NULL);
     int migrated = -1;
     GError *error = NULL;
-    assert(marker_db_migrate_from_json(db, json, &migrated, &error));
-    assert(error == NULL && migrated == 2);
-    assert(g_file_test(backup, G_FILE_TEST_IS_REGULAR));
+    g_assert_true(marker_db_migrate_from_json(db, json, &migrated, &error));
+    g_assert_true(error == NULL && migrated == 2);
+    g_assert_true(g_file_test(backup, G_FILE_TEST_IS_REGULAR));
 
     MarkerStore *store = marker_db_load_all(db, FALSE, NULL);
-    assert(marker_store_count(store) == 2);
-    assert(marker_store_find_by_id(store, "a") != NULL);
-    assert(marker_store_find_by_id(store, "b") == NULL);
-    assert(marker_store_find_by_id(store, "c") != NULL);
+    g_assert_cmpint(marker_store_count(store), ==, 2);
+    g_assert_nonnull(marker_store_find_by_id(store, "a"));
+    g_assert_null(marker_store_find_by_id(store, "b"));
+    g_assert_nonnull(marker_store_find_by_id(store, "c"));
     marker_store_free(store);
 
     marker_db_free(db);
@@ -746,7 +745,7 @@ main(void)
 {
     GError *error = NULL;
     char *dir = g_dir_make_tmp("syncview-marker-db-XXXXXX", &error);
-    assert(dir != NULL);
+    g_assert_nonnull(dir);
 
     test_creates_schema(dir);
     test_reopen_is_idempotent(dir);
@@ -769,7 +768,7 @@ main(void)
 
     /* Pulizia della directory temporanea. */
     char *cmd = g_strdup_printf("rm -rf '%s'", dir);
-    assert(system(cmd) == 0);
+    g_assert_cmpint(system(cmd), ==, 0);
     g_free(cmd);
     g_free(dir);
     return 0;

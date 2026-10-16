@@ -1,6 +1,5 @@
 #include "core/logger.h"
 
-#include <assert.h>
 #include <fcntl.h>
 #include <glib.h>
 #include <glib/gstdio.h>
@@ -17,7 +16,7 @@ capture_stderr_begin(const char *path)
     fflush(stderr);
     saved_stderr = dup(2);
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    assert(fd >= 0 && saved_stderr >= 0);
+    g_assert_true(fd >= 0 && saved_stderr >= 0);
     dup2(fd, 2);
     close(fd);
 }
@@ -35,7 +34,7 @@ static char *
 read_file(const char *path)
 {
     char *content = NULL;
-    assert(g_file_get_contents(path, &content, NULL, NULL));
+    g_assert_true(g_file_get_contents(path, &content, NULL, NULL));
 
     /* stderr catturato via open() è in modalità testo su Windows ("\r\n"): normalizza. */
     char *dst = content;
@@ -95,7 +94,7 @@ run_session(const char *dir, const char *tag, gboolean cli_debug, char **file_ou
     g_free(err_dir);
 
     capture_stderr_begin(err_path);
-    assert(logger_init(log_path, cli_debug, NULL));
+    g_assert_true(logger_init(log_path, cli_debug, NULL));
     call_every_log_function();
     logger_shutdown();
     capture_stderr_end();
@@ -114,33 +113,33 @@ test_normal_mode(const char *dir)
     run_session(dir, "normal", FALSE, &file, &err);
 
     /* Requisito centrale: modalità debug disattivata => ZERO byte su stderr, per qualsiasi numero di chiamate. */
-    assert(strlen(err) == 0);
+    g_assert_cmpint(strlen(err), ==, 0);
 
     /* File: intestazione + categorie dell'originale. */
-    assert(strstr(file, "SYNCVIEW - AVVIO APPLICAZIONE") != NULL);
-    assert(strstr(file, "Timestamp: ") != NULL);
-    assert(strstr(file, " - SyncView - INFO - Applicazione SyncView avviata") != NULL);
-    assert(count_occurrences(file, "[AZIONE UTENTE] azione-utente - dettagli-azione") == 20);
-    assert(count_occurrences(file, "[AZIONE UTENTE] azione-senza-dettagli\n") == 20);
-    assert(count_occurrences(file, "INFO - [VIDEO 1] azione-video - dettagli-video") == 20);
-    assert(count_occurrences(file, "[VIDEO 2] Stato riproduzione: playing") == 20);
-    assert(count_occurrences(file, "[VIDEO 3] Timeline seek: 02:05 (125999ms)") == 20);
-    assert(count_occurrences(file, "ERROR - errore-semplice") == 20);
-    assert(count_occurrences(file, "ERROR - errore-con-gerror") == 20);
-    assert(count_occurrences(file, "ERROR - dettaglio-errore") == 20);
-    assert(count_occurrences(file, "INFO - \xe2\x9c\x93 Esportazione completata: clip.mp4") == 20);
-    assert(count_occurrences(file, "ERROR - \xe2\x9c\x97 Esportazione fallita: clip-ko.mp4 - ffmpeg-fallito") == 20);
-    assert(count_occurrences(file, "INFO - [EXPORT] job-creato - id=7") == 20);
+    g_assert_nonnull(strstr(file, "SYNCVIEW - AVVIO APPLICAZIONE"));
+    g_assert_nonnull(strstr(file, "Timestamp: "));
+    g_assert_nonnull(strstr(file, " - SyncView - INFO - Applicazione SyncView avviata"));
+    g_assert_cmpint(count_occurrences(file, "[AZIONE UTENTE] azione-utente - dettagli-azione"), ==, 20);
+    g_assert_cmpint(count_occurrences(file, "[AZIONE UTENTE] azione-senza-dettagli\n"), ==, 20);
+    g_assert_cmpint(count_occurrences(file, "INFO - [VIDEO 1] azione-video - dettagli-video"), ==, 20);
+    g_assert_cmpint(count_occurrences(file, "[VIDEO 2] Stato riproduzione: playing"), ==, 20);
+    g_assert_cmpint(count_occurrences(file, "[VIDEO 3] Timeline seek: 02:05 (125999ms)"), ==, 20);
+    g_assert_cmpint(count_occurrences(file, "ERROR - errore-semplice"), ==, 20);
+    g_assert_cmpint(count_occurrences(file, "ERROR - errore-con-gerror"), ==, 20);
+    g_assert_cmpint(count_occurrences(file, "ERROR - dettaglio-errore"), ==, 20);
+    g_assert_cmpint(count_occurrences(file, "INFO - \xe2\x9c\x93 Esportazione completata: clip.mp4"), ==, 20);
+    g_assert_cmpint(count_occurrences(file, "ERROR - \xe2\x9c\x97 Esportazione fallita: clip-ko.mp4 - ffmpeg-fallito"), ==, 20);
+    g_assert_cmpint(count_occurrences(file, "INFO - [EXPORT] job-creato - id=7"), ==, 20);
 
     /* I dettagli di livello DEBUG non compaiono senza modalità debug. */
-    assert(strstr(file, "sync-dettaglio") == NULL && strstr(file, "[MARKER]") == NULL);
-    assert(strstr(file, "[GST]") == NULL && strstr(file, "[UI]") == NULL);
+    g_assert_true(strstr(file, "sync-dettaglio") == NULL && strstr(file, "[MARKER]") == NULL);
+    g_assert_true(strstr(file, "[GST]") == NULL && strstr(file, "[UI]") == NULL);
 
     /* Formato riga: "YYYY-MM-DD HH:MM:SS.mmm - SyncView - LIVELLO - msg". */
     const char *line = strstr(file, "- SyncView - INFO - [AZIONE UTENTE]");
-    assert(line != NULL);
+    g_assert_nonnull(line);
     line -= 24;  /* lunghezza "YYYY-MM-DD HH:MM:SS.mmm " */
-    assert(line[4] == '-' && line[7] == '-' && line[10] == ' ' && line[13] == ':' && line[16] == ':' && line[19] == '.');
+    g_assert_true(line[4] == '-' && line[7] == '-' && line[10] == ' ' && line[13] == ':' && line[16] == ':' && line[19] == '.');
 
     g_free(file);
     g_free(err);
@@ -160,20 +159,20 @@ test_debug_mode(const char *dir, gboolean via_env)
     g_unsetenv("SYNCVIEW_DEBUG");
 
     /* In debug: tutto anche su stderr, con timestamp, livello e categoria. */
-    assert(count_occurrences(err, "sync-dettaglio-") == 20);
-    assert(strstr(err, " - SyncView - DEBUG - [SYNC] sync-dettaglio-0") != NULL);
-    assert(strstr(err, " - SyncView - DEBUG - [MARKER] marker-dettaglio-x") != NULL);
-    assert(strstr(err, " - SyncView - DEBUG - [GST] gst-dettaglio") != NULL);
-    assert(strstr(err, " - SyncView - DEBUG - [UI] ui-dettaglio") != NULL);
-    assert(strstr(err, "INFO - [AZIONE UTENTE] azione-utente - dettagli-azione") != NULL);
-    assert(strstr(err, "ERROR - errore-semplice") != NULL);
+    g_assert_cmpint(count_occurrences(err, "sync-dettaglio-"), ==, 20);
+    g_assert_nonnull(strstr(err, " - SyncView - DEBUG - [SYNC] sync-dettaglio-0"));
+    g_assert_nonnull(strstr(err, " - SyncView - DEBUG - [MARKER] marker-dettaglio-x"));
+    g_assert_nonnull(strstr(err, " - SyncView - DEBUG - [GST] gst-dettaglio"));
+    g_assert_nonnull(strstr(err, " - SyncView - DEBUG - [UI] ui-dettaglio"));
+    g_assert_nonnull(strstr(err, "INFO - [AZIONE UTENTE] azione-utente - dettagli-azione"));
+    g_assert_nonnull(strstr(err, "ERROR - errore-semplice"));
 
     /* E anche sul file, che contiene ciò che c'è in modalità normale più i dettagli DEBUG. */
-    assert(count_occurrences(file, "sync-dettaglio-") == 20);
-    assert(count_occurrences(file, "[MARKER] marker-dettaglio-x") == 20);
-    assert(count_occurrences(file, "[AZIONE UTENTE] azione-utente - dettagli-azione") == 20);
+    g_assert_cmpint(count_occurrences(file, "sync-dettaglio-"), ==, 20);
+    g_assert_cmpint(count_occurrences(file, "[MARKER] marker-dettaglio-x"), ==, 20);
+    g_assert_cmpint(count_occurrences(file, "[AZIONE UTENTE] azione-utente - dettagli-azione"), ==, 20);
     /* stderr e file hanno le stesse righe di log (l'intestazione di avvio è solo nel file e non ha il prefisso). */
-    assert(count_occurrences(err, "\n") == count_occurrences(file, " - SyncView - "));
+    g_assert_true(count_occurrences(err, "\n") == count_occurrences(file, " - SyncView - "));
 
     g_free(file);
     g_free(err);
@@ -188,7 +187,7 @@ test_env_values(const char *dir)
         g_setenv("SYNCVIEW_DEBUG", off[i], TRUE);
         char *file, *err;
         run_session(dir, "env_off", FALSE, &file, &err);
-        assert(strlen(err) == 0);
+        g_assert_cmpint(strlen(err), ==, 0);
         g_free(file);
         g_free(err);
     }
@@ -210,7 +209,7 @@ test_uninitialized_is_silent(const char *dir)
 
     char *err = read_file(err_path);
     /* Solo la riga "avviata" emessa da init in debug (env) è ammessa: nessuna delle chiamate fuori sessione. */
-    assert(strstr(err, "azione-utente") == NULL && strstr(err, "sync-dettaglio") == NULL);
+    g_assert_true(strstr(err, "azione-utente") == NULL && strstr(err, "sync-dettaglio") == NULL);
     g_free(err);
     g_free(err_path);
     g_unsetenv("SYNCVIEW_DEBUG");
@@ -222,18 +221,18 @@ test_truncates_file_on_open(const char *dir)
     char *path = g_build_filename(dir, "truncate.txt", NULL);
     g_unsetenv("SYNCVIEW_DEBUG");
 
-    assert(logger_init(path, FALSE, NULL));
+    g_assert_true(logger_init(path, FALSE, NULL));
     log_user_action("prima-sessione", NULL);
     logger_shutdown();
 
-    assert(logger_init(path, FALSE, NULL));
+    g_assert_true(logger_init(path, FALSE, NULL));
     log_user_action("seconda-sessione", NULL);
     logger_shutdown();
 
     char *content = read_file(path);
-    assert(strstr(content, "prima-sessione") == NULL);
-    assert(strstr(content, "seconda-sessione") != NULL);
-    assert(count_occurrences(content, "AVVIO APPLICAZIONE") == 1);
+    g_assert_null(strstr(content, "prima-sessione"));
+    g_assert_nonnull(strstr(content, "seconda-sessione"));
+    g_assert_cmpint(count_occurrences(content, "AVVIO APPLICAZIONE"), ==, 1);
 
     g_free(content);
     g_free(path);
@@ -246,19 +245,19 @@ test_open_file_append_does_not_truncate(const char *dir)
     char *path = g_build_filename(dir, "append.txt", NULL);
     g_unsetenv("SYNCVIEW_DEBUG");
 
-    assert(logger_init(NULL, FALSE, NULL));
-    assert(logger_open_file(path, TRUE, NULL));  /* istanza primaria */
+    g_assert_true(logger_init(NULL, FALSE, NULL));
+    g_assert_true(logger_open_file(path, TRUE, NULL));  /* istanza primaria */
     log_user_action("istanza-primaria", NULL);
     logger_shutdown();
 
-    assert(logger_init(NULL, FALSE, NULL));  /* secondo avvio / --check-deps */
-    assert(logger_open_file(path, FALSE, NULL));
+    g_assert_true(logger_init(NULL, FALSE, NULL));  /* secondo avvio / --check-deps */
+    g_assert_true(logger_open_file(path, FALSE, NULL));
     log_user_action("secondo-avvio", NULL);
     logger_shutdown();
 
     char *content = read_file(path);
-    assert(strstr(content, "istanza-primaria") != NULL);
-    assert(strstr(content, "secondo-avvio") != NULL);
+    g_assert_nonnull(strstr(content, "istanza-primaria"));
+    g_assert_nonnull(strstr(content, "secondo-avvio"));
 
     g_free(content);
     g_free(path);
@@ -271,9 +270,9 @@ test_lines_before_open_file_are_flushed(const char *dir)
     char *path = g_build_filename(dir, "pending.txt", NULL);
     g_unsetenv("SYNCVIEW_DEBUG");
 
-    assert(logger_init(NULL, FALSE, NULL));
+    g_assert_true(logger_init(NULL, FALSE, NULL));
     log_user_action("riga-precoce", NULL);
-    assert(logger_open_file(path, TRUE, NULL));
+    g_assert_true(logger_open_file(path, TRUE, NULL));
     log_user_action("riga-tardiva", NULL);
     logger_shutdown();
 
@@ -281,20 +280,20 @@ test_lines_before_open_file_are_flushed(const char *dir)
     char *header = strstr(content, "AVVIO APPLICAZIONE");
     char *early = strstr(content, "riga-precoce");
 
-    assert(header && early && early > header);
-    assert(strstr(content, "Applicazione SyncView avviata") != NULL);
-    assert(strstr(content, "riga-tardiva") != NULL);
+    g_assert_true(header && early && early > header);
+    g_assert_nonnull(strstr(content, "Applicazione SyncView avviata"));
+    g_assert_nonnull(strstr(content, "riga-tardiva"));
     g_free(content);
 
     /* Il buffer non sopravvive a logger_shutdown. */
-    assert(logger_init(NULL, FALSE, NULL));
+    g_assert_true(logger_init(NULL, FALSE, NULL));
     log_user_action("solo-buffer", NULL);
     logger_shutdown();
-    assert(logger_init(NULL, FALSE, NULL));
-    assert(logger_open_file(path, TRUE, NULL));
+    g_assert_true(logger_init(NULL, FALSE, NULL));
+    g_assert_true(logger_open_file(path, TRUE, NULL));
     logger_shutdown();
     content = read_file(path);
-    assert(strstr(content, "solo-buffer") == NULL);
+    g_assert_null(strstr(content, "solo-buffer"));
     g_free(content);
     g_free(path);
 }
@@ -308,19 +307,19 @@ test_gst_debug_propagation(void)
     g_unsetenv("GST_DEBUG");
     logger_init(NULL, TRUE, NULL);
     logger_shutdown();
-    assert(g_strcmp0(g_getenv("GST_DEBUG"), "3") == 0);
+    g_assert_cmpint(g_strcmp0(g_getenv("GST_DEBUG"), "3"), ==, 0);
 
     /* Scelta esplicita dell'utente non sovrascritta. */
     g_setenv("GST_DEBUG", "playbin3:5", TRUE);
     logger_init(NULL, TRUE, NULL);
     logger_shutdown();
-    assert(g_strcmp0(g_getenv("GST_DEBUG"), "playbin3:5") == 0);
+    g_assert_cmpint(g_strcmp0(g_getenv("GST_DEBUG"), "playbin3:5"), ==, 0);
 
     /* Senza debug GST_DEBUG non viene toccata. */
     g_unsetenv("GST_DEBUG");
     logger_init(NULL, FALSE, NULL);
     logger_shutdown();
-    assert(g_getenv("GST_DEBUG") == NULL);
+    g_assert_null(g_getenv("GST_DEBUG"));
 }
 
 /* logger_is_debug_mode(): vero solo con logger inizializzato in debug (flag o variabile d'ambiente). */
@@ -328,20 +327,20 @@ static void
 test_is_debug_mode(void)
 {
     g_unsetenv("SYNCVIEW_DEBUG");
-    assert(!logger_is_debug_mode());  /* prima di init */
+    g_assert_false(logger_is_debug_mode());  /* prima di init */
 
     logger_init(NULL, FALSE, NULL);
-    assert(!logger_is_debug_mode());
+    g_assert_false(logger_is_debug_mode());
     logger_shutdown();
 
     logger_init(NULL, TRUE, NULL);  /* flag --debug */
-    assert(logger_is_debug_mode());
+    g_assert_true(logger_is_debug_mode());
     logger_shutdown();
-    assert(!logger_is_debug_mode());  /* dopo lo shutdown */
+    g_assert_false(logger_is_debug_mode());  /* dopo lo shutdown */
 
     g_setenv("SYNCVIEW_DEBUG", "1", TRUE);  /* variabile d'ambiente */
     logger_init(NULL, FALSE, NULL);
-    assert(logger_is_debug_mode());
+    g_assert_true(logger_is_debug_mode());
     logger_shutdown();
     g_unsetenv("SYNCVIEW_DEBUG");
 }
@@ -351,20 +350,20 @@ test_unwritable_file(const char *dir)
 {
     /* Il path è una directory: init segnala l'errore ma il logger resta utilizzabile (stderr in debug). */
     char *path = g_build_filename(dir, "isdir_log", NULL);
-    assert(g_mkdir_with_parents(path, 0755) == 0);
+    g_assert_cmpint(g_mkdir_with_parents(path, 0755), ==, 0);
     g_unsetenv("SYNCVIEW_DEBUG");
     char *err_path = g_build_filename(dir, "unwritable_stderr.txt", NULL);
 
     GError *error = NULL;
     capture_stderr_begin(err_path);
-    assert(!logger_init(path, TRUE, &error));
-    assert(error != NULL);
+    g_assert_false(logger_init(path, TRUE, &error));
+    g_assert_nonnull(error);
     log_user_action("ancora-vivo", NULL);
     logger_shutdown();
     capture_stderr_end();
 
     char *err = read_file(err_path);
-    assert(strstr(err, "ancora-vivo") != NULL);
+    g_assert_nonnull(strstr(err, "ancora-vivo"));
 
     g_free(err);
     g_error_free(error);
@@ -376,7 +375,7 @@ static void
 test_default_file(void)
 {
     char *f = logger_default_file();
-    assert(g_str_has_suffix(f, "syncview_log.txt") && strstr(f, ".syncview") != NULL);
+    g_assert_true(g_str_has_suffix(f, "syncview_log.txt") && strstr(f, ".syncview") != NULL);
     g_free(f);
 }
 
@@ -384,7 +383,7 @@ int
 main(void)
 {
     char *dir = g_dir_make_tmp("syncview-logger-XXXXXX", NULL);
-    assert(dir != NULL);
+    g_assert_nonnull(dir);
 
     test_normal_mode(dir);
     test_debug_mode(dir, FALSE);
@@ -400,7 +399,7 @@ main(void)
     test_default_file();
 
     char *cmd = g_strdup_printf("rm -rf '%s'", dir);
-    assert(system(cmd) == 0);
+    g_assert_cmpint(system(cmd), ==, 0);
     g_free(cmd);
     g_free(dir);
     return 0;

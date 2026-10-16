@@ -1,6 +1,5 @@
 #include "core/markers.h"
 
-#include <assert.h>
 #include <glib.h>
 #include <string.h>
 
@@ -8,7 +7,7 @@ static void
 assert_sorted(const MarkerStore *store)
 {
     for (size_t i = 1; i < marker_store_count(store); i++) {
-        assert(marker_store_get(store, i - 1)->timestamp_ms <= marker_store_get(store, i)->timestamp_ms);
+        g_assert_true(marker_store_get(store, i - 1)->timestamp_ms <= marker_store_get(store, i)->timestamp_ms);
     }
 }
 
@@ -16,45 +15,45 @@ static void
 test_store_crud(void)
 {
     MarkerStore *store = marker_store_new();
-    assert(marker_store_count(store) == 0);
-    assert(marker_store_get(store, 0) == NULL);
+    g_assert_cmpint(marker_store_count(store), ==, 0);
+    g_assert_null(marker_store_get(store, 0));
 
     const Marker *a = marker_store_add(store, 1000, "#e74c3c", "a", "action", 0);
-    assert(a != NULL);
-    assert(marker_store_count(store) == 1);
-    assert(marker_store_get(store, 0) == a);
-    assert(marker_store_find_by_id(store, a->id) == a);
-    assert(marker_store_find_by_id(store, "inesistente") == NULL);
+    g_assert_nonnull(a);
+    g_assert_cmpint(marker_store_count(store), ==, 1);
+    g_assert_true(marker_store_get(store, 0) == a);
+    g_assert_true(marker_store_find_by_id(store, a->id) == a);
+    g_assert_null(marker_store_find_by_id(store, "inesistente"));
 
     /* update parziale: solo i campi indicati cambiano */
     char *a_id = g_strdup(a->id);
     MarkerUpdate up = { .fields = MARKER_FIELD_COLOR | MARKER_FIELD_DESCRIPTION,
                         .color = "#2ecc71", .description = "nuova" };
     const Marker *u = marker_store_update(store, a_id, &up);
-    assert(u == a);
-    assert(strcmp(u->color, "#2ecc71") == 0);
-    assert(strcmp(u->description, "nuova") == 0);
-    assert(strcmp(u->category, "action") == 0);
-    assert(u->timestamp_ms == 1000 && u->video_index == 0);
+    g_assert_true(u == a);
+    g_assert_cmpstr(u->color, ==, "#2ecc71");
+    g_assert_cmpstr(u->description, ==, "nuova");
+    g_assert_cmpstr(u->category, ==, "action");
+    g_assert_true(u->timestamp_ms == 1000 && u->video_index == 0);
 
     /* description NULL -> "" */
     up = (MarkerUpdate){ .fields = MARKER_FIELD_DESCRIPTION, .description = NULL };
-    assert(strcmp(marker_store_update(store, a_id, &up)->description, "") == 0);
+    g_assert_cmpstr(marker_store_update(store, a_id, &up)->description, ==, "");
 
     up = (MarkerUpdate){ .fields = MARKER_FIELD_VIDEO_INDEX | MARKER_FIELD_CATEGORY,
                          .video_index = SYNCVIEW_MARKER_VIDEO_INDEX_ALL, .category = "note" };
     u = marker_store_update(store, a_id, &up);
-    assert(u->video_index == SYNCVIEW_MARKER_VIDEO_INDEX_ALL && strcmp(u->category, "note") == 0);
+    g_assert_true(u->video_index == SYNCVIEW_MARKER_VIDEO_INDEX_ALL && strcmp(u->category, "note") == 0);
 
     /* update di id inesistente */
-    assert(marker_store_update(store, "inesistente", &up) == NULL);
+    g_assert_null(marker_store_update(store, "inesistente", &up));
 
     /* remove */
-    assert(!marker_store_remove(store, "inesistente"));
-    assert(marker_store_count(store) == 1);
-    assert(marker_store_remove(store, a_id));
-    assert(marker_store_count(store) == 0);
-    assert(!marker_store_remove(store, a_id));
+    g_assert_false(marker_store_remove(store, "inesistente"));
+    g_assert_cmpint(marker_store_count(store), ==, 1);
+    g_assert_true(marker_store_remove(store, a_id));
+    g_assert_cmpint(marker_store_count(store), ==, 0);
+    g_assert_false(marker_store_remove(store, a_id));
 
     g_free(a_id);
     marker_store_free(store);
@@ -72,9 +71,9 @@ test_store_ordering(void)
         marker_store_add(store, ts[i], "#000000", NULL, NULL, SYNCVIEW_MARKER_VIDEO_INDEX_ALL);
         assert_sorted(store);
     }
-    assert(marker_store_count(store) == G_N_ELEMENTS(ts));
-    assert(marker_store_get(store, 0)->timestamp_ms == 1000);
-    assert(marker_store_get(store, 5)->timestamp_ms == 9000);
+    g_assert_true(marker_store_count(store) == G_N_ELEMENTS(ts));
+    g_assert_cmpint(marker_store_get(store, 0)->timestamp_ms, ==, 1000);
+    g_assert_cmpint(marker_store_get(store, 5)->timestamp_ms, ==, 9000);
 
     /* a parità di timestamp vale l'ordine di inserimento (stabile) */
     const Marker *first = marker_store_add(store, 3000, "#000000", "primo", NULL, 0);
@@ -84,25 +83,25 @@ test_store_ordering(void)
         if (marker_store_get(store, i) == first) i_first = i;
         if (marker_store_get(store, i) == second) i_second = i;
     }
-    assert(i_first < i_second);
+    g_assert_true(i_first < i_second);
 
     /* update del timestamp riposiziona il marker */
     char *second_id = g_strdup(second->id);
     MarkerUpdate up = { .fields = MARKER_FIELD_TIMESTAMP, .timestamp_ms = 100 };
     const Marker *moved = marker_store_update(store, second_id, &up);
-    assert(moved->timestamp_ms == 100);
-    assert(marker_store_get(store, 0) == moved);
+    g_assert_cmpint(moved->timestamp_ms, ==, 100);
+    g_assert_true(marker_store_get(store, 0) == moved);
     assert_sorted(store);
 
     up.timestamp_ms = 100000;
     moved = marker_store_update(store, second_id, &up);
-    assert(marker_store_get(store, marker_store_count(store) - 1) == moved);
+    g_assert_true(marker_store_get(store, marker_store_count(store) - 1) == moved);
     assert_sorted(store);
 
     /* remove dal mezzo mantiene l'ordine */
     size_t before = marker_store_count(store);
-    assert(marker_store_remove(store, first->id));
-    assert(marker_store_count(store) == before - 1);
+    g_assert_true(marker_store_remove(store, first->id));
+    g_assert_true(marker_store_count(store) == before - 1);
     assert_sorted(store);
 
     g_free(second_id);
@@ -155,9 +154,9 @@ static void
 check_queries_against_linear(const MarkerStore *store, int64_t t, int64_t tolerance,
                              int64_t range_end)
 {
-    assert(marker_store_get_at(store, t, tolerance) == linear_get_at(store, t, tolerance));
-    assert(marker_store_get_next(store, t) == linear_get_next(store, t));
-    assert(marker_store_get_previous(store, t) == linear_get_previous(store, t));
+    g_assert_true(marker_store_get_at(store, t, tolerance) == linear_get_at(store, t, tolerance));
+    g_assert_true(marker_store_get_next(store, t) == linear_get_next(store, t));
+    g_assert_true(marker_store_get_previous(store, t) == linear_get_previous(store, t));
 
     size_t first = 0;
     size_t n = marker_store_get_range(store, t, range_end, &first);
@@ -172,9 +171,9 @@ check_queries_against_linear(const MarkerStore *store, int64_t t, int64_t tolera
             expected++;
         }
     }
-    assert(n == expected);
+    g_assert_true(n == expected);
     if (n > 0) {
-        assert(first == expected_first);
+        g_assert_true(first == expected_first);
     }
 }
 
@@ -182,10 +181,10 @@ static void
 test_store_queries_empty(void)
 {
     MarkerStore *store = marker_store_new();
-    assert(marker_store_get_at(store, 100, 500) == NULL);
-    assert(marker_store_get_next(store, 100) == NULL);
-    assert(marker_store_get_previous(store, 100) == NULL);
-    assert(marker_store_get_range(store, 0, 1000, NULL) == 0);
+    g_assert_null(marker_store_get_at(store, 100, 500));
+    g_assert_null(marker_store_get_next(store, 100));
+    g_assert_null(marker_store_get_previous(store, 100));
+    g_assert_cmpint(marker_store_get_range(store, 0, 1000, NULL), ==, 0);
     marker_store_free(store);
 }
 
@@ -198,25 +197,25 @@ test_store_queries_basic(void)
     marker_store_add(store, 3000, "#000000", NULL, NULL, 0);
 
     /* next/previous sono strettamente > e < */
-    assert(marker_store_get_next(store, 2000)->timestamp_ms == 3000);
-    assert(marker_store_get_next(store, 3000) == NULL);
-    assert(marker_store_get_previous(store, 2000)->timestamp_ms == 1000);
-    assert(marker_store_get_previous(store, 1000) == NULL);
+    g_assert_cmpint(marker_store_get_next(store, 2000)->timestamp_ms, ==, 3000);
+    g_assert_null(marker_store_get_next(store, 3000));
+    g_assert_cmpint(marker_store_get_previous(store, 2000)->timestamp_ms, ==, 1000);
+    g_assert_null(marker_store_get_previous(store, 1000));
 
     /* get_at: tolleranza inclusiva, pareggio di distanza -> successivo */
-    assert(marker_store_get_at(store, 1500, 500)->timestamp_ms == 2000);
-    assert(marker_store_get_at(store, 2100, 500)->timestamp_ms == 2000);
-    assert(marker_store_get_at(store, 2600, 500)->timestamp_ms == 3000);
-    assert(marker_store_get_at(store, 2500, 500)->timestamp_ms == 3000);
-    assert(marker_store_get_at(store, 5000, 500) == NULL);
-    assert(marker_store_get_at(store, 2100, 50) == NULL);
+    g_assert_cmpint(marker_store_get_at(store, 1500, 500)->timestamp_ms, ==, 2000);
+    g_assert_cmpint(marker_store_get_at(store, 2100, 500)->timestamp_ms, ==, 2000);
+    g_assert_cmpint(marker_store_get_at(store, 2600, 500)->timestamp_ms, ==, 3000);
+    g_assert_cmpint(marker_store_get_at(store, 2500, 500)->timestamp_ms, ==, 3000);
+    g_assert_null(marker_store_get_at(store, 5000, 500));
+    g_assert_null(marker_store_get_at(store, 2100, 50));
 
     /* range inclusivo agli estremi */
     size_t first = 99;
-    assert(marker_store_get_range(store, 1000, 2000, &first) == 2 && first == 0);
-    assert(marker_store_get_range(store, 1001, 1999, &first) == 0);
-    assert(marker_store_get_range(store, 2000, 1000, &first) == 0);
-    assert(marker_store_get_range(store, 0, 10000, NULL) == 3);
+    g_assert_true(marker_store_get_range(store, 1000, 2000, &first) == 2 && first == 0);
+    g_assert_cmpint(marker_store_get_range(store, 1001, 1999, &first), ==, 0);
+    g_assert_cmpint(marker_store_get_range(store, 2000, 1000, &first), ==, 0);
+    g_assert_cmpint(marker_store_get_range(store, 0, 10000, NULL), ==, 3);
 
     marker_store_free(store);
 }
@@ -251,15 +250,15 @@ static void
 test_color_never_null(void)
 {
     Marker *m = marker_new(1000, NULL, NULL, NULL, 0);
-    assert(m != NULL && m->color != NULL && strcmp(m->color, "#3498db") == 0);
+    g_assert_true(m != NULL && m->color != NULL && strcmp(m->color, "#3498db") == 0);
     marker_free(m);
 
     MarkerStore *store = marker_store_new();
     const Marker *added = marker_store_add(store, 1000, "#e74c3c", NULL, NULL, 0);
     MarkerUpdate update = { .fields = MARKER_FIELD_COLOR, .color = NULL };
     const Marker *updated = marker_store_update(store, added->id, &update);
-    assert(updated != NULL && updated->color != NULL);
-    assert(strcmp(updated->color, "#3498db") == 0);
+    g_assert_true(updated != NULL && updated->color != NULL);
+    g_assert_cmpstr(updated->color, ==, "#3498db");
     marker_store_free(store);
 }
 
@@ -268,37 +267,37 @@ main(void)
 {
     /* Default: description e category NULL -> "" e "default" */
     Marker *m1 = marker_new(1000, "#3498db", NULL, NULL, SYNCVIEW_MARKER_VIDEO_INDEX_ALL);
-    assert(m1 != NULL);
-    assert(m1->timestamp_ms == 1000);
-    assert(strcmp(m1->color, "#3498db") == 0);
-    assert(strcmp(m1->description, "") == 0);
-    assert(strcmp(m1->category, "default") == 0);
-    assert(m1->video_index == SYNCVIEW_MARKER_VIDEO_INDEX_ALL);
+    g_assert_nonnull(m1);
+    g_assert_cmpint(m1->timestamp_ms, ==, 1000);
+    g_assert_cmpstr(m1->color, ==, "#3498db");
+    g_assert_cmpstr(m1->description, ==, "");
+    g_assert_cmpstr(m1->category, ==, "default");
+    g_assert_true(m1->video_index == SYNCVIEW_MARKER_VIDEO_INDEX_ALL);
 
     /* id generato, non NULL, formato "marker_<timestamp>_<epoch>" */
-    assert(m1->id != NULL);
-    assert(strncmp(m1->id, "marker_1000_", strlen("marker_1000_")) == 0);
+    g_assert_nonnull(m1->id);
+    g_assert_cmpint(strncmp(m1->id, "marker_1000_", strlen("marker_1000_")), ==, 0);
 
     /* created_at generato, formato ISO8601 (almeno "YYYY-MM-DDT" all'inizio) */
-    assert(m1->created_at != NULL);
-    assert(strlen(m1->created_at) >= 10);
-    assert(m1->created_at[4] == '-' && m1->created_at[7] == '-' && m1->created_at[10] == 'T');
+    g_assert_nonnull(m1->created_at);
+    g_assert_true(strlen(m1->created_at) >= 10);
+    g_assert_true(m1->created_at[4] == '-' && m1->created_at[7] == '-' && m1->created_at[10] == 'T');
 
     marker_free(m1);
 
     /* Valori espliciti, video_index specifico */
     Marker *m2 = marker_new(2500, "#e74c3c", "nota di test", "action", 2);
-    assert(m2 != NULL);
-    assert(strcmp(m2->description, "nota di test") == 0);
-    assert(strcmp(m2->category, "action") == 0);
-    assert(m2->video_index == 2);
+    g_assert_nonnull(m2);
+    g_assert_cmpstr(m2->description, ==, "nota di test");
+    g_assert_cmpstr(m2->category, ==, "action");
+    g_assert_cmpint(m2->video_index, ==, 2);
     marker_free(m2);
 
     /* Due marker creati con lo stesso timestamp devono avere id diversi
      * (componente epoch con precisione al microsecondo). */
     Marker *a = marker_new(5000, "#000000", NULL, NULL, SYNCVIEW_MARKER_VIDEO_INDEX_ALL);
     Marker *b = marker_new(5000, "#000000", NULL, NULL, SYNCVIEW_MARKER_VIDEO_INDEX_ALL);
-    assert(strcmp(a->id, b->id) != 0);
+    g_assert_cmpstr(a->id, !=, b->id);
     marker_free(a);
     marker_free(b);
 
@@ -312,13 +311,13 @@ main(void)
     }
     for (int i = 0; i < N_BURST; i++) {
         for (int j = i + 1; j < N_BURST; j++) {
-            assert(strcmp(burst[i]->id, burst[j]->id) != 0);
-            assert(strcmp(burst[i]->created_at, burst[j]->created_at) != 0);
+            g_assert_cmpstr(burst[i]->id, !=, burst[j]->id);
+            g_assert_cmpstr(burst[i]->created_at, !=, burst[j]->created_at);
         }
     }
     /* created_at crescente nell'ordine di creazione. */
     for (int i = 1; i < N_BURST; i++) {
-        assert(strcmp(burst[i - 1]->created_at, burst[i]->created_at) < 0);
+        g_assert_true(strcmp(burst[i - 1]->created_at, burst[i]->created_at) < 0);
     }
     for (int i = 0; i < N_BURST; i++) {
         marker_free(burst[i]);

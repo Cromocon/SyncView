@@ -1,6 +1,6 @@
 #include "util/time_format.h"
 
-#include <assert.h>
+#include <glib.h>
 #include <string.h>
 
 static void
@@ -8,7 +8,7 @@ check(int64_t ms, const char *expected)
 {
     char buf[SYNCVIEW_TIME_FORMAT_BUFSIZE];
     syncview_format_time_ms(ms, buf, sizeof(buf));
-    assert(strcmp(buf, expected) == 0);
+    g_assert_cmpstr(buf, ==, expected);
 }
 
 int

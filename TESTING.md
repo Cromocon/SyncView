@@ -83,7 +83,7 @@ Ogni voce corrisponde a una sotto-milestone già implementata e pushata su `Sync
 
 ### M0.4 — Test scaffolding
 
-- [ ] `meson test -C build` include `syncview:dummy` → **OK** (all'epoca era l'unico test; il totale attuale è nel **Riepilogo atteso** in fondo).
+- [ ] `meson test -C build` include `syncview:time_format` → **OK** (il totale attuale è nel **Riepilogo atteso** in fondo).
 - [ ] Il log completo è consultabile in `build/meson-logs/testlog.txt`.
 
 ### M0.5 — Documentazione
@@ -395,7 +395,7 @@ Uso: `SYNCVIEW_TEST_CLIPS=~/Downloads/Videos tools/on-desktop9.sh meson test -C 
 ```
 meson test -C build
 ```
-deve riportare **23/23** allo stato attuale (`dummy`, `time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`, `discoverer`, `frame_index`, `video_player`, `deps_check`, `design_tokens`, `main_window`, `debug_windows`, `dep_archive`, `dep_installer`, `real_clips`, `deps_state`, `deps_dialog`); `real_clips` è `SKIP` senza `SYNCVIEW_TEST_CLIPS`; in un ambiente senza display o senza `gtk4paintablesink` `video_player` e `main_window` risultano `SKIP` (e `debug_windows` senza display) (e `discoverer` se mancano i plugin di prova): è normale.
+deve riportare **22/22** allo stato attuale (`time_format`, `settings`, `sync_manager`, `markers`, `marker_db`, `user_paths`, `logger`, `no_adhoc_logging`, `module_logging`, `logger_filter`, `discoverer`, `frame_index`, `video_player`, `deps_check`, `design_tokens`, `main_window`, `debug_windows`, `dep_archive`, `dep_installer`, `real_clips`, `deps_state`, `deps_dialog`); `real_clips` è `SKIP` senza `SYNCVIEW_TEST_CLIPS`; in un ambiente senza display o senza `gtk4paintablesink` `video_player` e `main_window` risultano `SKIP` (e `debug_windows` senza display) (e `discoverer` se mancano i plugin di prova): è normale.
 
 ---
 

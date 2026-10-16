@@ -1,7 +1,7 @@
 /* M2.11: estrazione sicura di archivi ZIP (core/dep_archive) con archivi validi e malevoli costruiti in memoria. */
 #include "zip_builder.h"
 
-#include <assert.h>
+#include <glib.h>
 #include <glib/gstdio.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,7 +18,7 @@ new_dest(void)
 {
     char *dest = g_strdup_printf("%s/out-%d", root, counter++);
 
-    assert(g_mkdir_with_parents(dest, 0700) == 0);
+    g_assert_cmpint(g_mkdir_with_parents(dest, 0700), ==, 0);
     return dest;
 }
 
@@ -30,7 +30,7 @@ write_zip(const ZipEntry *entries, size_t n)
     gsize size;
     const char *data = g_bytes_get_data(zip, &size);
 
-    assert(g_file_set_contents(path, data, size, NULL));
+    g_assert_true(g_file_set_contents(path, data, size, NULL));
     g_bytes_unref(zip);
     return path;
 }
@@ -91,13 +91,13 @@ expect_rejected(const ZipEntry *entries, size_t n, DepArchiveError code, int str
     GError *error = NULL;
 
     g_remove(outside);
-    assert(!dep_archive_extract_zip(zip, dest, strip, max_total, &error));
-    assert(error != NULL);
+    g_assert_false(dep_archive_extract_zip(zip, dest, strip, max_total, &error));
+    g_assert_nonnull(error);
     if (!g_error_matches(error, DEP_ARCHIVE_ERROR, code)) {
         g_printerr("codice errore inatteso: %d (%s), atteso %d\n", error->code, error->message, code);
         abort();
     }
-    assert(!g_file_test(outside, G_FILE_TEST_EXISTS));  /* nessun file fuori dalla destinazione */
+    g_assert_false(g_file_test(outside, G_FILE_TEST_EXISTS));  /* nessun file fuori dalla destinazione */
     g_error_free(error);
     g_free(outside);
     g_free(dest);
@@ -125,42 +125,42 @@ test_valid_archive(void)
     char *dest = new_dest();
     GError *error = NULL;
 
-    assert(dep_archive_extract_zip(zip, dest, 1, 0, &error));  /* strip 1: «pacchetto/» sparisce */
-    assert(error == NULL);
+    g_assert_true(dep_archive_extract_zip(zip, dest, 1, 0, &error));  /* strip 1: «pacchetto/» sparisce */
+    g_assert_null(error);
 
     char *p = g_build_filename(dest, "bin", "ffmpeg", NULL);
     char *text = read_text(p);
 
-    assert(text && strcmp(text, "ciao mondo") == 0);
+    g_assert_true(text && strcmp(text, "ciao mondo") == 0);
     g_free(text);
 #ifdef G_OS_UNIX
     struct stat st;
 
-    assert(stat(p, &st) == 0 && (st.st_mode & 0111) != 0);  /* il bit di esecuzione è rispettato */
+    g_assert_true(stat(p, &st) == 0 && (st.st_mode & 0111) != 0);  /* il bit di esecuzione è rispettato */
 #endif
     g_free(p);
 
     p = g_build_filename(dest, "leggimi.txt", NULL);
     text = read_text(p);
-    assert(text && strlen(text) == sizeof big && memcmp(text, big, sizeof big) == 0);
+    g_assert_true(text && strlen(text) == sizeof big && memcmp(text, big, sizeof big) == 0);
     g_free(text);
     g_free(p);
 #ifdef G_OS_UNIX
     p = g_build_filename(dest, "note.txt", NULL);
-    assert(stat(p, &st) == 0 && (st.st_mode & 0111) == 0);
+    g_assert_true(stat(p, &st) == 0 && (st.st_mode & 0111) == 0);
     g_free(p);
 #endif
     p = g_build_filename(dest, "vuoto.txt", NULL);
-    assert(g_file_test(p, G_FILE_TEST_EXISTS));
+    g_assert_true(g_file_test(p, G_FILE_TEST_EXISTS));
     g_free(p);
-    assert(count_files(dest) == 4);
+    g_assert_cmpint(count_files(dest), ==, 4);
 
     /* Senza strip la cartella resta. */
     char *dest2 = new_dest();
 
-    assert(dep_archive_extract_zip(zip, dest2, 0, 0, &error));
+    g_assert_true(dep_archive_extract_zip(zip, dest2, 0, 0, &error));
     p = g_build_filename(dest2, "pacchetto", "bin", "ffmpeg", NULL);
-    assert(g_file_test(p, G_FILE_TEST_EXISTS));
+    g_assert_true(g_file_test(p, G_FILE_TEST_EXISTS));
     g_free(p);
 
     g_free(dest2);
@@ -290,9 +290,9 @@ test_malformed_files(void)
     char *path = g_strdup_printf("%s/garbage.zip", root);
     GError *error = NULL;
 
-    assert(g_file_set_contents(path, "questo non e' uno zip, e basta, davvero davvero", -1, NULL));
-    assert(!dep_archive_extract_zip(path, dest, 0, 0, &error));
-    assert(g_error_matches(error, DEP_ARCHIVE_ERROR, DEP_ARCHIVE_ERROR_FORMAT));
+    g_assert_true(g_file_set_contents(path, "questo non e' uno zip, e basta, davvero davvero", -1, NULL));
+    g_assert_false(dep_archive_extract_zip(path, dest, 0, 0, &error));
+    g_assert_true(g_error_matches(error, DEP_ARCHIVE_ERROR, DEP_ARCHIVE_ERROR_FORMAT));
     g_clear_error(&error);
 
     /* Troncato a metà: fine della directory centrale mancante. */
@@ -302,15 +302,15 @@ test_malformed_files(void)
     gsize size;
     const char *bytes = g_bytes_get_data(zip, &size);
 
-    assert(g_file_set_contents(path, bytes, size / 2, NULL));
-    assert(!dep_archive_extract_zip(path, dest, 0, 0, &error));
-    assert(g_error_matches(error, DEP_ARCHIVE_ERROR, DEP_ARCHIVE_ERROR_FORMAT));
+    g_assert_true(g_file_set_contents(path, bytes, size / 2, NULL));
+    g_assert_false(dep_archive_extract_zip(path, dest, 0, 0, &error));
+    g_assert_true(g_error_matches(error, DEP_ARCHIVE_ERROR, DEP_ARCHIVE_ERROR_FORMAT));
     g_clear_error(&error);
 
     /* File inesistente: errore di I/O, nessun crash. */
-    assert(!dep_archive_extract_zip("/non/esiste.zip", dest, 0, 0, &error));
+    g_assert_false(dep_archive_extract_zip("/non/esiste.zip", dest, 0, 0, &error));
     g_clear_error(&error);
-    assert(!dep_archive_extract_zip("/non/esiste.zip", dest, 0, 0, NULL));  /* error NULL non fa crashare */
+    g_assert_false(dep_archive_extract_zip("/non/esiste.zip", dest, 0, 0, NULL));  /* error NULL non fa crashare */
 
     g_bytes_unref(zip);
     g_free(path);
@@ -321,19 +321,19 @@ static void
 test_crc32(void)
 {
     /* Valore noto: CRC-32 di «123456789» = 0xCBF43926. */
-    assert(dep_crc32(0, (const guchar *)"123456789", 9) == 0xCBF43926u);
-    assert(dep_crc32(0, (const guchar *)"", 0) == 0);
+    g_assert_true(dep_crc32(0, (const guchar *)"123456789", 9) == 0xCBF43926u);
+    g_assert_cmpint(dep_crc32(0, (const guchar *)"", 0), ==, 0);
     /* Calcolo a pezzi = calcolo in un colpo. */
     guint32 part = dep_crc32(0, (const guchar *)"12345", 5);
 
-    assert(dep_crc32(part, (const guchar *)"6789", 4) == 0xCBF43926u);
+    g_assert_true(dep_crc32(part, (const guchar *)"6789", 4) == 0xCBF43926u);
 }
 
 int
 main(void)
 {
     root = g_dir_make_tmp("syncview-archive-XXXXXX", NULL);
-    assert(root != NULL);
+    g_assert_nonnull(root);
 
     test_crc32();
     test_valid_archive();
