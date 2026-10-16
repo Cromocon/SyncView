@@ -10,7 +10,6 @@
 #include "ui/theme.h"
 #include "video/video_player.h"
 
-#include <assert.h>
 #include <glib.h>
 #include <glib/gstdio.h>
 #include <gst/gst.h>
@@ -90,7 +89,7 @@ make_video(const char *name, int frames)
     GError *error = NULL;
     GstElement *pipeline = gst_parse_launch(desc, &error);
 
-    assert(pipeline != NULL && error == NULL);
+    g_assert_true(pipeline != NULL && error == NULL);
     GstElement *out = gst_bin_get_by_name(GST_BIN(pipeline), "out");
 
     g_object_set(out, "location", path, NULL);
@@ -99,7 +98,7 @@ make_video(const char *name, int frames)
     GstBus *bus = gst_element_get_bus(pipeline);
     GstMessage *msg = gst_bus_timed_pop_filtered(bus, 30 * GST_SECOND, GST_MESSAGE_EOS | GST_MESSAGE_ERROR);
 
-    assert(msg != NULL && GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS);
+    g_assert_true(msg != NULL && GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS);
     gst_message_unref(msg);
     gst_object_unref(bus);
     gst_element_set_state(pipeline, GST_STATE_NULL);
@@ -163,7 +162,7 @@ static void
 close_window(GtkWidget *window)
 {
     gtk_window_destroy(GTK_WINDOW(window));
-    assert(drain_teardowns(15000));
+    g_assert_true(drain_teardowns(15000));
 }
 
 static void
@@ -171,7 +170,7 @@ click(GtkWidget *window, const char *name)
 {
     GtkWidget *button = syncview_main_window_get_widget(window, name);
 
-    assert(button != NULL && gtk_widget_get_sensitive(button));
+    g_assert_true(button != NULL && gtk_widget_get_sensitive(button));
     g_signal_emit_by_name(button, "clicked");
 }
 
@@ -180,7 +179,7 @@ label_of(GtkWidget *window, const char *name)
 {
     GtkWidget *widget = syncview_main_window_get_widget(window, name);
 
-    assert(widget != NULL);
+    g_assert_true(widget != NULL);
     return GTK_IS_LABEL(widget) ? gtk_label_get_text(GTK_LABEL(widget)) : gtk_button_get_label(GTK_BUTTON(widget));
 }
 
@@ -195,14 +194,14 @@ test_theme_has_no_css_errors(void)
 
     /* Entrambi i fogli di stile generati devono essere accettati da GTK senza errori di analisi. */
     syncview_theme_set_choice(SYNCVIEW_THEME_DARK);
-    assert(syncview_theme_is_dark());
+    g_assert_true(syncview_theme_is_dark());
     syncview_theme_set_choice(SYNCVIEW_THEME_LIGHT);
-    assert(!syncview_theme_is_dark());
+    g_assert_true(!syncview_theme_is_dark());
     syncview_theme_set_choice(SYNCVIEW_THEME_DARK);
-    assert(syncview_theme_is_dark());
-    assert(syncview_theme_parse_errors() == 0);
+    g_assert_true(syncview_theme_is_dark());
+    g_assert_true(syncview_theme_parse_errors() == 0);
     syncview_theme_set_choice(SYNCVIEW_THEME_LIGHT);
-    assert(syncview_theme_parse_errors() == 0);
+    g_assert_true(syncview_theme_parse_errors() == 0);
 }
 
 static void
@@ -211,18 +210,18 @@ test_empty_window(void)
     char *paths_file = g_build_filename(tmp_dir, "empty-paths.json", NULL);
     GtkWidget *window = new_window(paths_file);
 
-    assert(syncview_main_window_get_state(window) == SYNCVIEW_MAIN_WINDOW_EMPTY);
-    assert(syncview_main_window_get_player(window) != NULL);
-    assert(strcmp(label_of(window, "card-title"), "Nessun video") == 0);
-    assert(!gtk_widget_get_sensitive(syncview_main_window_get_widget(window, "play")));
-    assert(!gtk_widget_get_sensitive(syncview_main_window_get_widget(window, "seek")));
+    g_assert_true(syncview_main_window_get_state(window) == SYNCVIEW_MAIN_WINDOW_EMPTY);
+    g_assert_true(syncview_main_window_get_player(window) != NULL);
+    g_assert_true(strcmp(label_of(window, "card-title"), "Nessun video") == 0);
+    g_assert_true(!gtk_widget_get_sensitive(syncview_main_window_get_widget(window, "play")));
+    g_assert_true(!gtk_widget_get_sensitive(syncview_main_window_get_widget(window, "seek")));
     const char *steps[] = { "step-m10", "step-m1", "step-p1", "step-p10" };
 
     for (int i = 0; i < 4; i++) {
-        assert(!gtk_widget_get_sensitive(syncview_main_window_get_widget(window, steps[i])));
+        g_assert_true(!gtk_widget_get_sensitive(syncview_main_window_get_widget(window, steps[i])));
     }
     /* Il pulsante «Carica video» c'è e funziona da subito. */
-    assert(gtk_widget_get_sensitive(syncview_main_window_get_widget(window, "open")));
+    g_assert_true(gtk_widget_get_sensitive(syncview_main_window_get_widget(window, "open")));
 
     close_window(window);
     g_free(paths_file);
@@ -236,55 +235,55 @@ test_open_play_step_close(void)
     GtkWidget *window = new_window(paths_file);
     SyncviewVideoPlayer *player = syncview_main_window_get_player(window);
 
-    assert(syncview_main_window_open_file(window, video));
-    assert(syncview_main_window_get_state(window) == SYNCVIEW_MAIN_WINDOW_LOADING);
-    assert(strcmp(label_of(window, "card-title"), "Analisi del file…") == 0);
-    assert(spin_until_state(window, SYNCVIEW_MAIN_WINDOW_LOADED, 15000));
+    g_assert_true(syncview_main_window_open_file(window, video));
+    g_assert_true(syncview_main_window_get_state(window) == SYNCVIEW_MAIN_WINDOW_LOADING);
+    g_assert_true(strcmp(label_of(window, "card-title"), "Analisi del file…") == 0);
+    g_assert_true(spin_until_state(window, SYNCVIEW_MAIN_WINDOW_LOADED, 15000));
 
     /* Caricato: comandi attivi, durata e tempo mostrati. */
-    assert(gtk_widget_get_sensitive(syncview_main_window_get_widget(window, "play")));
-    assert(gtk_widget_get_sensitive(syncview_main_window_get_widget(window, "seek")));
-    assert(strcmp(label_of(window, "time"), "00:00.000") == 0);
-    assert(strcmp(label_of(window, "play"), "Play") == 0);
-    assert(syncview_video_player_get_duration(player) > 3500);
+    g_assert_true(gtk_widget_get_sensitive(syncview_main_window_get_widget(window, "play")));
+    g_assert_true(gtk_widget_get_sensitive(syncview_main_window_get_widget(window, "seek")));
+    g_assert_true(strcmp(label_of(window, "time"), "00:00.000") == 0);
+    g_assert_true(strcmp(label_of(window, "play"), "Play") == 0);
+    g_assert_true(syncview_video_player_get_duration(player) > 3500);
 
     /* O3: dopo il caricamento riuscito il percorso è nel file. */
     char *saved = read_file(paths_file);
 
-    assert(saved != NULL && strstr(saved, "play.webm") != NULL);
+    g_assert_true(saved != NULL && strstr(saved, "play.webm") != NULL);
     g_free(saved);
 
     /* Play dal pulsante: parte, il pulsante diventa «Pausa» e il tempo avanza. */
     click(window, "play");
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
-    assert(strcmp(label_of(window, "play"), "Pausa") == 0);
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PLAYING);
+    g_assert_true(strcmp(label_of(window, "play"), "Pausa") == 0);
     spin_for(600);
     if (frame_clock_ticks(window)) {
-        assert(strcmp(label_of(window, "time"), "00:00.000") != 0);
+        g_assert_true(strcmp(label_of(window, "time"), "00:00.000") != 0);
     } else {
         g_printerr("frame clock assente (finestra non visibile): avanzamento del tempo in play non verificato\n");
     }
 
     click(window, "play");
-    assert(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
-    assert(strcmp(label_of(window, "play"), "Play") == 0);
+    g_assert_true(syncview_video_player_get_playback_state(player) == SYNCVIEW_PLAYBACK_PAUSED);
+    g_assert_true(strcmp(label_of(window, "play"), "Play") == 0);
     spin_for(300);
 
     /* Seek come dalla barra: la barra e il tempo seguono. */
-    assert(syncview_video_player_seek(player, 2000, NULL));
+    g_assert_true(syncview_video_player_seek(player, 2000, NULL));
     spin_for(600);
     GtkWidget *scale = syncview_main_window_get_widget(window, "seek");
 
-    assert(gtk_range_get_value(GTK_RANGE(scale)) > 1900 && gtk_range_get_value(GTK_RANGE(scale)) < 2100);
-    assert(strcmp(label_of(window, "time"), "00:02.000") == 0);
+    g_assert_true(gtk_range_get_value(GTK_RANGE(scale)) > 1900 && gtk_range_get_value(GTK_RANGE(scale)) < 2100);
+    g_assert_true(strcmp(label_of(window, "time"), "00:02.000") == 0);
 
     /* Passo di un frame dal pulsante: avanza di 40 ms esatti. */
     click(window, "step-p1");
     spin_for(800);
-    assert(strcmp(label_of(window, "time"), "00:02.040") == 0);
+    g_assert_true(strcmp(label_of(window, "time"), "00:02.040") == 0);
     click(window, "step-m1");
     spin_for(800);
-    assert(strcmp(label_of(window, "time"), "00:02.000") == 0);
+    g_assert_true(strcmp(label_of(window, "time"), "00:02.000") == 0);
 
     close_window(window);
     g_free(paths_file);
@@ -300,40 +299,40 @@ test_o3_failed_load_does_not_touch_saved_paths(void)
     char *missing = g_build_filename(tmp_dir, "non-esiste.mp4", NULL);
     GtkWidget *window = new_window(paths_file);
 
-    assert(g_file_set_contents(garbage, "questo non e' un video", -1, NULL));
+    g_assert_true(g_file_set_contents(garbage, "questo non e' un video", -1, NULL));
 
-    assert(syncview_main_window_open_file(window, video));
-    assert(spin_until_state(window, SYNCVIEW_MAIN_WINDOW_LOADED, 15000));
+    g_assert_true(syncview_main_window_open_file(window, video));
+    g_assert_true(spin_until_state(window, SYNCVIEW_MAIN_WINDOW_LOADED, 15000));
     char *before = read_file(paths_file);
 
-    assert(before != NULL && strstr(before, "o3.webm") != NULL);
+    g_assert_true(before != NULL && strstr(before, "o3.webm") != NULL);
 
     /* File non riproducibile: errore nella finestra, file dei percorsi identico byte per byte. */
-    assert(syncview_main_window_open_file(window, garbage));  /* il caricamento parte; l'esito è asincrono */
-    assert(spin_until_state(window, SYNCVIEW_MAIN_WINDOW_ERROR, 15000));
-    assert(strcmp(label_of(window, "card-title"), "Impossibile riprodurre il video") == 0);
-    assert(strstr(label_of(window, "card-detail"), "rotto.mp4") != NULL);
-    assert(!gtk_widget_get_sensitive(syncview_main_window_get_widget(window, "play")));
+    g_assert_true(syncview_main_window_open_file(window, garbage));  /* il caricamento parte; l'esito è asincrono */
+    g_assert_true(spin_until_state(window, SYNCVIEW_MAIN_WINDOW_ERROR, 15000));
+    g_assert_true(strcmp(label_of(window, "card-title"), "Impossibile riprodurre il video") == 0);
+    g_assert_true(strstr(label_of(window, "card-detail"), "rotto.mp4") != NULL);
+    g_assert_true(!gtk_widget_get_sensitive(syncview_main_window_get_widget(window, "play")));
     char *after_garbage = read_file(paths_file);
 
-    assert(after_garbage != NULL && strcmp(before, after_garbage) == 0);
+    g_assert_true(after_garbage != NULL && strcmp(before, after_garbage) == 0);
 
     /* File inesistente: errore subito, ancora nessuna modifica. */
-    assert(!syncview_main_window_open_file(window, missing));
-    assert(syncview_main_window_get_state(window) == SYNCVIEW_MAIN_WINDOW_ERROR);
-    assert(strcmp(label_of(window, "card-title"), "File spostato o non trovato") == 0);
+    g_assert_true(!syncview_main_window_open_file(window, missing));
+    g_assert_true(syncview_main_window_get_state(window) == SYNCVIEW_MAIN_WINDOW_ERROR);
+    g_assert_true(strcmp(label_of(window, "card-title"), "File spostato o non trovato") == 0);
     char *after_missing = read_file(paths_file);
 
-    assert(after_missing != NULL && strcmp(before, after_missing) == 0);
+    g_assert_true(after_missing != NULL && strcmp(before, after_missing) == 0);
 
     /* Dopo gli errori si può caricare di nuovo un video valido: ora il percorso cambia. */
     char *second = make_video("o3-second.webm", 25);
 
-    assert(syncview_main_window_open_file(window, second));
-    assert(spin_until_state(window, SYNCVIEW_MAIN_WINDOW_LOADED, 15000));
+    g_assert_true(syncview_main_window_open_file(window, second));
+    g_assert_true(spin_until_state(window, SYNCVIEW_MAIN_WINDOW_LOADED, 15000));
     char *after_second = read_file(paths_file);
 
-    assert(after_second != NULL && strstr(after_second, "o3-second.webm") != NULL);
+    g_assert_true(after_second != NULL && strstr(after_second, "o3-second.webm") != NULL);
 
     g_free(second);
     g_free(after_second);
@@ -354,26 +353,26 @@ test_saved_video_is_reloaded_at_startup(void)
     char *paths_file = g_build_filename(tmp_dir, "startup-paths.json", NULL);
     GtkWidget *first = new_window(paths_file);
 
-    assert(syncview_main_window_open_file(first, video));
-    assert(spin_until_state(first, SYNCVIEW_MAIN_WINDOW_LOADED, 15000));
+    g_assert_true(syncview_main_window_open_file(first, video));
+    g_assert_true(spin_until_state(first, SYNCVIEW_MAIN_WINDOW_LOADED, 15000));
     close_window(first);
 
     /* Nuova finestra: ricarica da sola il video salvato. */
     GtkWidget *second = new_window(paths_file);
 
-    assert(syncview_main_window_get_state(second) == SYNCVIEW_MAIN_WINDOW_LOADING ||
+    g_assert_true(syncview_main_window_get_state(second) == SYNCVIEW_MAIN_WINDOW_LOADING ||
            syncview_main_window_get_state(second) == SYNCVIEW_MAIN_WINDOW_LOADED);
-    assert(spin_until_state(second, SYNCVIEW_MAIN_WINDOW_LOADED, 15000));
+    g_assert_true(spin_until_state(second, SYNCVIEW_MAIN_WINDOW_LOADED, 15000));
     close_window(second);
 
     /* Se il file non c'è più: finestra vuota e percorso tolto dal file (get_valid_video_paths). */
-    assert(g_remove(video) == 0);
+    g_assert_true(g_remove(video) == 0);
     GtkWidget *third = new_window(paths_file);
 
-    assert(syncview_main_window_get_state(third) == SYNCVIEW_MAIN_WINDOW_EMPTY);
+    g_assert_true(syncview_main_window_get_state(third) == SYNCVIEW_MAIN_WINDOW_EMPTY);
     char *saved = read_file(paths_file);
 
-    assert(saved != NULL && strstr(saved, "startup.webm") == NULL);
+    g_assert_true(saved != NULL && strstr(saved, "startup.webm") == NULL);
     g_free(saved);
     close_window(third);
 
@@ -390,13 +389,13 @@ test_close_while_loading_and_playing(void)
     for (int i = 0; i < 6; i++) {
         GtkWidget *window = new_window(paths_file);
 
-        assert(syncview_main_window_open_file(window, video));
+        g_assert_true(syncview_main_window_open_file(window, video));
         if (i % 2) {
             /* Chiusa a metà del caricamento. */
             spin_for(i * 10);
         } else {
             /* Chiusa in riproduzione. */
-            assert(spin_until_state(window, SYNCVIEW_MAIN_WINDOW_LOADED, 15000));
+            g_assert_true(spin_until_state(window, SYNCVIEW_MAIN_WINDOW_LOADED, 15000));
             click(window, "play");
             spin_for(200);
         }
@@ -508,37 +507,37 @@ test_dependencies_menu_and_missing_plugin(void)
     syncview_main_window_set_deps_options(window, &options);
 
     /* Voce di menu «Verifica dipendenze»: apre la finestra «Preparazione di SyncView» (qui manca molto). */
-    assert(syncview_main_window_get_widget(window, "menu") != NULL);
-    assert(syncview_deps_dialog_find(GTK_WINDOW(window)) == NULL);
+    g_assert_true(syncview_main_window_get_widget(window, "menu") != NULL);
+    g_assert_true(syncview_deps_dialog_find(GTK_WINDOW(window)) == NULL);
     click(window, "menu-deps");
     GtkWidget *dialog = wait_for_deps_dialog(window, 10000);
 
-    assert(dialog != NULL && syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);
-    assert(gtk_window_get_transient_for(GTK_WINDOW(dialog)) == GTK_WINDOW(window));
+    g_assert_true(dialog != NULL && syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);
+    g_assert_true(gtk_window_get_transient_for(GTK_WINDOW(dialog)) == GTK_WINDOW(window));
     close_deps_dialog(dialog);
 
     /* Un decoder che manca davvero: l'errore del player riapre da solo la verifica, e la scheda lo dice. */
     char *video = make_video("noplugin.webm", 25);
     GPtrArray *saved = demote_vp8_decoders();
 
-    assert(saved->len > 0);  /* almeno un decoder VP8 nel registry (vp8dec o libav) */
-    assert(syncview_main_window_open_file(window, video));
-    assert(spin_until_state(window, SYNCVIEW_MAIN_WINDOW_ERROR, 20000));
-    assert(strcmp(label_of(window, "card-title"), "Manca un decoder per questo video") == 0);
+    g_assert_true(saved->len > 0);  /* almeno un decoder VP8 nel registry (vp8dec o libav) */
+    g_assert_true(syncview_main_window_open_file(window, video));
+    g_assert_true(spin_until_state(window, SYNCVIEW_MAIN_WINDOW_ERROR, 20000));
+    g_assert_true(strcmp(label_of(window, "card-title"), "Manca un decoder per questo video") == 0);
     dialog = wait_for_deps_dialog(window, 10000);
-    assert(dialog != NULL && syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);
+    g_assert_true(dialog != NULL && syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);
     close_deps_dialog(dialog);
     restore_ranks(saved);
 
     /* Un file rotto NON è un plugin mancante: nessuna finestra. */
     char *broken = g_build_filename(tmp_dir, "broken-deps.mp4", NULL);
 
-    assert(g_file_set_contents(broken, "non e' un video", -1, NULL));
+    g_assert_true(g_file_set_contents(broken, "non e' un video", -1, NULL));
     syncview_main_window_open_file(window, broken);
-    assert(spin_until_state(window, SYNCVIEW_MAIN_WINDOW_ERROR, 20000));
-    assert(strcmp(label_of(window, "card-title"), "Impossibile riprodurre il video") == 0);
+    g_assert_true(spin_until_state(window, SYNCVIEW_MAIN_WINDOW_ERROR, 20000));
+    g_assert_true(strcmp(label_of(window, "card-title"), "Impossibile riprodurre il video") == 0);
     spin_for(1200);
-    assert(syncview_deps_dialog_find(GTK_WINDOW(window)) == NULL);
+    g_assert_true(syncview_deps_dialog_find(GTK_WINDOW(window)) == NULL);
 
     close_window(window);
     g_free(broken);
@@ -557,11 +556,11 @@ test_deferred_callback_after_destroy(void)
     g_weak_ref_init(&weak, window);
     g_object_ref(window);  /* come fa g_weak_ref_get() in on_file_chosen / on_missing_plugin_idle */
     gtk_window_destroy(GTK_WINDOW(window));
-    assert(drain_teardowns(15000));
-    assert(!syncview_main_window_open_file(window, "/nonexistent.webm"));  /* mw già liberato: FALSE, non crash */
+    g_assert_true(drain_teardowns(15000));
+    g_assert_true(!syncview_main_window_open_file(window, "/nonexistent.webm"));  /* mw già liberato: FALSE, non crash */
     g_object_unref(window);
     spin_for(50);
-    assert(g_weak_ref_get(&weak) == NULL);
+    g_assert_true(g_weak_ref_get(&weak) == NULL);
     g_weak_ref_clear(&weak);
 }
 
@@ -577,28 +576,28 @@ test_abandoned_teardown_updates_picture(void)
     GtkWidget *picture = syncview_main_window_get_widget(window, "picture");
     GdkPaintable *old_paintable = syncview_video_player_get_paintable(player);
 
-    assert(picture != NULL && gtk_picture_get_paintable(GTK_PICTURE(picture)) == old_paintable);
-    assert(syncview_main_window_open_file(window, first));
+    g_assert_true(picture != NULL && gtk_picture_get_paintable(GTK_PICTURE(picture)) == old_paintable);
+    g_assert_true(syncview_main_window_open_file(window, first));
     /* Il primo load passa già da uno smontaggio (la pipeline appena creata è in transizione): si attende che finisca,
      * così la pipeline sale a PAUSED in modo asincrono e il secondo load() trova uno smontaggio da rimandare. */
-    assert(drain_teardowns(15000));
-    assert(syncview_main_window_get_state(window) == SYNCVIEW_MAIN_WINDOW_LOADING);
+    g_assert_true(drain_teardowns(15000));
+    g_assert_true(syncview_main_window_get_state(window) == SYNCVIEW_MAIN_WINDOW_LOADING);
     guint abandoned_before = syncview_video_player_abandoned_teardowns();
 
     syncview_video_player_test_force_abandon(TRUE);
-    assert(syncview_main_window_open_file(window, second));     /* smontaggio rimandato e abbandonato */
+    g_assert_true(syncview_main_window_open_file(window, second));     /* smontaggio rimandato e abbandonato */
     syncview_video_player_test_force_abandon(FALSE);
-    assert(syncview_video_player_pending_teardowns() == 1);
-    assert(spin_until_state(window, SYNCVIEW_MAIN_WINDOW_LOADED, 15000));
+    g_assert_true(syncview_video_player_pending_teardowns() == 1);
+    g_assert_true(spin_until_state(window, SYNCVIEW_MAIN_WINDOW_LOADED, 15000));
     spin_for(300);
-    assert(syncview_video_player_abandoned_teardowns() == abandoned_before + 1);
-    assert(syncview_main_window_get_state(window) == SYNCVIEW_MAIN_WINDOW_LOADED);
-    assert(syncview_video_player_is_loaded(player));
+    g_assert_true(syncview_video_player_abandoned_teardowns() == abandoned_before + 1);
+    g_assert_true(syncview_main_window_get_state(window) == SYNCVIEW_MAIN_WINDOW_LOADED);
+    g_assert_true(syncview_video_player_is_loaded(player));
 
     GdkPaintable *new_paintable = syncview_video_player_get_paintable(player);
 
-    assert(new_paintable != old_paintable);
-    assert(gtk_picture_get_paintable(GTK_PICTURE(picture)) == new_paintable);
+    g_assert_true(new_paintable != old_paintable);
+    g_assert_true(gtk_picture_get_paintable(GTK_PICTURE(picture)) == new_paintable);
 
     close_window(window);
     syncview_video_player_test_release_abandoned();
@@ -662,9 +661,9 @@ main(void)
     }
 
     tmp_dir = g_dir_make_tmp("syncview-mainwin-XXXXXX", NULL);
-    assert(tmp_dir != NULL);
+    g_assert_true(tmp_dir != NULL);
     app = gtk_application_new("com.syncview.SyncView.Test", G_APPLICATION_NON_UNIQUE);
-    assert(g_application_register(G_APPLICATION(app), NULL, NULL));
+    g_assert_true(g_application_register(G_APPLICATION(app), NULL, NULL));
 
     RUN_TEST(test_theme_has_no_css_errors());
     RUN_TEST(test_empty_window());
@@ -676,7 +675,7 @@ main(void)
     RUN_TEST(test_deferred_callback_after_destroy());
     RUN_TEST(test_abandoned_teardown_updates_picture());
 
-    assert(drain_teardowns(15000));
+    g_assert_true(drain_teardowns(15000));
     g_object_unref(app);
     return 0;
 }
