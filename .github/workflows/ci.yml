@@ -12,28 +12,25 @@ concurrency:
 
 jobs:
   build-linux:
-    name: Linux (ubuntu-latest)
+    name: Linux (Arch)
     runs-on: ubuntu-latest
+    container: archlinux:latest
     steps:
       - uses: actions/checkout@v4
-      # gstreamer1.0-gtk4 (Ubuntu 24.04, universe) fornisce gtk4paintablesink; xvfb il display per i test con finestra.
+      # gst-plugin-gtk4 fornisce gtk4paintablesink (Ubuntu 24.04 non lo pacchettizza); xvfb il display per i test con finestra.
       # Senza uno dei due i test GTK escono con 77 (skip): lo script check_skips.py lo trasforma in errore.
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            meson ninja-build xvfb libgl1-mesa-dri \
-            libgtk-4-dev \
-            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-            gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav \
-            gstreamer1.0-gtk4 \
-            libsqlite3-dev libjson-glib-dev libglib2.0-dev libsoup-3.0-dev
+          pacman -Syu --noconfirm --needed base-devel git meson ninja python gtk4 gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav gst-plugin-gtk4 sqlite json-glib libsoup3 xorg-server-xvfb mesa ffmpeg
+          useradd -m builder
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          chown -R builder "$GITHUB_WORKSPACE"
       - name: meson setup
-        run: meson setup build -Dwerror=true
+        run: runuser -u builder -- env HOME=/home/builder meson setup build -Dwerror=true
       - name: meson compile
-        run: meson compile -C build
+        run: runuser -u builder -- env HOME=/home/builder meson compile -C build
       - name: meson test
-        run: xvfb-run -a meson test -C build --print-errorlogs
+        run: runuser -u builder -- env HOME=/home/builder xvfb-run -a meson test -C build --print-errorlogs
       - name: Test saltati non previsti
         run: python3 .github/scripts/check_skips.py build/meson-logs/testlog.json linux
       - name: Log di Meson
@@ -44,30 +41,29 @@ jobs:
           path: build/meson-logs
 
   build-linux-sanitizers:
-    name: Linux (ASan + UBSan)
+    name: Linux (ASan + UBSan, Arch)
     runs-on: ubuntu-latest
+    container: archlinux:latest
     steps:
       - uses: actions/checkout@v4
+      # gst-plugin-gtk4 fornisce gtk4paintablesink (Ubuntu 24.04 non lo pacchettizza); xvfb il display per i test con finestra.
+      # Senza uno dei due i test GTK escono con 77 (skip): lo script check_skips.py lo trasforma in errore.
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            meson ninja-build xvfb libgl1-mesa-dri \
-            libgtk-4-dev \
-            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-            gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav \
-            gstreamer1.0-gtk4 \
-            libsqlite3-dev libjson-glib-dev libglib2.0-dev libsoup-3.0-dev
+          pacman -Syu --noconfirm --needed base-devel git meson ninja python gtk4 gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav gst-plugin-gtk4 sqlite json-glib libsoup3 xorg-server-xvfb mesa ffmpeg
+          useradd -m builder
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          chown -R builder "$GITHUB_WORKSPACE"
       - name: meson setup
-        run: meson setup build -Db_sanitize=address,undefined -Db_lundef=false --buildtype=debug
+        run: runuser -u builder -- env HOME=/home/builder meson setup build -Db_sanitize=address,undefined -Db_lundef=false --buildtype=debug
       - name: meson compile
-        run: meson compile -C build
+        run: runuser -u builder -- env HOME=/home/builder meson compile -C build
       - name: meson test
         # LSAN_OPTIONS con tests/lsan.supp (driver GPU/Mesa/font di terze parti) è già impostato per ogni test in tests/meson.build.
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
-        run: xvfb-run -a meson test -C build --print-errorlogs
+        run: runuser -u builder -- env HOME=/home/builder xvfb-run -a meson test -C build --print-errorlogs
       - name: Test saltati non previsti
         run: python3 .github/scripts/check_skips.py build/meson-logs/testlog.json linux
       - name: Log di Meson
