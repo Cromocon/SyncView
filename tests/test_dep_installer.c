@@ -385,20 +385,27 @@ test_plan_third_party_repositories(void)
 
     DepPlan *plan = dep_plan_new(report, &options, &error);
 
-    if (!plan || dep_plan_step_count(plan) != 2) {
+    if (!plan || dep_plan_step_count(plan) != 4) {
         char *dump = deps_report_to_text(report);
 
         g_printerr("piano inatteso (%s), passi=%zu\n%s\n", error ? error->message : "ok", dep_plan_step_count(plan), dump);
         g_free(dump);
     }
-    g_assert_true(plan && dep_plan_step_count(plan) == 2 && dep_plan_has_third_party(plan));
+    g_assert_true(plan && dep_plan_step_count(plan) == 4 && dep_plan_has_third_party(plan));
 
-    const DepStep *repo = dep_plan_step(plan, 0), *packages = dep_plan_step(plan, 1);
+    const DepStep *keys = dep_plan_step(plan, 0), *import = dep_plan_step(plan, 1), *repo = dep_plan_step(plan, 2);
+    const DepStep *packages = dep_plan_step(plan, 3);
 
+    /* Catena di fiducia: chiavi dai repository Fedora, import della chiave RPM Fusion, poi il RPM con controllo della firma. */
+    g_assert_true(strcmp(keys->argv[0], "dnf") == 0 && strcmp(keys->argv[3], "distribution-gpg-keys") == 0 && keys->argv[4] == NULL);
+    g_assert_true(strcmp(import->argv[0], "rpm") == 0 && strcmp(import->argv[1], "--import") == 0);
+    g_assert_cmpstr(import->argv[2], ==, "/usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-free-fedora-40");
+    g_assert_null(import->argv[3]);
     g_assert_true(repo->kind == DEP_STEP_ADD_REPOSITORY && repo->third_party && repo->needs_elevation);
     g_assert_true(strcmp(repo->argv[0], "dnf") == 0 && strcmp(repo->argv[1], "install") == 0 && strcmp(repo->argv[2], "-y") == 0);
-    g_assert_cmpstr(repo->argv[3], ==, "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-40.noarch.rpm");
-    g_assert_null(repo->argv[4]);
+    g_assert_cmpstr(repo->argv[3], ==, "--setopt=localpkg_gpgcheck=1");  /* senza, dnf non verifica la firma dei RPM da URL */
+    g_assert_cmpstr(repo->argv[4], ==, "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-40.noarch.rpm");
+    g_assert_null(repo->argv[5]);
     g_assert_true(packages->kind == DEP_STEP_SYSTEM_PACKAGES && packages->third_party);
     g_assert_true(strcmp(packages->argv[3], "gstreamer1-libav") == 0 && packages->argv[4] == NULL);
 
@@ -762,13 +769,15 @@ test_third_party_consent_is_enforced_at_run(void)
     g_clear_error(&error);
     g_assert_null(fake_log());
 
-    /* Con il consenso: i due comandi, nell'ordine (prima il repository, poi i pacchetti). */
+    /* Con il consenso: i comandi nell'ordine (chiavi, import, repository, pacchetti). */
     options.consent_third_party = TRUE;
     g_assert_true(dep_installer_run(plan, &options, &error));
 
     char *log = fake_log();
 
-    g_assert_true(log && strcmp(log, "dnf\ninstall\n-y\nhttps://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-41.noarch.rpm\n--\n"
+    g_assert_true(log && strcmp(log, "dnf\ninstall\n-y\ndistribution-gpg-keys\n--\n"
+                              "rpm\n--import\n/usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-free-fedora-41\n--\n"
+                              "dnf\ninstall\n-y\n--setopt=localpkg_gpgcheck=1\nhttps://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-41.noarch.rpm\n--\n"
                               "dnf\ninstall\n-y\ngstreamer1-libav\n--\n") == 0);
     g_free(log);
 

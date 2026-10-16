@@ -330,13 +330,39 @@ add_fedora_third_party_steps(DepPlan *plan, const DepsReport *report, const DepP
     if (fedora) {
         const ManagerSyntax *dnf = find_manager("dnf");
         char *url = g_strdup_printf("https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-%s.noarch.rpm", version);
-        const char *repo_args[] = { url, NULL };
-        DepStep *repo = plan_add(plan, DEP_STEP_ADD_REPOSITORY, "Aggiungi il repository RPM Fusion (free)",
-                                 g_strdup_printf("   dnf installa: %s\n   RPM Fusion è un repository di terze parti, non testato né supportato da SyncView: "
-                                                 "il funzionamento corretto dell'app con i suoi pacchetti non è garantito.", url),
+        char *key = g_strdup_printf("/usr/share/distribution-gpg-keys/rpmfusion/RPM-GPG-KEY-rpmfusion-free-fedora-%s", version);
+        const char *keys_pkg[] = { "distribution-gpg-keys", NULL };
+        DepStep *keys = plan_add(plan, DEP_STEP_ADD_REPOSITORY, "Installa le chiavi GPG delle distribuzioni (Fedora)",
+                                 g_strdup("   Pacchetto distribution-gpg-keys dai repository Fedora (firmati da Fedora): "
+                                          "contiene la chiave ufficiale di RPM Fusion."),
                                  TRUE, TRUE);
 
-        repo->argv = build_argv(dnf, repo_args, error);
+        keys->argv = build_argv(dnf, keys_pkg, error);
+
+        /* Il RPM scaricato via HTTPS non è firmato da Fedora: la sua firma si verifica con la chiave di RPM Fusion, che arriva
+         * da un pacchetto Fedora (catena di fiducia: Fedora → chiave RPM Fusion → release RPM), non dal solo TLS. */
+        DepStep *import = plan_add(plan, DEP_STEP_ADD_REPOSITORY, "Importa la chiave GPG di RPM Fusion (free)",
+                                   g_strdup_printf("   rpm importa: %s", key), TRUE, TRUE);
+
+        import->argv = g_new0(char *, 4);
+        import->argv[0] = g_strdup("rpm");
+        import->argv[1] = g_strdup("--import");
+        import->argv[2] = g_strdup(key);
+
+        DepStep *repo = plan_add(plan, DEP_STEP_ADD_REPOSITORY, "Aggiungi il repository RPM Fusion (free)",
+                                 g_strdup_printf("   dnf installa (con verifica della firma GPG): %s\n   RPM Fusion è un repository di terze parti, "
+                                                 "non testato né supportato da SyncView: il funzionamento corretto dell'app con i "
+                                                 "suoi pacchetti non è garantito.", url),
+                                 TRUE, TRUE);
+
+        /* Senza localpkg_gpgcheck dnf NON controlla la firma dei RPM locali/da URL (default false). */
+        repo->argv = g_new0(char *, 6);
+        repo->argv[0] = g_strdup("dnf");
+        repo->argv[1] = g_strdup("install");
+        repo->argv[2] = g_strdup("-y");
+        repo->argv[3] = g_strdup("--setopt=localpkg_gpgcheck=1");
+        repo->argv[4] = g_strdup(url);
+        g_free(key);
 
         char *joined = g_strjoinv(", ", (char **)FEDORA_THIRD_PARTY_PACKAGES);
         DepStep *pkgs = plan_add(plan, DEP_STEP_SYSTEM_PACKAGES, "Installa il decoder H.264 da RPM Fusion",

@@ -16,6 +16,9 @@
  *    non scrivibili da altri) e passati con percorso assoluto, mai dal PATH dell'utente. Elevazione SOLO con polkit: la password la chiede il sistema, l'app non la vede mai.
  *    argv fisso, senza shell; i nomi dei pacchetti vengono solo dalla tabella interna di deps_check.c (altro è rifiutato).
  *  - ADD_REPOSITORY + pacchetti di terze parti (solo Fedora, solo con consenso dedicato): RPM Fusion per gstreamer1-libav.
+ *    Il release RPM scaricato via HTTPS è verificato con la sua firma GPG, non col solo TLS: (1) dnf installa
+ *    distribution-gpg-keys dai repository Fedora (firmati da Fedora), (2) `rpm --import` della chiave RPM Fusion
+ *    che contiene, (3) `dnf install --setopt=localpkg_gpgcheck=1 <url>` (dnf non controlla i RPM locali/da URL di default).
  *    openSUSE/Packman NON si automatizza (procedura invasiva non verificata): resta «istruzioni».
  *  - PLATFORM_INSTALLER (Windows/macOS): scarica l'installer ufficiale di GStreamer dal manifest incorporato, ne verifica
  *    dimensione e SHA-256 e lo lancia con l'elevazione del sistema (UAC / Installer di macOS).
