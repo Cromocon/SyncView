@@ -705,7 +705,8 @@ test_real_probes_with_scripts(const char *dir)
     const char *sleep_args[] = { "30", NULL };
     g_assert_null(probes.run_program("/bin/sleep", sleep_args, NULL));
     gint64 elapsed_ms = (g_get_monotonic_time() - start) / 1000;
-    g_assert_true(elapsed_ms >= 4500 && elapsed_ms < 10000);
+    /* Terminato dal timeout (~5 s), non arrivato a fine corsa (30 s): il margine alto assorbe una macchina carica. */
+    g_assert_true(elapsed_ms >= 4500 && elapsed_ms < 25000);
 
     /* find_program: la directory extra ha la precedenza sul PATH, in <dir>/bin e in <dir>. */
     char *bin = g_build_filename(dir, "bin", NULL);

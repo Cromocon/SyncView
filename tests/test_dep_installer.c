@@ -700,7 +700,7 @@ test_cancel_and_timeout(void)
     g_timer_start(timer);
     g_assert_false(dep_installer_run(plan, &options, &error));
     g_assert_true(error_is(error, DEP_INSTALLER_ERROR_CANCELLED));
-    g_assert_true(g_timer_elapsed(timer, NULL) < 10.0);  /* non ha atteso i 30 secondi del processo finto */
+    g_assert_true(g_timer_elapsed(timer, NULL) < 25.0);  /* non ha atteso i 30 secondi del processo finto (margine largo: macchina carica) */
     g_assert_true(fake_process_gone());
     g_assert_false(recorder_has(rec, "end:"));  /* il passo non risulta concluso */
     g_clear_error(&error);
@@ -730,7 +730,7 @@ test_cancel_and_timeout(void)
     g_timer_start(timer);
     g_assert_false(dep_installer_run(plan, &timeout, &error));
     g_assert_true(error_is(error, DEP_INSTALLER_ERROR_TIMEOUT));
-    g_assert_true(g_timer_elapsed(timer, NULL) < 10.0);
+    g_assert_true(g_timer_elapsed(timer, NULL) >= 0.9 && g_timer_elapsed(timer, NULL) < 25.0);  /* scatta a ~1 s, non a 30 s */
     g_assert_true(fake_process_gone());
     g_clear_error(&error);
 

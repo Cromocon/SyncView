@@ -105,6 +105,54 @@ spin_until_phase(GtkWidget *dialog, SyncviewDepsDialogPhase phase, int timeout_m
     return syncview_deps_dialog_get_phase(dialog) == phase;
 }
 
+/* Attese su condizioni reali con scadenza larga (solo un guasto la raggiunge): quelle a durata fissa restano per i «non succede nulla». */
+static gboolean
+spin_until_done(const gboolean *called)
+{
+    gint64 end = g_get_monotonic_time() + 10 * G_USEC_PER_SEC;
+
+    while (!*called && g_get_monotonic_time() < end) {
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
+    return *called;
+}
+
+/* Il finto pkexec è partito: ha già scritto i propri argomenti nel registro (la riga «--» chiude la scrittura). */
+static gboolean
+spin_until_started(void)
+{
+    gint64 end = g_get_monotonic_time() + 10 * G_USEC_PER_SEC;
+
+    while (g_get_monotonic_time() < end) {
+        char *log = NULL;
+        gboolean started = g_file_get_contents(fake_log_path, &log, NULL, NULL) && strstr(log, "--\n") != NULL;
+
+        g_free(log);
+        if (started) {
+            return TRUE;
+        }
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+    }
+    return FALSE;
+}
+
+/* Attende che il dialogo compaia sotto «parent» (NULL se non compare entro la scadenza). */
+static GtkWidget *
+wait_dialog(GtkWindow *parent)
+{
+    gint64 end = g_get_monotonic_time() + 10 * G_USEC_PER_SEC;
+    GtkWidget *dialog = syncview_deps_dialog_find(parent);
+
+    while (!dialog && g_get_monotonic_time() < end) {
+        g_main_context_iteration(NULL, FALSE);
+        g_usleep(1000);
+        dialog = syncview_deps_dialog_find(parent);
+    }
+    return dialog;
+}
+
 static GtkWidget *
 W(GtkWidget *dialog, const char *name)
 {
@@ -242,7 +290,7 @@ test_x_does_not_close_when_a_choice_is_needed(void)
     /* Un pulsante, invece, è una scelta esplicita e chiude. */
     click(dialog, "back");
     click(dialog, "cancel");
-    spin_for(50);
+    g_assert_true(spin_until_done(&done.called));
     g_assert_true(done.called && done.outcome == SYNCVIEW_DEPS_OUTCOME_CLOSED);
 }
 
@@ -283,7 +331,7 @@ test_review_shows_exact_plan_and_does_nothing_without_consent(void)
 
     /* Annulla: chiude senza ricordare nulla e senza installare. */
     click(dialog, "cancel");
-    spin_for(50);
+    g_assert_true(spin_until_done(&done.called));
     g_assert_true(done.called && done.outcome == SYNCVIEW_DEPS_OUTCOME_CLOSED);
     DepsState *state = deps_state_load(state_path);
 
@@ -319,7 +367,7 @@ test_install_success_flow(void)
     g_assert_true(HAS(label_text(dialog, "banner"), "Tutto pronto"));
 
     click(dialog, "close");
-    spin_for(50);
+    g_assert_true(spin_until_done(&done.called));
     g_assert_true(done.called && done.outcome == SYNCVIEW_DEPS_OUTCOME_INSTALLED);
 }
 
@@ -422,7 +470,7 @@ test_failure_offers_manual_table(void)
 
     /* «Continua senza» dopo un fallimento: si ricorda la scelta. */
     click(dialog, "continue");
-    spin_for(50);
+    g_assert_true(spin_until_done(&done.called));
     g_assert_true(done.called && done.outcome == SYNCVIEW_DEPS_OUTCOME_CONTINUED_WITHOUT);
 }
 
@@ -434,7 +482,7 @@ test_cancel_while_running_and_close_request(void)
     GtkWidget *dialog = open_dialog(&done, NULL);
 
     click(dialog, "install");
-    spin_for(500);  /* il finto pkexec è partito e dorme */
+    g_assert_true(spin_until_started());  /* il finto pkexec è partito e dorme */
     g_assert_true(syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_RUNNING);
 
     /* Chiudere la finestra durante l'installazione non la interrompe a metà: chiede l'annullamento e resta aperta. */
@@ -520,7 +568,7 @@ test_continue_without_is_remembered_across_startups(void)
 
     syncview_deps_check_and_show(GTK_WINDOW(parent), SYNCVIEW_DEPS_SHOW_STARTUP, &options);
     wait_check_finished(before);
-    GtkWidget *dialog = syncview_deps_dialog_find(GTK_WINDOW(parent));
+    GtkWidget *dialog = wait_dialog(GTK_WINDOW(parent));
 
     g_assert_true(dialog != NULL && syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_REVIEW);
 
@@ -531,7 +579,7 @@ test_continue_without_is_remembered_across_startups(void)
     g_assert_true(syncview_deps_dialog_find(GTK_WINDOW(parent)) == dialog);
 
     click(dialog, "continue");
-    spin_for(100);
+    g_assert_true(spin_until_done(&done.called));
     g_assert_true(done.called && done.outcome == SYNCVIEW_DEPS_OUTCOME_CONTINUED_WITHOUT);
     g_assert_null(syncview_deps_dialog_find(GTK_WINDOW(parent)));
 
@@ -545,7 +593,7 @@ test_continue_without_is_remembered_across_startups(void)
     before = g_atomic_int_get(&check_calls);
     syncview_deps_check_and_show(GTK_WINDOW(parent), SYNCVIEW_DEPS_SHOW_AFTER_ERROR, &options);
     wait_check_finished(before);
-    dialog = syncview_deps_dialog_find(GTK_WINDOW(parent));
+    dialog = wait_dialog(GTK_WINDOW(parent));
     g_assert_nonnull(dialog);
     close_dialog(dialog);
 
@@ -564,7 +612,7 @@ test_continue_without_is_remembered_across_startups(void)
     before = g_atomic_int_get(&check_calls);
     syncview_deps_check_and_show(GTK_WINDOW(parent), SYNCVIEW_DEPS_SHOW_USER_REQUESTED, &options);
     wait_check_finished(before);
-    dialog = syncview_deps_dialog_find(GTK_WINDOW(parent));
+    dialog = wait_dialog(GTK_WINDOW(parent));
     g_assert_true(dialog != NULL && syncview_deps_dialog_get_phase(dialog) == SYNCVIEW_DEPS_DIALOG_ALL_OK);
     close_dialog(dialog);
     gtk_window_destroy(GTK_WINDOW(parent));
@@ -589,7 +637,7 @@ test_declined_set_changes_prompt_again(void)
 
     syncview_deps_check_and_show(GTK_WINDOW(parent), SYNCVIEW_DEPS_SHOW_STARTUP, &options);
     wait_check_finished(before);
-    GtkWidget *dialog = syncview_deps_dialog_find(GTK_WINDOW(parent));
+    GtkWidget *dialog = wait_dialog(GTK_WINDOW(parent));
 
     g_assert_nonnull(dialog);
     close_dialog(dialog);
